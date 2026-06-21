@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
+    "incremental": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-    "target": "es2023",
+    "target": "es2021",
     "lib": ["ES2023"],
     "module": "esnext",
     "types": ["node"],
@@ -9,10 +10,9 @@
 
     /* Bundler mode */
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
-    "noEmit": true,
+    "composite": true,
 
     /* Linting */
     "noUnusedLocals": true,

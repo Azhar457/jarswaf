@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import VirtualHostModal from './components/VirtualHostModal.svelte';
 
   export let controllerUrl = '';
   let vhosts: any[] = [];
@@ -255,7 +256,7 @@
 <!-- Main Header -->
 <div class="flex justify-between items-end mb-lg">
   <div>
-    <div class="flex items-center gap-2 text-on-surface-variant text-xs mb-1">
+    <div class="flex items-center  text-on-surface-variant text-xs mb-1">
       <span>Aegis WAF</span>
       <span class="material-symbols-outlined text-[12px]">chevron_right</span>
       <span>Configuration</span>
@@ -277,7 +278,7 @@
     </div>
     <button 
       on:click={openCreateModal}
-      class="px-lg py-sm bg-primary text-background font-bold text-sm rounded flex items-center gap-2 active:scale-95 transition-all cursor-pointer border-none"
+      class="px-lg py-sm bg-primary text-background font-bold text-sm rounded flex items-center  active:scale-95 transition-all cursor-pointer border-none"
     >
       <span class="material-symbols-outlined text-[18px]">add</span>
       Create VHost
@@ -332,18 +333,22 @@
               </div>
             </td>
             <td class="p-md">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center ">
                 <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_#00d4ff]"></span>
                 <span class="font-mono text-xs">{host.upstream}</span>
               </div>
             </td>
             <td class="p-md">
-              <div class="flex items-center gap-sm">
-                <span class="material-symbols-outlined {host.ssl !== 'Disabled' ? 'text-primary' : 'text-outline'} text-[18px]">
-                  {host.ssl !== 'Disabled' ? 'verified_user' : 'no_encryption'}
+              {#if host.ssl === 'Disabled'}
+                <span class="px-2.5 py-1 text-xs font-semibold rounded-full text-amber-400 bg-amber-400/10 border border-amber-400/20 inline-block font-mono">
+                  Disabled
                 </span>
-                <span class="text-xs text-on-surface">{host.ssl}</span>
-              </div>
+              {:else}
+                <span class="px-2.5 py-1 text-xs font-semibold rounded-full text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 inline-flex items-center gap-1 font-mono">
+                  <span class="material-symbols-outlined text-[12px]">verified_user</span>
+                  {host.ssl}
+                </span>
+              {/if}
             </td>
             <td class="p-md">
               <span class="font-mono text-xs">{host.max_body}</span>
@@ -351,12 +356,14 @@
             <td class="p-md">
               <div class="flex flex-wrap gap-1">
                 {#each host.rules as rule}
-                  <span class="px-1.5 py-0.5 bg-primary/10 border border-primary/20 text-primary text-[10px] font-bold rounded font-mono">
+                  <span class="px-2 py-0.5 text-[10px] font-semibold rounded-full text-red-400 bg-red-400/10 border border-red-400/20 uppercase font-mono">
                     {rule.replace('-*', '')}
                   </span>
+                {:else}
+                  <span class="text-xs text-on-surface-variant font-mono">None</span>
                 {/each}
                 {#if host.blocked_countries.length > 0}
-                  <span class="px-1.5 py-0.5 bg-error/10 border border-error/20 text-error text-[10px] font-bold rounded font-mono">
+                  <span class="px-2.5 py-1 bg-amber-400/10 border border-amber-400/20 text-amber-400 text-[10px] font-bold rounded-full font-mono uppercase">
                     {host.geoblock_type === 'Allowlist' ? 'ALLOW' : 'BLOCK'}: {host.blocked_countries.join(',')}
                   </span>
                 {/if}
@@ -497,151 +504,20 @@
 </div>
 
 <!-- Modal Form Overlay -->
-{#if showModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-lg overflow-y-auto">
-    <div class="glass-panel rounded-xl max-w-2xl w-full p-lg shadow-2xl flex flex-col gap-md my-auto border border-outline-variant">
-      <div class="flex justify-between items-center border-b border-outline-variant pb-md">
-        <h3 class="font-headline-md text-headline-md text-on-surface">{isEditing ? 'Edit Virtual Host' : 'Create Virtual Host'}</h3>
-        <button on:click={() => showModal = false} class="text-outline hover:text-primary transition-colors cursor-pointer bg-transparent border-none">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
-      
-      <div class="grid grid-cols-2 gap-md">
-        <div class="flex flex-col gap-1 col-span-2">
-          <label for="server_name" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Server Name (Domain / Wildcard)</label>
-          <input 
-            id="server_name"
-            type="text" 
-            placeholder="e.g. example.com or *.example.com" 
-            bind:value={newServerName}
-            class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface"
-          />
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label for="upstream" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Upstream Backend Port / Host</label>
-          <input 
-            id="upstream"
-            type="text" 
-            placeholder="e.g. 127.0.0.1:8080" 
-            bind:value={newUpstream}
-            class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface font-mono"
-          />
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label for="ssl" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">SSL Encryption Mode</label>
-          <select id="ssl" bind:value={newSsl} class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface">
-            <option value="Auto (Local CA)">Auto (Local CA)</option>
-            <option value="Manual Cert">Manual Certificate</option>
-            <option value="Disabled">Disabled (HTTP Only)</option>
-          </select>
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label for="max_body" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Max Request Body Size</label>
-          <input 
-            id="max_body"
-            type="text" 
-            placeholder="e.g. 10MB" 
-            bind:value={newMaxBody}
-            class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface font-mono"
-          />
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label for="rate_limit" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Rate Limiter Threshold</label>
-          <input 
-            id="rate_limit"
-            type="text" 
-            placeholder="e.g. 600 req/min" 
-            bind:value={newRateLimit}
-            class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface font-mono"
-          />
-        </div>
-
-        <!-- WAF Rule modules batch checklist -->
-        <div class="col-span-2 border-t border-outline-variant/30 pt-md mt-sm">
-          <span class="text-xs font-bold text-on-surface-variant uppercase tracking-wider block mb-sm">Enable WAF Rule Modules</span>
-          <div class="grid grid-cols-3 gap-sm">
-            <label class="flex items-center gap-2 cursor-pointer bg-surface-container-low border border-outline-variant rounded p-sm hover:border-primary transition-all text-on-surface">
-              <input type="checkbox" bind:checked={selectedCategories.sqli} class="rounded border-outline-variant text-primary focus:ring-0 cursor-pointer" />
-              <span class="text-xs">SQL Injection</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer bg-surface-container-low border border-outline-variant rounded p-sm hover:border-primary transition-all text-on-surface">
-              <input type="checkbox" bind:checked={selectedCategories.xss} class="rounded border-outline-variant text-primary focus:ring-0 cursor-pointer" />
-              <span class="text-xs">XSS Protection</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer bg-surface-container-low border border-outline-variant rounded p-sm hover:border-primary transition-all text-on-surface">
-              <input type="checkbox" bind:checked={selectedCategories.lfi} class="rounded border-outline-variant text-primary focus:ring-0 cursor-pointer" />
-              <span class="text-xs">Local/Remote File</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer bg-surface-container-low border border-outline-variant rounded p-sm hover:border-primary transition-all text-on-surface">
-              <input type="checkbox" bind:checked={selectedCategories.cmdi} class="rounded border-outline-variant text-primary focus:ring-0 cursor-pointer" />
-              <span class="text-xs">Command Injection</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer bg-surface-container-low border border-outline-variant rounded p-sm hover:border-primary transition-all text-on-surface">
-              <input type="checkbox" bind:checked={selectedCategories.ssrf} class="rounded border-outline-variant text-primary focus:ring-0 cursor-pointer" />
-              <span class="text-xs">SSRF Protection</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer bg-surface-container-low border border-outline-variant rounded p-sm hover:border-primary transition-all text-on-surface">
-              <input type="checkbox" bind:checked={selectedCategories.bot} class="rounded border-outline-variant text-primary focus:ring-0 cursor-pointer" />
-              <span class="text-xs">Bot Scanners</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Geoblocking strategy -->
-        <div class="col-span-2 border-t border-outline-variant/30 pt-md mt-sm flex flex-col gap-3">
-          <div class="flex justify-between items-center">
-            <span class="text-xs font-bold text-on-surface-variant uppercase tracking-wider block">Geoblocking Configuration</span>
-            <div class="flex items-center gap-2 text-on-surface-variant">
-              <span class="text-xs">Strategy:</span>
-              <select bind:value={geoblockType} class="bg-surface-container border border-outline-variant rounded px-2 py-0.5 text-xs outline-none focus:border-primary text-on-surface font-bold">
-                <option value="Blocklist">Blocklist (Block selected, allow others)</option>
-                <option value="Allowlist">Allowlist (Allow selected, block others)</option>
-              </select>
-            </div>
-          </div>
-          
-          <div class="grid grid-cols-4 gap-sm">
-            {#each availableCountries as country}
-              <label class="flex items-center gap-2 cursor-pointer bg-surface-container-low border border-outline-variant rounded p-sm hover:border-primary transition-all text-on-surface">
-                <input
-                  type="checkbox"
-                  value={country.code}
-                  checked={blockedCountries.includes(country.code)}
-                  on:change={(e) => toggleCountry(country.code, (e.target as HTMLInputElement).checked)}
-                  class="rounded border-outline-variant text-primary focus:ring-0 cursor-pointer"
-                />
-                <span class="text-xs flex items-center gap-1">
-                  <span>{country.flag}</span>
-                  <span>{country.name}</span>
-                </span>
-              </label>
-            {/each}
-          </div>
-        </div>
-      </div>
-
-      <div class="flex justify-end gap-md border-t border-outline-variant pt-md mt-md">
-        <button 
-          on:click={() => showModal = false} 
-          class="px-lg py-sm bg-surface-container border border-outline-variant hover:bg-surface-container-high rounded text-sm text-on-surface transition-colors cursor-pointer"
-        >
-          Cancel
-        </button>
-        <button 
-          on:click={handleSaveVhost} 
-          class="px-lg py-sm bg-primary text-background font-bold rounded text-sm hover:brightness-110 active:scale-95 transition-all cursor-pointer border-none"
-        >
-          {isEditing ? 'Save Changes' : 'Create Host'}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+<VirtualHostModal
+  show={showModal}
+  {isEditing}
+  bind:serverName={newServerName}
+  bind:upstream={newUpstream}
+  bind:ssl={newSsl}
+  bind:maxBody={newMaxBody}
+  bind:rateLimit={newRateLimit}
+  bind:selectedCategories
+  bind:blockedCountries
+  bind:geoblockType
+  on:close={() => showModal = false}
+  on:save={handleSaveVhost}
+/>
 
 <style>
   .glass-panel {

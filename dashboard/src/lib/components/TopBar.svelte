@@ -17,12 +17,14 @@
   <!-- Left: Search -->
   <div class="flex items-center gap-6">
     <div class="relative w-72">
-      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
+      <!-- TODO: Implement global rules search functionality -->
+      <!--
       <input
         class="w-full bg-surface-container-lowest border-outline-variant border rounded py-2 pl-10 pr-4 text-body-sm font-body-sm text-on-surface placeholder:text-on-surface-variant focus:ring-1 focus:ring-primary focus:outline-none"
         placeholder="Search rules..."
         type="text"
       />
+      -->
     </div>
   </div>
 
@@ -34,24 +36,33 @@
     </span>
 
     <!-- System Status Pill -->
-    <div class="flex items-center gap-2 px-4 py-2 bg-primary-container/10 border border-primary/20 rounded">
-      <div class="w-2 h-2 rounded-full {isOnline ? 'bg-primary animate-pulse' : 'bg-error'}"></div>
-      <span class="text-[11px] font-bold text-primary uppercase tracking-tighter">
-        {isOnline ? 'System Online' : 'System Offline'}
-      </span>
+    <div class="flex items-center  px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+      {#if isOnline}
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+        </span>
+        <span class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider font-mono">
+          System Online
+        </span>
+      {:else}
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-error"></span>
+        </span>
+        <span class="text-[11px] font-bold text-error uppercase tracking-wider font-mono">
+          System Offline
+        </span>
+      {/if}
     </div>
 
     <!-- Divider + Action Icons -->
-    <div class="flex gap-2 border-l border-outline-variant pl-4 text-on-surface-variant items-center">
-      <button type="button" class="p-2 hover:text-primary transition-colors cursor-pointer">
-        <span class="material-symbols-outlined text-[20px]">notifications</span>
-      </button>
-      <button type="button" class="p-2 hover:text-primary transition-colors cursor-pointer">
+    <!-- TODO: Connect System Logs terminal button to a modal or tab -->
+    <!--
+    <div class="flex  border-l border-outline-variant pl-4 text-on-surface-variant items-center">
+      <button type="button" class="p-2 hover:text-primary transition-colors cursor-pointer" title="System Logs">
         <span class="material-symbols-outlined text-[20px]">terminal</span>
       </button>
-      <button type="button" class="p-2 hover:text-primary transition-colors cursor-pointer flex items-center">
-        <span class="material-symbols-outlined text-[24px]">account_circle</span>
-      </button>
     </div>
+    -->
   </div>
 </header>

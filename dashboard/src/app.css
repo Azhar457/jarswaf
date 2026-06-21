@@ -1,144 +1,16 @@
 @import "tailwindcss";
 
-.material-symbols-outlined {
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-  display: inline-block;
-}
-
 @theme {
-  --color-tertiary-fixed: #ffddb3;
-  --color-error: #ffb4ab;
-  --color-on-surface: #e2e2e9;
-  --color-inverse-surface: #e2e2e9;
-  --color-on-surface-variant: #bbc9cf;
-  --color-secondary-fixed-dim: #ffb2ba;
-  --color-error-container: #93000a;
-  --color-secondary: #ffb2ba;
-  --color-inverse-on-surface: #2e3036;
-  --color-background: #111319;
-  --color-on-secondary: #670020;
-  --color-on-primary-container: #00586b;
-  --color-on-error-container: #ffdad6;
-  --color-surface-container-lowest: #0c0e13;
-  --color-surface-bright: #37393f;
-  --color-on-error: #690005;
-  --color-secondary-container: #d4004b;
-  --color-on-tertiary-container: #6f4800;
-  --color-on-secondary-fixed: #400011;
-  --color-surface-dim: #111319;
-  --color-on-secondary-fixed-variant: #910030;
-  --color-tertiary-fixed-dim: #ffb950;
-  --color-tertiary: #ffd8a7;
-  --color-surface-container-highest: #33353a;
-  --color-on-tertiary-fixed: #291800;
-  --color-surface-tint: #3cd7ff;
-  --color-primary-fixed-dim: #3cd7ff;
-  --color-secondary-fixed: #ffd9dc;
-  --color-on-secondary-container: #ffe6e8;
-  --color-surface: #111319;
-  --color-surface-container: #1e1f25;
-  --color-on-primary-fixed-variant: #004e5f;
-  --color-surface-container-high: #282a30;
-  --color-on-background: #e2e2e9;
-  --color-surface-variant: #33353a;
-  --color-on-tertiary: #452b00;
-  --color-inverse-primary: #00677e;
-  --color-surface-container-low: #191b21;
-  --color-primary-fixed: #b4ebff;
-  --color-on-primary-fixed: #001f27;
-  --color-on-tertiary-fixed-variant: #624000;
-  --color-outline-variant: #3c494e;
-  --color-primary: #a8e8ff;
-  --color-outline: #859398;
-  --color-tertiary-container: #ffb43c;
-  --color-on-primary: #003642;
-  --color-primary-container: #00d4ff;
-
-  --radius-default: 0.125rem;
-  --radius-lg: 0.25rem;
-  --radius-xl: 0.5rem;
-  --radius-full: 0.75rem;
-
-  /* Spacing system — all multiples of 8px */
-  --spacing-xs: 8px;
-  --spacing-sm: 16px;
-  --spacing-md: 24px;
-  --spacing-lg: 32px;
-  --spacing-xl: 40px;
-  --spacing-2xl: 48px;
-  --spacing-3xl: 64px;
-
-  --font-headline-md: "Geist", sans-serif;
-  --font-metric-lg: "JetBrains Mono", monospace;
-  --font-body-sm: "Geist", sans-serif;
-  --font-code-md: "JetBrains Mono", monospace;
-  --font-display-lg: "Geist", sans-serif;
-
-  --font-size-headline-md: 24px;
-  --line-height-headline-md: 32px;
-  --letter-spacing-headline-md: -0.02em;
-
-  --font-size-metric-lg: 32px;
-  --line-height-metric-lg: 40px;
-  --letter-spacing-metric-lg: -0.05em;
-
-  --font-size-body-sm: 14px;
-  --line-height-body-sm: 20px;
-
-  --font-size-code-md: 13px;
-  --line-height-code-md: 18px;
-
-  --font-size-display-lg: 48px;
-  --line-height-display-lg: 1.1;
-  --letter-spacing-display-lg: -0.04em;
-}
-
-:root {
-  /* Color system */
-  --bg-darker: #080a0f;
-  --bg-dark: #111319;
-  --bg-card: rgba(13, 17, 23, 0.6);
-  --border-card: rgba(255, 255, 255, 0.08);
-  
-  --accent-primary: #a8e8ff;
-  --accent-glow: rgba(0, 212, 255, 0.25);
-  
-  --text-main: #e2e2e9;
-  --text-muted: #bbc9cf;
-  --text-dark: #859398;
-
-  /* Severity colors */
-  --color-critical: #ffb4ab;
-  --color-high: #ffb43c;
-  --color-medium: #ffd8a7;
-  --color-low: #a8e8ff;
-  --color-pass: #a8e8ff;
-  
-  --glow-critical: 0 0 12px rgba(255, 180, 171, 0.4);
-  --glow-high: 0 0 12px rgba(255, 180, 60, 0.4);
-  
-  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  
-  /* Sidebar widths — multiples of 8 */
-  --sidebar-width: 256px;
-  --sidebar-collapsed-width: 64px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Fira Code', 'JetBrains Mono', monospace;
 }
 
 * {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
 }
 
 body {
-  background-color: var(--bg-darker);
-  color: var(--text-main);
-  font-family: var(--font-sans);
-  overflow: hidden;
-  height: 100vh;
-  width: 100vw;
-  -webkit-font-smoothing: antialiased;
+  @apply bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden h-screen w-screen;
 }
 
 /* Scrollbars */
@@ -147,129 +19,20 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  @apply bg-slate-800 rounded;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-primary);
+  @apply bg-slate-700;
 }
 
-/* ============================================
-   GLOBAL REUSABLE PANEL STYLES
-   ============================================ */
-
-.glass-panel {
-  background: rgba(13, 17, 23, 0.8);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top-color: rgba(255, 255, 255, 0.15);
-  position: relative;
-}
-
-.glass-card {
-  background: rgba(13, 17, 23, 0.7);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top-color: rgba(255, 255, 255, 0.15);
-}
-
-/* ============================================
-   LAYOUT
-   ============================================ */
-
-.app-container {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
-  height: 100vh;
-  width: 100vw;
-}
-
-/* Severity indicators */
-.text-critical { color: var(--color-critical); }
-.text-high { color: var(--color-high); }
-.text-medium { color: var(--color-medium); }
-.text-low { color: var(--color-low); }
-.text-pass { color: var(--color-pass); }
-
-.bg-critical-glow { box-shadow: var(--glow-critical); }
-.bg-high-glow { box-shadow: var(--glow-high); }
-
-/* ============================================
-   ANIMATIONS
-   ============================================ */
-
-@keyframes pulse-cyan {
-  0% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.1); }
-  100% { opacity: 1; transform: scale(1); }
-}
-
-.pulse-dot {
-  animation: pulse-cyan 2s infinite ease-in-out;
-}
-
-.cyan-glow {
-  box-shadow: 0 0 20px rgba(0, 212, 255, 0.05);
-}
-
-/* ============================================
-   CUSTOM SCROLLBAR VARIANT
-   ============================================ */
-
-.terminal-scroll::-webkit-scrollbar {
-  width: 4px;
-}
-.terminal-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.terminal-scroll::-webkit-scrollbar-thumb {
-  background: #33353a;
-  border-radius: 2px;
-}
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #33353a;
-  border-radius: 2px;
-}
-
+/* Hide scrollbar for clean UI */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
-}
-
-/* ============================================
-   ACTION ROW STYLES (LiveLogs)
-   ============================================ */
-
-.terminal-row {
-  transition: background-color 0.2s ease;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.terminal-row:hover {
-  background-color: rgba(255, 255, 255, 0.02);
-}
-
-.action-block { 
-  border-left: 3px solid #ffb4ab; 
-  background: linear-gradient(90deg, rgba(255, 180, 171, 0.05) 0%, transparent 100%); 
-}
-.action-rate { 
-  border-left: 3px solid #ffd8a7; 
-  background: linear-gradient(90deg, rgba(255, 216, 167, 0.05) 0%, transparent 100%); 
-}
-.action-pass { 
-  border-left: 3px solid transparent; 
 }

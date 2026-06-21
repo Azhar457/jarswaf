@@ -17,12 +17,50 @@ export interface Stats {
   rate_limited: number;
 }
 
+export interface AgentInfo {
+  hostname: string;
+  ip: string;
+  os: string;
+  cpu: number;
+  ram: number;
+  disk: number;
+  uptime: string;
+  status: string;
+  network_interfaces: any[];
+  discovered_services: any[];
+}
+
+export interface VHost {
+  name: string;
+  hosts: string[];
+  backend: string;
+  rate_limit_tiers: any[];
+  rules: string[];
+  blocked_countries: string[];
+  geoblock_type: string;
+  custom_rules: any[];
+  ssl: string;
+  max_body: string;
+  rate_limit: string;
+}
+
+export interface RateLimitPolicy {
+  name: string;
+  limit: string;
+  burst: number;
+  path: string;
+  description: string;
+}
+
 export const connectionStatus = writable<'connecting' | 'online' | 'offline'>('connecting');
 export const logs = writable<WafLog[]>([]);
 export const latestLog = writable<WafLog | null>(null);
 export const stats = writable<Stats>({ total_requests: 0, blocked: 0, rate_limited: 0 });
 export const dbSize = writable<string>('0.0 KB');
 export const vhostsCount = writable<number>(0);
+export const agents = writable<AgentInfo[]>([]);
+export const vhostsList = writable<VHost[]>([]);
+export const rateLimits = writable<RateLimitPolicy[]>([]);
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -33,6 +71,25 @@ let isInitialized = false;
 export function initGlobalStore(controllerUrl: string) {
   if (isInitialized) return;
   isInitialized = true;
+
+  // Fetch initial REST data
+  fetch(`${controllerUrl}/api/v1/agents`)
+    .then(res => res.json())
+    .then(data => agents.set(data))
+    .catch(console.error);
+
+  fetch(`${controllerUrl}/api/v1/vhosts`)
+    .then(res => res.json())
+    .then(data => {
+      vhostsList.set(data);
+      vhostsCount.set(data.length);
+    })
+    .catch(console.error);
+
+  fetch(`${controllerUrl}/api/v1/rate-limits`)
+    .then(res => res.json())
+    .then(data => rateLimits.set(data))
+    .catch(console.error);
 
   const connectWs = () => {
     const wsUrl = controllerUrl.replace(/^http/, 'ws') + '/ws/dashboard';

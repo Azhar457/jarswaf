@@ -129,17 +129,32 @@ curl -sSL http://<CONTROLLER_IP>:8080/install.sh | CONTROLLER_IP=<CONTROLLER_IP>
 
 ---
 
-## 💻 Perbedaan Fitur Berdasarkan Sistem Operasi
+## 💻 Perbedaan Fitur Berdasarkan Sistem Operasi (OS Compatibility)
 
-Kemampuan Agent Aegis WAF bervariasi bergantung pada sistem operasi dari Server Target yang dilindungi:
+Aegis WAF dirancang untuk mendukung *cross-platform compatibility*, yang secara otomatis (gracefully) beradaptasi berdasarkan Sistem Operasi yang digunakan oleh Server Target.
 
-| Fitur / Kemampuan | 🐧 Linux (Ubuntu/Debian/dll) | 🍎 macOS | 🪟 Windows Server |
-| :--- | :--- | :--- | :--- |
-| **Reverse Proxy Engine** | ✅ Ya (Sangat Cepat via epoll) | ✅ Ya (via kqueue) | ✅ Ya (via IOCP) |
-| **Pattern Matching (SQLi/XSS)** | ✅ Ya | ✅ Ya | ✅ Ya |
-| **Background Service Daemon** | ✅ Ya (`systemd`) | ⚠️ Manual / `launchd` | ✅ Ya (`install.ps1` via NSSM/SC) |
-| **eBPF (Kernel Packet Drop)** | 🔥 **Ya** (Siap dikembangkan untuk XDP) | ❌ Tidak didukung Apple Kernel | ❌ Tidak didukung Windows Kernel |
-| **Hardware Metrics Collection** | ✅ Mendalam (via `/proc`) | ⚠️ Terbatas | ⚠️ Terbatas (WMI overhead) |
+### 🐧 Linux (eBPF XDP Enabled) - Rekomendasi Produksi
+Pada sistem Linux modern (Kernel >= 5.8), Aegis WAF memanfaatkan **eBPF (Extended Berkeley Packet Filter) XDP (eXpress Data Path)** untuk membuang paket berbahaya di level kernel sebelum paket tersebut mencapai *user-space networking stack*.
 
-### Mengapa Linux Paling Superior untuk WAF?
-Linux sangat direkomendasikan sebagai mesin yang dipasangi **Aegis Agent** untuk di lingkungan produksi. Hal ini dikarenakan Linux mendukung **eBPF (Extended Berkeley Packet Filter)**. Dengan eBPF, Aegis dapat mendeteksi lalu lintas berbahaya (seperti serangan Volumetrik DDoS) dan **membuang (drop) paket tersebut langsung di level Kernel (NIC)** sebelum paket tersebut membebani memori, TCP Stack, atau CPU server web Anda. Hal ini membuat CPU server target tetap stabil mendekati 0% di tengah pusaran serangan.
+**Pros:**
+- **Extreme Performance:** Trafik berbahaya didrop langsung di level Network Interface Card (NIC) driver. Memastikan CPU overhead mendekati 0% saat terjadi Volumetric DDoS.
+- **True Zero-Day Defense:** Karena payload diblokir sebelum TCP/IP stack melakukan parsing, kerentanan pada HTTP parser atau OS networking stack tidak dapat dieksploitasi.
+- **Resource Efficiency:** Proxy *user-space* Axum tidak membuang-buang memori atau CPU untuk memproses koneksi dari *bad actors*.
+
+**Cons:**
+- Membutuhkan hak akses *root* Linux (CAP_BPF/CAP_NET_ADMIN).
+
+### 🪟 Windows & 🍎 macOS (L7 Proxy Fallback) - Pengembangan & Testing
+Pada Windows dan macOS, kode Rust secara pintar akan me- *disable* modul eBPF. Ketika Aegis WAF menerima perintah untuk memblokir IP, sistem akan otomatis melakukan *fallback* sepenuhnya ke **Layer 7 Application Proxy (Axum)**.
+
+**Pros:**
+- **Universal Portability:** Berjalan mulus di *local environment* para Developer tanpa perlu setup Linux VM.
+- **Full Deep Packet Inspection:** Tetap menjalankan Regex, *signature matching*, pembatasan akses (*rate-limiting*), dan virtual host routing sama persis seperti pada Linux.
+- **Mudah di-debug:** Bebas dari panic Kernel atau error eBPF Verifier.
+
+**Cons:**
+- **Rentan terhadap Volumetric DDoS:** Karena semua koneksi diizinkan masuk ke *user-space* (Layer 7) untuk dievaluasi oleh proxy Axum sebelum diberikan `403 Forbidden`, serangan jutaan *request* secara simultan tetap akan membebani CPU dan RAM server proxy.
+- **Latensi Tinggi saat Heavy Load:** Menangani serangan di Layer 7 jauh lebih berat dan lambat daripada men- *drop* koneksi di Layer 4 / Kernel.
+
+### Kesimpulan
+Secara arsitektur, **Aegis WAF siap digunakan di semua OS**. Anda bebas mengembangkan aplikasi ini di Windows/Mac menggunakan `start.bat`. Namun, saat WAF ini dipasang di *production server* ber-OS Linux, modul eBPF XDP akan otomatis aktif dan menjadikannya sebuah WAF berskala Enterprise sesungguhnya!

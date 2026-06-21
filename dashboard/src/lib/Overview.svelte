@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { stats, dbSize, logs } from './stores';
+  import { stats, dbSize, logs, latestLog, type WafLog } from './stores';
+  import { Terminal } from '@xterm/xterm';
+  import { FitAddon } from '@xterm/addon-fit';
+  import '@xterm/xterm/css/xterm.css';
   import PageHeader from './components/PageHeader.svelte';
   import MetricCard from './components/MetricCard.svelte';
   import GlassPanel from './components/GlassPanel.svelte';
@@ -47,6 +50,12 @@
   let updateInterval: ReturnType<typeof setInterval>;
   let summaryInterval: ReturnType<typeof setInterval>;
   let lastTotalRequests = 0;
+
+  let terminalElement: HTMLDivElement;
+  let term: Terminal | null = null;
+  let fitAddon: FitAddon | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+  let unsubscribeLogs: () => void;
 
   async function fetchSystemSummary() {
     try {
@@ -101,6 +110,33 @@
     }
   }
 
+  function writeLogToTerminal(log: WafLog) {
+    if (!term) return;
+
+    const timeStr = formatTime(log.timestamp);
+    const action = (log.action || 'INFO').toUpperCase();
+    const method = (log.method || 'GET').toUpperCase();
+    const path = log.path || '/';
+    const ip = log.client_ip || 'unknown';
+    const reason = log.reason || '';
+
+    let tagColor = '\x1b[1;32m'; // Bold green for standard ALLOWED/INFO
+    if (action === 'BLOCK' || action === 'DENY') {
+      tagColor = '\x1b[1;31m'; // Bold red
+    } else if (action === 'LIMIT' || action === 'RATE_LIMIT') {
+      tagColor = '\x1b[1;33m'; // Bold yellow
+    }
+
+    const actionTag = `${tagColor}[${action}]\x1b[0m`;
+    const timeTag = `\x1b[90m[${timeStr}]\x1b[0m`;
+    const methodTag = `\x1b[1;36m${method}\x1b[0m`;
+    const pathTag = `\x1b[37m${path}\x1b[0m`;
+    const ipTag = `\x1b[1;35m${ip}\x1b[0m`;
+    const reasonTag = reason ? ` \x1b[33m(${reason})\x1b[0m` : '';
+
+    term.writeln(`${actionTag} ${timeTag} ${methodTag} ${pathTag} — ${ipTag}${reasonTag}`);
+  }
+
   onMount(() => {
     fetchSystemSummary();
     summaryInterval = setInterval(fetchSystemSummary, 5000);
@@ -112,11 +148,81 @@
       }
       lastTotalRequests = currentTotal;
     }, 2500);
+
+    // Initialize Xterm.js Terminal
+    term = new Terminal({
+      theme: {
+        background: '#040508',
+        foreground: '#e2e2e9',
+        cursor: '#a8e8ff',
+        black: '#000000',
+        red: '#ffb4ab',
+        green: '#a8e8ff',
+        yellow: '#ffd8a7',
+        blue: '#3cd7ff',
+        magenta: '#ffb2ba',
+        cyan: '#b4ebff',
+        white: '#e2e2e9',
+      },
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: 12,
+      lineHeight: 1.4,
+      cursorBlink: true,
+      disableStdin: true,
+      convertEol: true
+    });
+
+    fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(terminalElement);
+    
+    // Fit the terminal to its DOM element
+    setTimeout(() => {
+      if (fitAddon) fitAddon.fit();
+    }, 50);
+
+    // Write a beautiful welcome banner
+    term.writeln('\x1b[1;36mAegis WAF - Live Security Event Stream\x1b[0m');
+    term.writeln('\x1b[90m================================================================================\x1b[0m');
+    term.writeln('\x1b[32m[SYSTEM]\x1b[0m Terminal initialized. Streaming real-time security events...');
+    term.writeln('');
+
+    // Print existing logs history (reversing to show oldest first)
+    const initialLogs = [...$logs].reverse();
+    initialLogs.forEach(log => {
+      if (term) writeLogToTerminal(log);
+    });
+
+    // Auto-fit terminal on resize
+    resizeObserver = new ResizeObserver(() => {
+      if (fitAddon) {
+        try {
+          fitAddon.fit();
+        } catch (e) {
+          // Fit error if element is hidden/detached
+        }
+      }
+    });
+    resizeObserver.observe(terminalElement);
+
+    // Subscribe to latest log store for new events in real time
+    unsubscribeLogs = latestLog.subscribe(log => {
+      if (log && term) {
+        writeLogToTerminal(log);
+      }
+    });
   });
 
   onDestroy(() => {
     if (updateInterval) clearInterval(updateInterval);
     if (summaryInterval) clearInterval(summaryInterval);
+    if (unsubscribeLogs) unsubscribeLogs();
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+    }
+    if (term) {
+      term.dispose();
+    }
   });
 </script>
 
@@ -127,7 +233,7 @@
     title="Network Overview"
     subtitle="Real-time traffic telemetry and threat mitigation status."
   >
-    <div slot="actions" class="flex gap-2">
+    <div slot="actions" class="flex ">
       <div class="flex flex-col items-end">
         <span class="text-[10px] text-on-surface-variant uppercase font-bold">Sampling Rate</span>
         <span class="font-code-md text-code-md text-primary">1:1 (Real-time)</span>
@@ -171,7 +277,7 @@
     <!-- Agent Nodes (Live Health) -->
     <section class="col-span-12 lg:col-span-4 glass-panel rounded-xl overflow-hidden flex flex-col">
       <div class="px-4 py-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-low">
-        <h4 class="text-body-sm font-bold flex items-center gap-2 text-on-surface">
+        <h4 class="text-body-sm font-bold flex items-center  text-on-surface">
           <span class="material-symbols-outlined text-[18px]">dns</span>
           Agent Nodes
         </h4>
@@ -191,7 +297,7 @@
           {#each agents as agent}
             <div class="space-y-2 bg-surface-container-lowest/30 p-4 rounded-lg border border-outline-variant/20">
               <div class="flex justify-between items-center">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center">
                   <span class="w-2 h-2 rounded-full {agent.status === 'online' ? 'bg-primary pulse-dot' : 'bg-secondary'}"></span>
                   <span class="text-xs font-bold text-on-surface">{agent.hostname}</span>
                   <span class="text-[10px] font-mono text-on-surface-variant">({agent.ip})</span>
@@ -230,7 +336,7 @@
     <!-- Active VHosts Table -->
     <section class="col-span-12 lg:col-span-8 glass-panel rounded-xl overflow-hidden flex flex-col">
       <div class="px-4 py-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-low">
-        <h4 class="text-body-sm font-bold flex items-center gap-2 text-on-surface">
+        <h4 class="text-body-sm font-bold flex items-center  text-on-surface">
           <span class="material-symbols-outlined text-[18px]">public</span>
           Active VHosts
         </h4>
@@ -254,17 +360,28 @@
                 <td class="px-4 py-4 font-bold text-on-surface font-mono">{host.hosts[0]}</td>
                 <td class="px-4 py-4 font-code-md text-on-surface-variant">{host.backend}</td>
                 <td class="px-4 py-4">
-                  <div class="flex items-center gap-2">
-                    {#if host.ssl !== 'Disabled'}
-                      <span class="material-symbols-outlined text-[14px] text-primary" style="font-variation-settings: 'FILL' 1;">verified_user</span>
-                      <span class="text-[11px] uppercase font-bold text-primary">{host.ssl}</span>
+                  {#if host.ssl === 'Disabled'}
+                    <span class="px-2.5 py-1 text-xs font-semibold rounded-full text-amber-400 bg-amber-400/10 border border-amber-400/20 inline-block font-mono">
+                      Disabled
+                    </span>
+                  {:else}
+                    <span class="px-2.5 py-1 text-xs font-semibold rounded-full text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 inline-flex items-center gap-1 font-mono">
+                      <span class="material-symbols-outlined text-[12px]">verified_user</span>
+                      {host.ssl}
+                    </span>
+                  {/if}
+                </td>
+                <td class="px-4 py-4">
+                  <div class="flex flex-wrap gap-1 max-w-[200px]">
+                    {#each host.rules as rule}
+                      <span class="px-2 py-0.5 text-[9px] font-semibold rounded-full text-red-400 bg-red-400/10 border border-red-400/20 uppercase font-mono">
+                        {rule.replace('-*', '')}
+                      </span>
                     {:else}
-                      <span class="material-symbols-outlined text-[14px] text-on-surface-variant">lock_open</span>
-                      <span class="text-[11px] uppercase font-bold text-on-surface-variant">Disabled</span>
-                    {/if}
+                      <span class="text-xs text-on-surface-variant font-mono">None</span>
+                    {/each}
                   </div>
                 </td>
-                <td class="px-4 py-4 font-code-md text-on-surface-variant">{(host.rules ? host.rules.length : 0) + (host.custom_rules ? host.custom_rules.length : 0)} rules</td>
                 <td class="px-4 py-4 text-right">
                   {#if host.blocked_countries && host.blocked_countries.length > 0}
                     <span class="text-[10px] font-bold text-secondary uppercase bg-secondary-container/10 border border-secondary/20 px-2 py-1 rounded">
@@ -291,12 +408,12 @@
   <!-- Security Event Log (Live Stream) -->
   <section class="glass-panel rounded-xl overflow-hidden">
     <div class="px-4 py-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-low">
-      <h4 class="text-body-sm font-bold flex items-center gap-2 text-on-surface">
+      <h4 class="text-body-sm font-bold flex items-center  text-on-surface">
         <span class="material-symbols-outlined text-[18px]">terminal</span>
         Security Event Log (Live Stream)
       </h4>
       <div class="flex gap-4 items-center">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center ">
           <span class="w-1.5 h-1.5 rounded-full bg-primary pulse-dot"></span>
           <span class="text-[10px] font-code-md uppercase text-primary">Connected</span>
         </div>
@@ -304,25 +421,9 @@
       </div>
     </div>
     
-    <div class="p-4 font-code-md text-code-md h-48 overflow-y-auto terminal-scroll bg-surface-container-lowest" id="event-log">
-      {#if $logs.length === 0}
-        <div class="text-on-surface-variant text-center py-12 text-xs italic">
-          Waiting for security event activity...
-        </div>
-      {:else}
-        {#each $logs.slice(0, 50) as log}
-          <div class="flex gap-4 {log.action === 'ALLOW' || log.action === 'PASS' ? 'opacity-70' : 'opacity-100'} mb-2 leading-tight">
-            <span class="text-on-surface-variant shrink-0">[{formatTime(log.timestamp)}]</span>
-            <span class="shrink-0 font-bold {log.action === 'ALLOW' || log.action === 'PASS' ? 'text-primary' : log.action === 'BLOCK' ? 'text-secondary' : 'text-tertiary'}">{log.action}</span>
-            <span class="text-on-surface truncate">
-              {log.method} <span class="text-on-surface-variant">{log.path}</span> - <span class="font-bold">{log.client_ip}</span> 
-              {#if log.reason}
-                <span class="text-on-surface-variant">({log.reason})</span>
-              {/if}
-            </span>
-          </div>
-        {/each}
-      {/if}
-    </div>
+    <div 
+      bind:this={terminalElement} 
+      class="w-full h-72 bg-[#040508] p-3 rounded-lg border border-outline-variant/20 overflow-hidden"
+    ></div>
   </section>
 </div>

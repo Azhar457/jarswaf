@@ -9,6 +9,15 @@ pub struct Config {
     #[serde(default)]
     pub rate_limit_policies: Vec<RateLimitPolicy>,
     pub vhosts: Vec<VHost>,
+    #[serde(default)]
+    pub certificates: Vec<CertificateConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CertificateConfig {
+    pub domain: String,
+    pub provider: String,
+    pub email: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

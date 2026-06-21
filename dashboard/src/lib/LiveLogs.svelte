@@ -95,7 +95,7 @@
   <!-- Title section -->
   <div class="flex justify-between items-end">
     <div>
-      <div class="flex items-center gap-2 text-on-surface-variant text-xs mb-1">
+      <div class="flex items-center text-on-surface-variant text-xs mb-1">
         <span>Aegis WAF</span>
         <span class="material-symbols-outlined text-[12px]">chevron_right</span>
         <span class="text-primary">Live Threat Feed</span>

@@ -22,7 +22,7 @@
     <span class="text-on-surface-variant text-[12px] font-bold uppercase tracking-widest">{label}</span>
     <span class="material-symbols-outlined {colorClass}">{icon}</span>
   </div>
-  <div class="flex items-baseline gap-2">
+  <div class="flex items-baseline ">
     <h3 class="font-metric-lg text-metric-lg {colorClass}">{value}</h3>
     {#if subtext}
       <span class="{colorClass}/60 text-[11px] font-code-md font-mono">{subtext}</span>

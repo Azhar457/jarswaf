@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import CustomRuleBuilder from './components/CustomRuleBuilder.svelte';
+  import SimulationSandbox from './components/SimulationSandbox.svelte';
 
   export let controllerUrl = '';
 
@@ -372,7 +374,7 @@
       {#each presetGroups as group}
         {@const hostRules = vhosts[selectedVhostIndex] ? (vhosts[selectedVhostIndex].rules || []) : []}
         {@const isEnabled = hostRules.includes(group.rule_pattern)}
-        <div class="glass-card rounded-xl p-4 border border-outline-variant/60 relative overflow-hidden flex flex-col gap-2">
+        <div class="glass-card rounded-xl p-4 border border-outline-variant/60 relative overflow-hidden flex flex-col ">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-sm">
               <span class="material-symbols-outlined text-primary text-xl">{group.icon}</span>
@@ -382,7 +384,7 @@
               </div>
             </div>
             
-            <div class="flex items-center gap-2">
+            <div class="flex items-center">
               <span class="text-[9px] font-mono px-1.5 py-0.5 rounded border {group.severity === 'CRITICAL' ? 'bg-error/10 text-error border-error/20' : group.severity === 'HIGH' ? 'bg-tertiary-container/10 text-tertiary-container border-tertiary-container/20' : 'bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20'}">
                 {group.severity}
               </span>
@@ -393,7 +395,7 @@
                   on:change={(e) => toggleModule(group.rule_pattern, e.currentTarget.checked)}
                   class="sr-only peer"
                 />
-                <div class="w-9 h-5 bg-surface-container-highest rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                <div class="w-9 h-5 bg-surface-container-highest rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
               </label>
             </div>
           </div>
@@ -491,167 +493,24 @@
 
   <!-- Right panel: Custom Rule Builder & Simulation Sandbox -->
   <div class="w-full lg:w-[420px] flex-shrink-0 flex flex-col gap-6 overflow-y-auto no-scrollbar">
-    <!-- Rule Editor Panel -->
-    <div class="glass-card rounded-xl border border-outline-variant/60 flex flex-col overflow-hidden">
-      <div class="p-4 border-b border-outline-variant flex items-center justify-between bg-surface-container-high/30">
-        <div class="flex items-center gap-2">
-          <span class="material-symbols-outlined text-primary text-lg">terminal</span>
-          <span class="font-bold text-sm tracking-tight text-on-surface">CUSTOM RULE BUILDER</span>
-        </div>
-        {#if editingRuleId}
-          <span class="text-[10px] font-mono bg-primary/20 text-primary px-1.5 rounded uppercase font-bold">Editing: {editingRuleId}</span>
-        {/if}
-      </div>
+    <CustomRuleBuilder
+      bind:editingRuleId
+      bind:ruleName
+      bind:conditionFieldType
+      bind:operator
+      bind:customHeaderName
+      bind:conditionValue
+      bind:action
+      bind:redirectUrl
+      on:save={handleSaveCustomRule}
+      on:cancel={cancelEdit}
+    />
 
-      <div class="p-4 space-y-4 flex-1">
-        <div class="flex flex-col gap-1">
-          <label for="rule_name_inp" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Rule Name / Description</label>
-          <input 
-            id="rule_name_inp" 
-            class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm text-on-surface focus:border-primary outline-none" 
-            type="text" 
-            placeholder="e.g. Block login page scanner"
-            bind:value={ruleName}
-          />
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div class="flex flex-col gap-1">
-            <label for="field_select" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Target Field</label>
-            <select id="field_select" bind:value={conditionFieldType} class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm outline-none focus:border-primary text-on-surface">
-              <option value="path">URL Path (e.g. /wp-admin)</option>
-              <option value="query">Query Parameter</option>
-              <option value="body">Request Body</option>
-              <option value="header">HTTP Header</option>
-            </select>
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <label for="operator_select" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Operator</label>
-            <select id="operator_select" bind:value={operator} class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm outline-none focus:border-primary text-on-surface">
-              <option value="contains">Contains substring</option>
-              <option value="equals">Equals exactly</option>
-              <option value="starts_with">Starts with prefix</option>
-            </select>
-          </div>
-        </div>
-
-        {#if conditionFieldType === 'header'}
-          <div class="flex flex-col gap-1">
-            <label for="hdr_name" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">HTTP Header Name</label>
-            <input 
-              id="hdr_name" 
-              class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
-              type="text" 
-              placeholder="e.g. User-Agent or Referer"
-              bind:value={customHeaderName}
-            />
-          </div>
-        {/if}
-
-        <div class="flex flex-col gap-1">
-          <label for="match_val" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Value to Match</label>
-          <input 
-            id="match_val" 
-            class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
-            type="text" 
-            placeholder="e.g. /wp-admin"
-            bind:value={conditionValue}
-          />
-        </div>
-
-        <div class="grid grid-cols-2 gap-3 border-t border-outline-variant/30 pt-4">
-          <div class="flex flex-col gap-1 col-span-2">
-            <label for="action_sel" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Enforcement Action</label>
-            <select id="action_sel" bind:value={action} class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm outline-none focus:border-primary text-on-surface font-bold">
-              <option value="block">Block request (Return 403 Forbidden)</option>
-              <option value="redirect">Redirect client (Return 302 Redirect)</option>
-            </select>
-          </div>
-          
-          {#if action === 'redirect'}
-            <div class="flex flex-col gap-1 col-span-2">
-              <label for="redir_url" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Target Redirect URL</label>
-              <input 
-                id="redir_url" 
-                class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
-                type="text" 
-                placeholder="e.g. http://localhost/blocked"
-                bind:value={redirectUrl}
-              />
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <div class="p-4 bg-surface-container-high/30 border-t border-outline-variant flex items-center justify-between">
-        {#if editingRuleId}
-          <button on:click={cancelEdit} class="text-xs text-outline hover:text-on-surface transition-colors cursor-pointer bg-transparent border-none">Cancel</button>
-        {:else}
-          <span class="text-xs text-on-surface-variant italic font-mono">New Signature</span>
-        {/if}
-        <button 
-          on:click={handleSaveCustomRule}
-          class="bg-primary text-background font-bold px-6 py-2 rounded text-xs transition-transform active:scale-95 shadow-lg shadow-primary/10 cursor-pointer border-none"
-        >
-          {editingRuleId ? 'Apply Updates' : 'Compile & Add Rule'}
-        </button>
-      </div>
-    </div>
-
-    <!-- Simulation Sandbox -->
-    <div class="glass-card rounded-xl p-4 border border-outline-variant/60">
-      <div class="flex items-center gap-2 mb-4 pb-1 border-b border-outline-variant/30">
-        <span class="material-symbols-outlined text-primary text-md">science</span>
-        <h4 class="font-bold text-sm tracking-tight text-on-surface">SIMULATION SANDBOX</h4>
-      </div>
-      <div class="space-y-4">
-        <p class="text-[11px] text-on-surface-variant">Test payloads or paths against active modules and custom rules instantly:</p>
-        
-        <div class="relative">
-          <textarea 
-            class="w-full bg-[#040508] border border-outline-variant rounded p-3 text-xs font-mono text-on-surface focus:border-primary outline-none h-20 resize-none" 
-            placeholder="Paste malicious payload or URL here (e.g. /wp-admin or ' OR 1=1)..."
-            bind:value={testPayload}
-          ></textarea>
-          <button 
-            on:click={runSimulation}
-            class="absolute bottom-3 right-3 bg-surface-container-highest p-1.5 rounded hover:text-primary transition-colors cursor-pointer text-xs flex items-center gap-1 border-none text-on-surface-variant"
-            title="Execute test"
-          >
-            <span class="material-symbols-outlined text-sm">play_arrow</span>
-            <span>Test</span>
-          </button>
-        </div>
-
-        {#if simulationResult.status === 'testing'}
-          <div class="flex items-center justify-center p-3 rounded bg-surface-container/30 border border-outline-variant">
-            <span class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2"></span>
-            <span class="text-xs font-mono text-outline">Simulating enforcements...</span>
-          </div>
-        {:else}
-          {#if simulationResult.status === 'triggered'}
-            <div class="flex items-center justify-between p-3 rounded bg-error/10 border border-error/20">
-              <div class="flex items-center gap-2">
-                <span class="material-symbols-outlined text-error text-md">dangerous</span>
-                <span class="text-xs font-bold text-error">DETECTION TRIGGERED</span>
-              </div>
-              <span class="text-[10px] font-mono text-on-surface-variant max-w-[180px] truncate" title={simulationResult.ruleName}>
-                Rule: {simulationResult.ruleName}
-              </span>
-            </div>
-          {:else if simulationResult.status === 'passed'}
-            <div class="flex items-center justify-between p-3 rounded bg-primary/10 border border-primary/20">
-              <div class="flex items-center gap-2">
-                <span class="material-symbols-outlined text-primary text-md">check_circle</span>
-                <span class="text-xs font-bold text-primary font-mono">REQUEST CLEARED</span>
-              </div>
-              <span class="text-[10px] font-mono text-on-surface-variant">No rules triggered</span>
-            </div>
-          {/if}
-        {/if}
-      </div>
-    </div>
+    <SimulationSandbox
+      bind:testPayload
+      {simulationResult}
+      on:test={runSimulation}
+    />
   </div>
 </div>
 

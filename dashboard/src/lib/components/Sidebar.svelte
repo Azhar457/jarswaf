@@ -32,13 +32,13 @@
 </script>
 
 <aside
-  class="fixed left-0 top-0 h-screen z-50 bg-surface-container-lowest border-r border-outline-variant transition-all duration-300 flex flex-col py-6"
+  class="h-screen sticky top-0 z-50 bg-surface-container-lowest border-r border-outline-variant transition-all duration-300 flex flex-col py-6 shrink-0"
   style="width: {isCollapsed ? '64px' : '256px'};"
 >
   <!-- Logo Section -->
   <div class="mb-8 flex items-center justify-between px-4">
     {#if !isCollapsed}
-      <div class="flex items-center gap-2">
+      <div class="flex items-center ">
         <span class="material-symbols-outlined text-primary" style="font-size: 32px;">security</span>
         <div class="flex flex-col">
           <span class="font-headline-md text-headline-md text-on-surface font-bold leading-tight">Aegis WAF</span>
@@ -64,11 +64,11 @@
   </div>
 
   <!-- Navigation Items -->
-  <nav class="flex flex-col gap-2 flex-1 px-2">
+  <nav class="flex flex-col  flex-1 px-2">
     {#each navItems as item (item.id)}
       <button
         on:click={() => handleTabChange(item.id)}
-        class="flex items-center gap-2 p-4 rounded-lg transition-colors relative w-full text-left
+        class="flex items-center  p-4 rounded-lg transition-colors relative w-full text-left
           {activeTab === item.id
             ? 'text-primary font-bold bg-primary-container/10 border-r-2 border-primary'
             : 'text-on-surface-variant hover:bg-surface-container-high'}"
@@ -90,11 +90,11 @@
   </nav>
 
   <!-- Bottom Section -->
-  <div class="border-t border-outline-variant pt-6 px-2 flex flex-col gap-2">
+  <div class="border-t border-outline-variant pt-6 px-2 flex flex-col ">
     <!-- Deploy Rules Button -->
     <button
       on:click={handleDeployRules}
-      class="flex items-center justify-center gap-2 p-4 rounded-lg bg-primary text-on-primary font-bold transition-colors hover:opacity-90 w-full"
+      class="flex items-center justify-center  p-4 rounded-lg bg-primary text-on-primary font-bold transition-colors hover:opacity-90 w-full"
       title={isCollapsed ? 'Deploy Rules' : ''}
     >
       <span class="material-symbols-outlined shrink-0">rocket_launch</span>
@@ -105,12 +105,12 @@
 
     <!-- Footer Links -->
     {#if !isCollapsed}
-      <div class="flex flex-col gap-2 px-2 pt-2">
+      <div class="flex flex-col  px-2 pt-2">
         <a
           href="https://github.com/Azhar457/aegis-waf#readme"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center gap-2 text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
+          class="flex items-center  text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
         >
           <span class="material-symbols-outlined" style="font-size: 16px;">description</span>
           Documentation
@@ -119,14 +119,14 @@
           href="https://azhar457.github.io/note/"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center gap-2 text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
+          class="flex items-center  text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
         >
           <span class="material-symbols-outlined" style="font-size: 16px;">support</span>
           Support
         </a>
       </div>
     {:else}
-      <div class="flex flex-col gap-2 items-center pt-2">
+      <div class="flex flex-col  items-center pt-2">
         <a
           href="https://github.com/Azhar457/aegis-waf#readme"
           target="_blank"

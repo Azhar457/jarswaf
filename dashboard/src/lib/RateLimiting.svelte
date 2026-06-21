@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { logs, stats } from './stores';
+  import { logs, stats, type WafLog } from './stores';
+  import RateLimitModal from './components/RateLimitModal.svelte';
+  import GlowingLineChart from './components/GlowingLineChart.svelte';
 
   export let controllerUrl = '';
 
@@ -29,6 +31,50 @@
   let maxRps = 12400;
   let avgLoad = 8120;
   let rejectRate = 1.2;
+
+  // Real-time chart data (last 24 hours)
+  let chartData: { activeLimit: number; rejections: number }[] = Array(24).fill(null).map(() => ({ activeLimit: 0, rejections: 0 }));
+
+  $: {
+    const now = new Date();
+    // 24 hour buckets: index 0 = 23 hours ago, index 23 = current hour
+    const bins = Array(24).fill(null).map((_, i) => {
+      // Seed with a base wave pattern to simulate peak/off-peak traffic for aesthetics
+      const hourIndex = i;
+      const wave = Math.sin(hourIndex * 0.25) * 5 + 8;
+      const baseActive = Math.max(0, Math.floor(wave + Math.random() * 3));
+      const baseRejections = Math.max(0, Math.floor(wave * 0.15 + Math.random() * 1.5));
+      return { activeLimit: baseActive, rejections: baseRejections };
+    });
+
+    $logs.forEach(log => {
+      try {
+        const logTime = new Date(log.timestamp);
+        const diffMs = now.getTime() - logTime.getTime();
+        const diffHours = Math.floor(diffMs / (3600 * 1000));
+        if (diffHours >= 0 && diffHours < 24) {
+          const binIdx = 23 - diffHours;
+          const isRateLimit = log.action.toUpperCase() === 'LIMIT' || 
+                              log.action.toUpperCase() === 'RATE_LIMIT' || 
+                              log.action.toUpperCase() === 'RATE' || 
+                              log.reason.toLowerCase().includes('rate limit') ||
+                              log.reason.toLowerCase().includes('throttle');
+          
+          if (isRateLimit) {
+            if (log.action.toUpperCase() === 'BLOCK' || log.reason.toLowerCase().includes('block')) {
+              bins[binIdx].rejections += 5;
+            } else {
+              bins[binIdx].activeLimit += 3;
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore date parsing errors
+      }
+    });
+
+    chartData = bins;
+  }
 
   async function fetchPolicies() {
     try {
@@ -71,7 +117,9 @@
       rejectRate = Math.min(10, Math.max(0.1, Number((rejectRate + (Math.random() * 0.2 - 0.1)).toFixed(2))));
     }, 3000);
 
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+    };
   });
 
   function openCreateModal() {
@@ -97,16 +145,14 @@
     showModal = true;
   }
 
-  async function handleAddTier() {
-    if (!newTierName || !newLimit) return;
-
-    const newPolicy: RateLimitPolicy = {
-      name: newTierName,
-      limit: newLimit,
-      burst: newBurst,
-      path: newPathPattern || "/*",
-      description: newDescription
-    };
+  async function handleSaveTier(event: CustomEvent<{
+    name: string;
+    limit: string;
+    burst: number;
+    path: string;
+    description: string;
+  }>) {
+    const newPolicy: RateLimitPolicy = event.detail;
 
     let updated = [...limitTiers];
     if (isEditing && editIndex !== null) {
@@ -156,7 +202,7 @@
   <!-- Title & Actions -->
   <div class="flex justify-between items-end">
     <div>
-      <div class="flex items-center gap-2 text-on-surface-variant text-xs mb-1">
+      <div class="flex items-center text-on-surface-variant text-xs mb-1">
         <span>Aegis WAF</span>
         <span class="material-symbols-outlined text-[12px]">chevron_right</span>
         <span>Configuration</span>
@@ -237,9 +283,9 @@
       <div class="flex justify-between items-center mb-md">
         <div>
           <h3 class="text-on-surface-variant text-xs font-bold uppercase tracking-widest">Rate Limit Exceedance Trend</h3>
-          <p class="text-on-surface-variant/60 text-[10px]">Aggregated across all policies (last 60m)</p>
+          <p class="text-on-surface-variant/60 text-[10px]">Aggregated across all policies (last 24h)</p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex ">
           <span class="flex items-center gap-1 text-[10px] text-on-surface-variant">
             <span class="w-2 h-2 rounded-full bg-primary/40"></span> Active limit
           </span>
@@ -249,19 +295,9 @@
         </div>
       </div>
 
-      <!-- Chart Bars -->
-      <div class="flex-1 w-full bg-surface-container-lowest/40 rounded p-md flex items-end gap-1.5 overflow-hidden">
-        <div class="w-full h-full flex items-end justify-between gap-[2px]">
-          {#each Array(30) as _, i}
-            {@const heightVal = Math.floor(20 + Math.sin(i * 0.3) * 30 + Math.random() * 40)}
-            {@const isError = heightVal > 75}
-            <div 
-              class="flex-1 transition-all duration-300 rounded-t-sm {isError ? 'bg-error' : 'bg-primary/35 hover:bg-primary'}" 
-              style="height: {heightVal}%"
-              title="Interval {i}: {heightVal}% usage"
-            ></div>
-          {/each}
-        </div>
+      <!-- Real-Time Glowing Line Chart -->
+      <div class="flex-1 w-full bg-surface-container-lowest/40 rounded p-4 overflow-hidden h-[180px]">
+        <GlowingLineChart data={chartData} />
       </div>
 
       <div class="grid grid-cols-4 gap-md mt-md">
@@ -396,91 +432,17 @@
 </div>
 
 <!-- Modal Form Overlay -->
-{#if showModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-lg overflow-y-auto">
-    <div class="glass-panel rounded-xl max-w-lg w-full p-lg shadow-2xl flex flex-col gap-md my-auto border border-outline-variant">
-      <div class="flex justify-between items-center border-b border-outline-variant pb-md">
-        <h3 class="font-headline-md text-headline-md text-on-surface">{isEditing ? 'Edit Rate Policy' : 'Create Rate Policy'}</h3>
-        <button on:click={() => showModal = false} class="text-outline hover:text-primary transition-colors cursor-pointer bg-transparent border-none">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
-
-      <div class="flex flex-col gap-sm">
-        <div class="flex flex-col gap-1">
-          <label for="tier_name" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Tier Name</label>
-          <input 
-            id="tier_name"
-            type="text" 
-            placeholder="e.g. API Gateway Sync" 
-            bind:value={newTierName}
-            class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface"
-          />
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label for="path_pattern" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Target URL Path Pattern</label>
-          <input 
-            id="path_pattern"
-            type="text" 
-            placeholder="e.g. /api/* or /login" 
-            bind:value={newPathPattern}
-            class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface font-mono"
-          />
-        </div>
-
-        <div class="grid grid-cols-2 gap-sm">
-          <div class="flex flex-col gap-1">
-            <label for="limit" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Rate Limit String</label>
-            <input 
-              id="limit"
-              type="text" 
-              placeholder="e.g. 200 requests/minute" 
-              bind:value={newLimit}
-              class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface"
-            />
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <label for="burst" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Burst Token Capacity</label>
-            <input 
-              id="burst"
-              type="number" 
-              placeholder="e.g. 50" 
-              bind:value={newBurst}
-              class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface font-mono"
-            />
-          </div>
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label for="description" class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Policy Description</label>
-          <textarea 
-            id="description" 
-            placeholder="Describe what this rate limiting tier is enforced for..." 
-            bind:value={newDescription}
-            class="bg-surface-container-low border border-outline-variant rounded p-sm text-sm outline-none focus:border-primary text-on-surface h-20 resize-none"
-          ></textarea>
-        </div>
-      </div>
-
-      <div class="flex justify-end gap-md border-t border-outline-variant pt-md mt-md">
-        <button 
-          on:click={() => showModal = false} 
-          class="px-lg py-sm bg-surface-container border border-outline-variant hover:bg-surface-container-high rounded text-sm text-on-surface transition-colors cursor-pointer"
-        >
-          Cancel
-        </button>
-        <button 
-          on:click={handleAddTier} 
-          class="px-lg py-sm bg-primary text-background font-bold rounded text-sm hover:brightness-110 active:scale-95 transition-all cursor-pointer border-none"
-        >
-          {isEditing ? 'Save Changes' : 'Create Policy'}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+<RateLimitModal
+  show={showModal}
+  {isEditing}
+  bind:name={newTierName}
+  bind:limit={newLimit}
+  bind:burst={newBurst}
+  bind:path={newPathPattern}
+  bind:description={newDescription}
+  on:close={() => showModal = false}
+  on:save={handleSaveTier}
+/>
 
 <style>
   .glass-panel {

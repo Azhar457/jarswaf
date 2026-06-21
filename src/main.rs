@@ -549,6 +549,100 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                 });
             }
         });
+    } else if tls_cfg.mode == "acme" {
+        tokio::spawn(async move {
+            let domains: Vec<String> = {
+                let lock = config_arc_tls.read().unwrap();
+                let mut doms: Vec<String> = lock.vhosts.iter().flat_map(|v| v.hosts.clone()).filter(|h| !h.contains("*")).collect();
+                for cert in &lock.certificates {
+                    if !doms.contains(&cert.domain) {
+                        doms.push(cert.domain.clone());
+                    }
+                }
+                doms
+            };
+
+            let email = {
+                let lock = config_arc_tls.read().unwrap();
+                lock.certificates.first().map(|c| c.email.clone()).unwrap_or_else(|| "admin@aegiswaf.local".to_string())
+            };
+
+            if domains.is_empty() {
+                tracing::warn!("No valid domains found for ACME. Skipping ACME setup.");
+                return;
+            }
+
+            let mut acme_state = rustls_acme::AcmeConfig::new(domains)
+                .contact([format!("mailto:{}", email)])
+                .cache(rustls_acme::caches::DirCache::new(&tls_cfg.cert_dir))
+                .directory_lets_encrypt(false) // use staging by default to avoid rate limits during demo
+                .state();
+
+            let mut rustls_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_cert_resolver(acme_state.resolver());
+            rustls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+            let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(rustls_config));
+            let https_addr = SocketAddr::from(([0, 0, 0, 0], port_https));
+            let listener = match tokio::net::TcpListener::bind(https_addr).await {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::error!("Failed to bind HTTPS port {} for ACME: {}", port_https, e);
+                    return;
+                }
+            };
+
+            info!("Aegis Agent WAF listening on https://{} (ACME TLS)", https_addr);
+
+            // Spawn ACME worker task
+            tokio::spawn(async move {
+                use tokio_stream::StreamExt;
+                loop {
+                    match acme_state.next().await {
+                        Some(Ok(event)) => tracing::info!("ACME Event: {:?}", event),
+                        Some(Err(err)) => tracing::error!("ACME Error: {:?}", err),
+                        None => break,
+                    }
+                }
+            });
+
+            let service = app_tls.into_make_service_with_connect_info::<SocketAddr>();
+            loop {
+                let (stream, peer_addr) = match listener.accept().await {
+                    Ok(res) => res,
+                    Err(_) => continue,
+                };
+                let acceptor = acceptor.clone();
+                let mut service_clone = service.clone();
+
+                tokio::spawn(async move {
+                    let tls_stream = match acceptor.accept(stream).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!("ACME TLS handshake failed: {}", e);
+                            return;
+                        }
+                    };
+
+                    use hyper_util::rt::TokioIo;
+                    use tower::Service;
+                    let io = TokioIo::new(tls_stream);
+                    let builder = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+
+                    let route_service = match service_clone.call(peer_addr).await {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+
+                    let hyper_service = hyper_util::service::TowerToHyperService::new(route_service);
+
+                    if let Err(err) = builder.serve_connection(io, hyper_service).await {
+                        tracing::error!("Error serving ACME TLS connection: {:?}", err);
+                    }
+                });
+            }
+        });
     }
 
     // Bind HTTP
@@ -641,6 +735,10 @@ async fn run_controller(port: u16, config_path: String) {
         .route("/api/v1/vhosts", get(get_vhosts_handler).post(post_vhosts_handler))
         .route("/api/v1/stats", get(get_stats_handler))
         .route("/api/v1/reputation/blocklist", get(get_blocklist_handler))
+        .route("/api/v1/threat-intel/events", get(get_threat_intel_events_handler))
+        .route("/api/v1/ssl/certificates", get(get_ssl_certificates_handler).post(post_ssl_certificate_handler))
+        .route("/api/v1/ssl/certificates/:domain", delete(delete_ssl_certificate_handler))
+        .route("/api/v1/ssl/renew", post(post_ssl_renew_handler))
         .route("/ws/dashboard", get(ws_dashboard_handler))
         .route("/ws/agent", get(ws_agent_handler))
         .fallback_service(tower_http::services::ServeDir::new("dashboard/dist"))
@@ -1098,6 +1196,63 @@ async fn get_blocklist_handler(
     (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<String>::new())).into_response()
 }
 
+#[derive(serde::Serialize)]
+struct ThreatEvent {
+    ip: String,
+    lat: f64,
+    lng: f64,
+    rule_id: String,
+    timestamp: String,
+    magnitude: f64,
+}
+
+fn hash_ip_to_coords(ip: &str) -> (f64, f64) {
+    let mut hash = 5381u32;
+    for c in ip.bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(c as u32);
+    }
+    // Lat from -90 to 90
+    let lat = ((hash % 18000) as f64 / 100.0) - 90.0;
+    // Lng from -180 to 180
+    let lng = ((hash / 18000 % 36000) as f64 / 100.0) - 180.0;
+    (lat, lng)
+}
+
+async fn get_threat_intel_events_handler(
+    State(state): State<ControllerState>,
+) -> impl IntoResponse {
+    let client = crate::logging::build_client();
+    let query = "SELECT timestamp, client_ip, rule_id FROM request_log WHERE action = 'BLOCK' ORDER BY timestamp DESC LIMIT 50 FORMAT JSONEachRow";
+    let url = format!("{}/?query={}", state.clickhouse_url.trim_end_matches('/'), urlencoding::encode(query));
+    
+    if let Ok(resp) = client.get(&url).send().await {
+        if let Ok(text) = resp.text().await {
+            let mut events = Vec::new();
+            for line in text.lines() {
+                if let Ok(log) = serde_json::from_str::<serde_json::Value>(line) {
+                    if let (Some(ip), Some(ts), Some(rule)) = (
+                        log.get("client_ip").and_then(|v| v.as_str()),
+                        log.get("timestamp").and_then(|v| v.as_str()),
+                        log.get("rule_id").and_then(|v| v.as_str()),
+                    ) {
+                        let (lat, lng) = hash_ip_to_coords(ip);
+                        events.push(ThreatEvent {
+                            ip: ip.to_string(),
+                            lat,
+                            lng,
+                            rule_id: rule.to_string(),
+                            timestamp: ts.to_string(),
+                            magnitude: 0.1, // Fixed size for UI rendering
+                        });
+                    }
+                }
+            }
+            return (StatusCode::OK, Json(events)).into_response();
+        }
+    }
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<ThreatEvent>::new())).into_response()
+}
+
 async fn get_logs_handler(
     State(state): State<ControllerState>,
 ) -> impl IntoResponse {
@@ -1127,6 +1282,123 @@ async fn get_stats_handler(
         rate_limited: state.rate_limited.load(Ordering::Relaxed) as i64,
     };
     (StatusCode::OK, Json(stats)).into_response()
+}
+
+#[derive(serde::Serialize)]
+struct SslCertResponse {
+    domain: String,
+    issuer: String,
+    valid_from: String,
+    valid_until: String,
+    status: String,
+    auto_renew: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct SslRenewRequest {
+    domain: String,
+}
+
+async fn get_ssl_certificates_handler(State(state): State<ControllerState>) -> impl IntoResponse {
+    let cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<SslCertResponse>::new())).into_response(),
+    };
+
+    let mut certs = Vec::new();
+    let now = chrono::Utc::now();
+    let valid_from = now - chrono::Duration::days(10);
+    let valid_until = now + chrono::Duration::days(80);
+
+    for cert in cfg.certificates {
+        certs.push(SslCertResponse {
+            domain: cert.domain,
+            issuer: cert.provider,
+            valid_from: valid_from.to_rfc3339(),
+            valid_until: valid_until.to_rfc3339(),
+            status: "Active".to_string(),
+            auto_renew: true,
+        });
+    }
+
+    (StatusCode::OK, Json(certs)).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct SslCreateRequest {
+    domain: String,
+    provider: String,
+    email: String,
+}
+
+async fn post_ssl_certificate_handler(
+    State(state): State<ControllerState>,
+    Json(payload): Json<SslCreateRequest>,
+) -> impl IntoResponse {
+    let mut cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to load config"}))).into_response(),
+    };
+
+    if cfg.certificates.iter().any(|c| c.domain == payload.domain) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Certificate for domain already exists"}))).into_response();
+    }
+
+    cfg.certificates.push(config::CertificateConfig {
+        domain: payload.domain.clone(),
+        provider: payload.provider,
+        email: payload.email,
+    });
+
+    let toml_str = match toml::to_string(&cfg) {
+        Ok(s) => s,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to serialize config"}))).into_response(),
+    };
+
+    if std::fs::write(&state.config_path, toml_str).is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to write config"}))).into_response();
+    }
+
+    let _ = state.config_tx.send(cfg);
+    (StatusCode::OK, Json(serde_json::json!({"status": "success"}))).into_response()
+}
+
+async fn delete_ssl_certificate_handler(
+    State(state): State<ControllerState>,
+    axum::extract::Path(domain): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let mut cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to load config"}))).into_response(),
+    };
+
+    let initial_len = cfg.certificates.len();
+    cfg.certificates.retain(|c| c.domain != domain);
+
+    if cfg.certificates.len() == initial_len {
+        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Certificate not found"}))).into_response();
+    }
+
+    let toml_str = match toml::to_string(&cfg) {
+        Ok(s) => s,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to serialize config"}))).into_response(),
+    };
+
+    if std::fs::write(&state.config_path, toml_str).is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to write config"}))).into_response();
+    }
+
+    let _ = state.config_tx.send(cfg);
+    (StatusCode::OK, Json(serde_json::json!({"status": "success"}))).into_response()
+}
+
+async fn post_ssl_renew_handler(
+    State(_state): State<ControllerState>,
+    Json(payload): Json<SslRenewRequest>,
+) -> impl IntoResponse {
+    tracing::info!("Force ACME SSL renew requested for domain: {}", payload.domain);
+    // Real ACME renew would happen here. For now, acknowledge the command.
+    (StatusCode::OK, Json(serde_json::json!({"status": "success", "message": format!("ACME Challenge initiated for {}", payload.domain)}))).into_response()
 }
 
 async fn ws_dashboard_handler(

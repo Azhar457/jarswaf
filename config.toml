@@ -39,18 +39,14 @@ path = "/static/*, *.css, *.js, *.png"
 description = "Exempted assets to reduce WAF engine evaluation overhead."
 
 [[vhosts]]
-name = "dev.azharmtq.my.id"
+name = "development"
 hosts = ["dev.azharmtq.my.id"]
-backend = "127.0.0.1:9500"
+backend = "http://127.0.0.1:9500"
 rate_limit_tiers = []
-rules = ["XSS-*", "CMDI-*", "SSRF-*", "BOT-*", "LFI-*", "RFI-*", "SQLI-*"]
+rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "CMDI-*", "BOT-*", "SSRF-*"]
 blocked_countries = []
-geoblock_type = "Blocklist"
+geoblock_type = "blacklist"
 custom_rules = []
-ssl = "Disabled"
+ssl = "None (HTTP only)"
 max_body = "10MB"
-rate_limit = "600 req/min"
-
-[vhosts.logging]
-enabled = true
-db_path = "logs/aegis-waf.db"
+rate_limit = "100/m"

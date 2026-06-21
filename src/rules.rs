@@ -288,6 +288,7 @@ mod tests {
                 default_rate_limit: 100,
                 log_dir: "./logs".to_string(),
                 log_level: "security".to_string(),
+                trusted_proxies: Some(vec![]),
             },
             tls: TlsConfig {
                 mode: "local_ca".to_string(),
@@ -295,6 +296,7 @@ mod tests {
             },
             vhosts: vec![],
             rate_limit_policies: vec![],
+            certificates: vec![],
         }
     }
 

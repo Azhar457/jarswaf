@@ -31,7 +31,7 @@
   $: colors = variantMap[variant] || variantMap.info;
 </script>
 
-<span class="inline-flex items-center gap-2 px-4 py-2 rounded text-xs font-bold border {colors.badge} {uppercase ? 'uppercase' : ''}">
+<span class="inline-flex items-center  px-4 py-2 rounded text-xs font-bold border {colors.badge} {uppercase ? 'uppercase' : ''}">
   {#if dot}
     <span class="w-2 h-2 rounded-full {colors.dot} {variant === 'success' ? 'animate-pulse' : ''}"></span>
   {/if}

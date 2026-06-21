@@ -10,7 +10,7 @@
 <div class="flex justify-between items-end mb-8">
   <div>
     {#if breadcrumbs.length > 0}
-      <div class="flex items-center gap-2 text-on-surface-variant text-xs mb-2">
+      <div class="flex items-center  text-on-surface-variant text-xs mb-2">
         {#each breadcrumbs as crumb, i}
           {#if i > 0}
             <span class="material-symbols-outlined text-[12px]">chevron_right</span>

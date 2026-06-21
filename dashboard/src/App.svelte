@@ -1,32 +1,29 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import Overview from './lib/Overview.svelte';
-  import LiveLogs from './lib/LiveLogs.svelte';
-  import VirtualHosts from './lib/VirtualHosts.svelte';
-  import RuleEngine from './lib/RuleEngine.svelte';
-  import RateLimiting from './lib/RateLimiting.svelte';
-  import Sidebar from './lib/components/Sidebar.svelte';
-  import TopBar from './lib/components/TopBar.svelte';
+  import Layout from './components/layout/Layout.svelte';
+  import Dashboard from './pages/Dashboard.svelte';
+  import VHostConfig from './pages/VHostConfig.svelte';
+  import RateLimiting from './pages/RateLimiting.svelte';
+  import LiveLogs from './pages/LiveLogs.svelte';
+  import RuleEngine from './pages/RuleEngine.svelte';
+  import ThreatIntel from './pages/ThreatIntel.svelte';
+  import SSLCertificates from './pages/SSLCertificates.svelte';
+  import AgentNodes from './pages/AgentNodes.svelte';
+  
   import AlertBanner from './lib/components/AlertBanner.svelte';
+  import ToastContainer from './components/ui/ToastContainer.svelte';
   import DeployToast from './lib/components/DeployToast.svelte';
-  import { initGlobalStore, cleanupGlobalStore, connectionStatus, stats, latestLog } from './lib/stores';
+  import { initGlobalStore, cleanupGlobalStore, latestLog } from './lib/stores';
 
   const controllerUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080';
-  let activeTab = 'overview';
-  let isSidebarCollapsed = false;
+  let activeTab = 'dashboard';
 
   let showDeployToast = false;
   let dismissedAlert = false;
-  let activeAlert: any = {
-    client_ip: '192.168.1.104',
-    method: 'GET',
-    path: '/auth/admin',
-    reason: 'SQLI PATTERN DETECTED IN USER-AGENT HEADER',
-    action: 'BLOCK'
-  };
+  let activeAlert: any = null;
 
   $: if ($latestLog) {
-    if ($latestLog.action === 'Block' || $latestLog.action === 'block' || $latestLog.action === 'RateLimit' || $latestLog.action === 'ratelimit') {
+    if ($latestLog.action.toLowerCase() === 'block' || $latestLog.action.toLowerCase() === 'ratelimit') {
       activeAlert = {
         client_ip: $latestLog.client_ip,
         method: $latestLog.method,
@@ -54,52 +51,29 @@
   });
 </script>
 
-<div class="min-h-screen bg-surface-container-lowest text-on-surface font-body-sm flex">
-  <!-- Sidebar Component -->
-  <Sidebar
-    {activeTab}
-    isCollapsed={isSidebarCollapsed}
-    on:tabChange={(e) => activeTab = e.detail}
-    on:toggleCollapse={() => isSidebarCollapsed = !isSidebarCollapsed}
-    on:deployRules={deployRules}
-  />
+<Layout bind:activeTab on:deploy={deployRules}>
+  {#if activeTab === 'dashboard'}
+    <Dashboard />
+  {:else if activeTab === 'threats'}
+    <ThreatIntel />
+  {:else if activeTab === 'rules'}
+    <RuleEngine />
+  {:else if activeTab === 'rate_limits'}
+    <RateLimiting />
+  {:else if activeTab === 'vhosts'}
+    <VHostConfig />
+  {:else if activeTab === 'ssl'}
+    <SSLCertificates />
+  {:else if activeTab === 'nodes'}
+    <AgentNodes />
+  {:else if activeTab === 'traffic'}
+    <LiveLogs />
+  {/if}
+</Layout>
 
-  <!-- Main Content Area -->
-  <div 
-    class="flex-1 transition-all duration-300 flex flex-col min-h-screen"
-    style="margin-left: {isSidebarCollapsed ? '64px' : '256px'};"
-  >
-    <!-- Top App Bar -->
-    <TopBar
-      blockedCount={$stats.blocked}
-      isOnline={$connectionStatus === 'online'}
-    />
-
-    <!-- Page Content -->
-    <main class="p-8 flex-1 overflow-y-auto bg-background" style="padding-bottom: {activeAlert && !dismissedAlert ? '80px' : '32px'};">
-      {#if activeTab === 'overview'}
-        <Overview {controllerUrl} />
-      {/if}
-      {#if activeTab === 'logs'}
-        <LiveLogs {controllerUrl} />
-      {/if}
-      {#if activeTab === 'vhosts'}
-        <VirtualHosts {controllerUrl} />
-      {/if}
-      {#if activeTab === 'rules'}
-        <RuleEngine {controllerUrl} />
-      {/if}
-      {#if activeTab === 'rate_limits'}
-        <RateLimiting {controllerUrl} />
-      {/if}
-    </main>
-  </div>
-</div>
-
-<!-- Deploy Toast -->
 <DeployToast show={showDeployToast} />
+<ToastContainer />
 
-<!-- Bottom Critical Alert Banner -->
 <AlertBanner
   show={activeAlert != null && !dismissedAlert}
   alert={activeAlert}
