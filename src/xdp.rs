@@ -3,7 +3,7 @@ use tracing::{info, warn, error};
 
 #[cfg(target_os = "linux")]
 use aya::{
-    programs::{Xdp, XdpFlags},
+    programs::{Xdp, XdpMode},
     maps::HashMap,
     Ebpf,
 };
@@ -41,9 +41,8 @@ impl XdpManager {
         {
             let program: &mut Xdp = self.bpf.program_mut("aegis_ebpf").unwrap().try_into().map_err(|e| format!("{}", e))?;
             program.load().map_err(|e| format!("{}", e))?;
-            program.attach(_interface, XdpFlags::default())
-                .context("failed to attach the XDP program with default flags")
-                .map_err(|e| format!("{}", e))?;
+            program.attach(_interface, XdpMode::default())
+                .map_err(|e| format!("failed to attach the XDP program: {}", e))?;
             info!("XDP program successfully attached to interface: {}", _interface);
             Ok(())
         }

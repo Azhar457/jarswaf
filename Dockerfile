@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev curl
 
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY xtask ./xtask
 # Build the release binary
 RUN cargo build --release
 

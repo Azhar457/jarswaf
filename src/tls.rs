@@ -12,9 +12,16 @@ pub struct LocalCA {
 #[allow(dead_code)]
 impl LocalCA {
     pub fn new(cert_dir: &str) -> Self {
+        // Securely ensure path exists and canonicalize to avoid path traversal
+        let _ = fs::create_dir_all(cert_dir);
+        let canonical_path = Path::new(cert_dir)
+            .canonicalize()
+            .unwrap_or_else(|_| std::path::PathBuf::from(cert_dir));
+        let cert_path = canonical_path.join("ca.crt").to_string_lossy().to_string();
+        let key_path = canonical_path.join("ca.key").to_string_lossy().to_string();
         Self {
-            cert_path: format!("{}/ca.crt", cert_dir),
-            key_path: format!("{}/ca.key", cert_dir),
+            cert_path,
+            key_path,
         }
     }
 

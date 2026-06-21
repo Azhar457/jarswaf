@@ -342,8 +342,8 @@
 </script>
 
 <!-- Domain Selection Bar -->
-<div class="glass-panel p-md rounded-xl flex items-center justify-between border border-outline-variant mb-lg bg-surface-container-low/50">
-  <div class="flex items-center gap-md">
+<div class="glass-panel p-4 rounded-xl flex items-center justify-between border border-outline-variant mb-6 bg-surface-container-low/50">
+  <div class="flex items-center gap-4">
     <span class="material-symbols-outlined text-primary">dns</span>
     <span class="text-xs font-bold text-outline uppercase tracking-wider">Select virtual host:</span>
     {#if vhosts.length > 0}
@@ -358,9 +358,9 @@
   </div>
 </div>
 
-<div class="flex flex-col lg:flex-row gap-lg h-[calc(100vh-210px)] overflow-hidden">
+<div class="flex flex-col lg:flex-row gap-6 h-[calc(100vh-240px)] overflow-hidden">
   <!-- Left panel: Rule Lists & Toggles -->
-  <div class="flex-grow flex flex-col gap-lg overflow-y-auto no-scrollbar pr-xs">
+  <div class="flex-grow flex flex-col gap-6 overflow-y-auto no-scrollbar pr-1">
     <!-- Title -->
     <div>
       <h2 class="font-headline-md text-headline-md text-on-surface">Active Policy Engine</h2>
@@ -368,11 +368,11 @@
     </div>
 
     <!-- Preset Modules Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-md">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       {#each presetGroups as group}
         {@const hostRules = vhosts[selectedVhostIndex] ? (vhosts[selectedVhostIndex].rules || []) : []}
         {@const isEnabled = hostRules.includes(group.rule_pattern)}
-        <div class="glass-card rounded-xl p-md border border-outline-variant/60 relative overflow-hidden flex flex-col gap-sm">
+        <div class="glass-card rounded-xl p-4 border border-outline-variant/60 relative overflow-hidden flex flex-col gap-2">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-sm">
               <span class="material-symbols-outlined text-primary text-xl">{group.icon}</span>
@@ -478,7 +478,7 @@
               {/each}
             {:else}
               <tr>
-                <td colspan="6" class="py-lg text-center text-outline font-mono">
+                <td colspan="6" class="py-6 text-center text-outline font-mono">
                   No custom rules defined for this host. Use the right panel to define one.
                 </td>
               </tr>
@@ -490,11 +490,11 @@
   </div>
 
   <!-- Right panel: Custom Rule Builder & Simulation Sandbox -->
-  <div class="w-full lg:w-[420px] flex-shrink-0 flex flex-col gap-lg overflow-y-auto no-scrollbar">
+  <div class="w-full lg:w-[420px] flex-shrink-0 flex flex-col gap-6 overflow-y-auto no-scrollbar">
     <!-- Rule Editor Panel -->
     <div class="glass-card rounded-xl border border-outline-variant/60 flex flex-col overflow-hidden">
-      <div class="p-md border-b border-outline-variant flex items-center justify-between bg-surface-container-high/30">
-        <div class="flex items-center gap-sm">
+      <div class="p-4 border-b border-outline-variant flex items-center justify-between bg-surface-container-high/30">
+        <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-primary text-lg">terminal</span>
           <span class="font-bold text-sm tracking-tight text-on-surface">CUSTOM RULE BUILDER</span>
         </div>
@@ -503,22 +503,22 @@
         {/if}
       </div>
 
-      <div class="p-md space-y-md flex-1">
+      <div class="p-4 space-y-4 flex-1">
         <div class="flex flex-col gap-1">
           <label for="rule_name_inp" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Rule Name / Description</label>
           <input 
             id="rule_name_inp" 
-            class="w-full bg-[#040508] border border-outline-variant rounded px-sm py-2 text-sm text-on-surface focus:border-primary outline-none" 
+            class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm text-on-surface focus:border-primary outline-none" 
             type="text" 
             placeholder="e.g. Block login page scanner"
             bind:value={ruleName}
           />
         </div>
 
-        <div class="grid grid-cols-2 gap-sm">
+        <div class="grid grid-cols-2 gap-3">
           <div class="flex flex-col gap-1">
             <label for="field_select" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Target Field</label>
-            <select id="field_select" bind:value={conditionFieldType} class="w-full bg-[#040508] border border-outline-variant rounded px-sm py-2 text-sm outline-none focus:border-primary text-on-surface">
+            <select id="field_select" bind:value={conditionFieldType} class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm outline-none focus:border-primary text-on-surface">
               <option value="path">URL Path (e.g. /wp-admin)</option>
               <option value="query">Query Parameter</option>
               <option value="body">Request Body</option>
@@ -528,7 +528,7 @@
 
           <div class="flex flex-col gap-1">
             <label for="operator_select" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Operator</label>
-            <select id="operator_select" bind:value={operator} class="w-full bg-[#040508] border border-outline-variant rounded px-sm py-2 text-sm outline-none focus:border-primary text-on-surface">
+            <select id="operator_select" bind:value={operator} class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm outline-none focus:border-primary text-on-surface">
               <option value="contains">Contains substring</option>
               <option value="equals">Equals exactly</option>
               <option value="starts_with">Starts with prefix</option>
@@ -541,7 +541,7 @@
             <label for="hdr_name" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">HTTP Header Name</label>
             <input 
               id="hdr_name" 
-              class="w-full bg-[#040508] border border-outline-variant rounded px-sm py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
+              class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
               type="text" 
               placeholder="e.g. User-Agent or Referer"
               bind:value={customHeaderName}
@@ -553,17 +553,17 @@
           <label for="match_val" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Value to Match</label>
           <input 
             id="match_val" 
-            class="w-full bg-[#040508] border border-outline-variant rounded px-sm py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
+            class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
             type="text" 
             placeholder="e.g. /wp-admin"
             bind:value={conditionValue}
           />
         </div>
 
-        <div class="grid grid-cols-2 gap-sm border-t border-outline-variant/30 pt-md">
+        <div class="grid grid-cols-2 gap-3 border-t border-outline-variant/30 pt-4">
           <div class="flex flex-col gap-1 col-span-2">
             <label for="action_sel" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Enforcement Action</label>
-            <select id="action_sel" bind:value={action} class="w-full bg-[#040508] border border-outline-variant rounded px-sm py-2 text-sm outline-none focus:border-primary text-on-surface font-bold">
+            <select id="action_sel" bind:value={action} class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm outline-none focus:border-primary text-on-surface font-bold">
               <option value="block">Block request (Return 403 Forbidden)</option>
               <option value="redirect">Redirect client (Return 302 Redirect)</option>
             </select>
@@ -574,7 +574,7 @@
               <label for="redir_url" class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Target Redirect URL</label>
               <input 
                 id="redir_url" 
-                class="w-full bg-[#040508] border border-outline-variant rounded px-sm py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
+                class="w-full bg-[#040508] border border-outline-variant rounded px-3 py-2 text-sm text-on-surface focus:border-primary outline-none font-mono" 
                 type="text" 
                 placeholder="e.g. http://localhost/blocked"
                 bind:value={redirectUrl}
@@ -584,7 +584,7 @@
         </div>
       </div>
 
-      <div class="p-md bg-surface-container-high/30 border-t border-outline-variant flex items-center justify-between">
+      <div class="p-4 bg-surface-container-high/30 border-t border-outline-variant flex items-center justify-between">
         {#if editingRuleId}
           <button on:click={cancelEdit} class="text-xs text-outline hover:text-on-surface transition-colors cursor-pointer bg-transparent border-none">Cancel</button>
         {:else}
@@ -592,7 +592,7 @@
         {/if}
         <button 
           on:click={handleSaveCustomRule}
-          class="bg-primary text-background font-bold px-lg py-2 rounded text-xs transition-transform active:scale-95 shadow-lg shadow-primary/10 cursor-pointer border-none"
+          class="bg-primary text-background font-bold px-6 py-2 rounded text-xs transition-transform active:scale-95 shadow-lg shadow-primary/10 cursor-pointer border-none"
         >
           {editingRuleId ? 'Apply Updates' : 'Compile & Add Rule'}
         </button>
@@ -600,17 +600,17 @@
     </div>
 
     <!-- Simulation Sandbox -->
-    <div class="glass-card rounded-xl p-md border border-outline-variant/60">
-      <div class="flex items-center gap-sm mb-md pb-xs border-b border-outline-variant/30">
+    <div class="glass-card rounded-xl p-4 border border-outline-variant/60">
+      <div class="flex items-center gap-2 mb-4 pb-1 border-b border-outline-variant/30">
         <span class="material-symbols-outlined text-primary text-md">science</span>
         <h4 class="font-bold text-sm tracking-tight text-on-surface">SIMULATION SANDBOX</h4>
       </div>
-      <div class="space-y-md">
+      <div class="space-y-4">
         <p class="text-[11px] text-on-surface-variant">Test payloads or paths against active modules and custom rules instantly:</p>
         
         <div class="relative">
           <textarea 
-            class="w-full bg-[#040508] border border-outline-variant rounded p-sm text-xs font-mono text-on-surface focus:border-primary outline-none h-20 resize-none" 
+            class="w-full bg-[#040508] border border-outline-variant rounded p-3 text-xs font-mono text-on-surface focus:border-primary outline-none h-20 resize-none" 
             placeholder="Paste malicious payload or URL here (e.g. /wp-admin or ' OR 1=1)..."
             bind:value={testPayload}
           ></textarea>
@@ -625,14 +625,14 @@
         </div>
 
         {#if simulationResult.status === 'testing'}
-          <div class="flex items-center justify-center p-sm rounded bg-surface-container/30 border border-outline-variant">
-            <span class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-sm"></span>
+          <div class="flex items-center justify-center p-3 rounded bg-surface-container/30 border border-outline-variant">
+            <span class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2"></span>
             <span class="text-xs font-mono text-outline">Simulating enforcements...</span>
           </div>
         {:else}
           {#if simulationResult.status === 'triggered'}
-            <div class="flex items-center justify-between p-sm rounded bg-error/10 border border-error/20">
-              <div class="flex items-center gap-sm">
+            <div class="flex items-center justify-between p-3 rounded bg-error/10 border border-error/20">
+              <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-error text-md">dangerous</span>
                 <span class="text-xs font-bold text-error">DETECTION TRIGGERED</span>
               </div>
@@ -641,8 +641,8 @@
               </span>
             </div>
           {:else if simulationResult.status === 'passed'}
-            <div class="flex items-center justify-between p-sm rounded bg-primary/10 border border-primary/20">
-              <div class="flex items-center gap-sm">
+            <div class="flex items-center justify-between p-3 rounded bg-primary/10 border border-primary/20">
+              <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-primary text-md">check_circle</span>
                 <span class="text-xs font-bold text-primary font-mono">REQUEST CLEARED</span>
               </div>
