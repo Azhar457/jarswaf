@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable } from "svelte/store";
 
 export interface WafLog {
   timestamp: string;
@@ -52,11 +52,11 @@ export interface RateLimitPolicy {
   description: string;
 }
 
-export const connectionStatus = writable<'connecting' | 'online' | 'offline'>('connecting');
+export const connectionStatus = writable<"connecting" | "online" | "offline">("connecting");
 export const logs = writable<WafLog[]>([]);
 export const latestLog = writable<WafLog | null>(null);
 export const stats = writable<Stats>({ total_requests: 0, blocked: 0, rate_limited: 0 });
-export const dbSize = writable<string>('0.0 KB');
+export const dbSize = writable<string>("0.0 KB");
 export const vhostsCount = writable<number>(0);
 export const agents = writable<AgentInfo[]>([]);
 export const vhostsList = writable<VHost[]>([]);
@@ -74,33 +74,33 @@ export function initGlobalStore(controllerUrl: string) {
 
   // Fetch initial REST data
   fetch(`${controllerUrl}/api/v1/agents`)
-    .then(res => res.json())
-    .then(data => agents.set(data))
+    .then((res) => res.json())
+    .then((data) => agents.set(data))
     .catch(console.error);
 
   fetch(`${controllerUrl}/api/v1/vhosts`)
-    .then(res => res.json())
-    .then(data => {
+    .then((res) => res.json())
+    .then((data) => {
       vhostsList.set(data);
       vhostsCount.set(data.length);
     })
     .catch(console.error);
 
   fetch(`${controllerUrl}/api/v1/rate-limits`)
-    .then(res => res.json())
-    .then(data => rateLimits.set(data))
+    .then((res) => res.json())
+    .then((data) => rateLimits.set(data))
     .catch(console.error);
 
   const connectWs = () => {
-    const wsUrl = controllerUrl.replace(/^http/, 'ws') + '/ws/dashboard';
+    const wsUrl = controllerUrl.replace(/^http/, "ws") + "/ws/dashboard";
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      connectionStatus.set('online');
+      connectionStatus.set("online");
     };
 
     ws.onclose = () => {
-      connectionStatus.set('offline');
+      connectionStatus.set("offline");
       ws = null;
       if (!reconnectTimer) {
         reconnectTimer = setTimeout(() => {
@@ -117,15 +117,15 @@ export function initGlobalStore(controllerUrl: string) {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'log') {
+        if (data.type === "log") {
           data.expanded = false;
           incomingQueue.push(data);
           latestLog.set(data);
-        } else if (data.type === 'stats') {
+        } else if (data.type === "stats") {
           stats.set({
             total_requests: data.total_requests,
             blocked: data.blocked,
-            rate_limited: data.rate_limited
+            rate_limited: data.rate_limited,
           });
         }
       } catch (e) {
@@ -138,7 +138,7 @@ export function initGlobalStore(controllerUrl: string) {
 
   flushInterval = setInterval(() => {
     if (incomingQueue.length > 0) {
-      logs.update(currentLogs => {
+      logs.update((currentLogs) => {
         const newLogs = [...incomingQueue.reverse(), ...currentLogs];
         return newLogs.slice(0, 500); // retain 500 max
       });

@@ -2,38 +2,39 @@ mod config;
 mod logging;
 mod proxy;
 pub mod rules;
-pub mod vhost;
 pub mod tls;
+pub mod vhost;
 pub mod xdp;
 
+use axum::response::sse::{Event, Sse};
 use axum::{
     body::Body,
-    extract::{Host, State, ws::{WebSocketUpgrade, WebSocket}},
+    extract::{
+        ws::{WebSocket, WebSocketUpgrade},
+        Host, State,
+    },
     http::{Request, StatusCode},
-    response::{Response, IntoResponse},
-    routing::{any, get, post},
-    Router,
-    Json,
+    response::{IntoResponse, Response},
+    routing::{any, delete, get, post},
+    Json, Router,
 };
-use std::net::SocketAddr;
-use tracing::info;
 use clap::{Parser, Subcommand};
-use tower_http::cors::{Any, CorsLayer};
-use tokio::sync::broadcast;
-use tokio_stream::StreamExt;
-use sysinfo::{System, Networks, Disks};
-use std::convert::Infallible;
-use axum::response::sse::{Event, Sse};
-use tokio_stream::wrappers::BroadcastStream;
 use once_cell::sync::Lazy;
+use std::convert::Infallible;
+use std::net::SocketAddr;
+use sysinfo::{Disks, Networks, System};
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
+use tower_http::cors::{Any, CorsLayer};
+use tracing::info;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 // Global XDP Manager
-pub static XDP_MANAGER: Lazy<Arc<tokio::sync::Mutex<xdp::XdpManager>>> = Lazy::new(|| {
-    Arc::new(tokio::sync::Mutex::new(xdp::XdpManager::new()))
-});
+pub static XDP_MANAGER: Lazy<Arc<tokio::sync::Mutex<xdp::XdpManager>>> =
+    Lazy::new(|| Arc::new(tokio::sync::Mutex::new(xdp::XdpManager::new())));
 
 #[derive(Parser, Debug)]
 #[command(name = "aegis-waf")]
@@ -121,7 +122,8 @@ fn get_docker_services() -> Vec<DiscoveredService> {
     let mut services = Vec::new();
     if let Ok(output) = std::process::Command::new("docker")
         .args(&["ps", "--format", "{{json .}}"])
-        .output() {
+        .output()
+    {
         if output.status.success() {
             let out_str = String::from_utf8_lossy(&output.stdout);
             for line in out_str.lines() {
@@ -133,7 +135,8 @@ fn get_docker_services() -> Vec<DiscoveredService> {
                                 if let Some(idx) = ports_str.find("->") {
                                     let before_arrow = &ports_str[..idx];
                                     if let Some(colon_idx) = before_arrow.rfind(':') {
-                                        if let Ok(p) = before_arrow[colon_idx + 1..].parse::<u16>() {
+                                        if let Ok(p) = before_arrow[colon_idx + 1..].parse::<u16>()
+                                        {
                                             public_port = p;
                                         }
                                     }
@@ -169,11 +172,11 @@ fn get_hostname() -> String {
 
 pub fn is_local_ip(ip: &std::net::IpAddr) -> bool {
     match ip {
-        std::net::IpAddr::V4(ipv4) => {
-            ipv4.is_loopback() || ipv4.is_private()
-        }
+        std::net::IpAddr::V4(ipv4) => ipv4.is_loopback() || ipv4.is_private(),
         std::net::IpAddr::V6(ipv6) => {
-            ipv6.is_loopback() || (ipv6.segments()[0] & 0xff00) == 0xfd00 || (ipv6.segments()[0] & 0xfe00) == 0xfc00
+            ipv6.is_loopback()
+                || (ipv6.segments()[0] & 0xff00) == 0xfd00
+                || (ipv6.segments()[0] & 0xfe00) == 0xfc00
         }
     }
 }
@@ -192,13 +195,14 @@ fn drop_privileges() {
 #[tokio::main]
 async fn main() {
     // Init tracing
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     let cli = Cli::parse();
 
-    match cli.command.unwrap_or(Commands::Agent { controller: None, token: None }) {
+    match cli.command.unwrap_or(Commands::Agent {
+        controller: None,
+        token: None,
+    }) {
         Commands::Agent { controller, token } => {
             run_agent(&cli.config, controller, token).await;
         }
@@ -217,8 +221,11 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
     rules::start_rate_limiter_cleanup();
 
     // Setup logging
-    let clickhouse_url = std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://localhost:8123".to_string());
-    logging::init_db(&clickhouse_url).await.expect("Failed to init ClickHouse DB");
+    let clickhouse_url =
+        std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://localhost:8123".to_string());
+    logging::init_db(&clickhouse_url)
+        .await
+        .expect("Failed to init ClickHouse DB");
 
     // Initialize MPSC Channel for logs
     let (log_tx, log_rx) = tokio::sync::mpsc::channel::<logging::WafLogEntry>(10000);
@@ -238,7 +245,7 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
         let mut last_modified = std::fs::metadata(&config_path_clone)
             .and_then(|m| m.modified())
             .unwrap_or_else(|_| std::time::SystemTime::now());
-        
+
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             if let Ok(metadata) = std::fs::metadata(&config_path_clone) {
@@ -249,11 +256,18 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                             Ok(new_cfg) => {
                                 if let Ok(mut lock) = config_arc_clone.write() {
                                     *lock = new_cfg;
-                                    info!("Configuration reloaded successfully from {}", config_path_clone);
+                                    info!(
+                                        "Configuration reloaded successfully from {}",
+                                        config_path_clone
+                                    );
                                 }
                             }
                             Err(e) => {
-                                tracing::error!("Failed to reload config from {}: {:?}", config_path_clone, e);
+                                tracing::error!(
+                                    "Failed to reload config from {}: {:?}",
+                                    config_path_clone,
+                                    e
+                                );
                             }
                         }
                     }
@@ -263,7 +277,10 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
     });
 
     if let Some(ctrl) = &controller {
-        info!("Running in distributed Agent mode. Connecting to Controller at {}...", ctrl);
+        info!(
+            "Running in distributed Agent mode. Connecting to Controller at {}...",
+            ctrl
+        );
         if token.is_some() {
             info!("Using registration token: [REDACTED]");
         }
@@ -277,7 +294,7 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
             let mut sys = System::new_all();
             sys.refresh_cpu();
             sys.refresh_memory();
-            
+
             // Sleep briefly to let CPU metrics gather
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
@@ -285,7 +302,7 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                 sys.refresh_cpu();
                 sys.refresh_memory();
                 let cpu = sys.global_cpu_info().cpu_usage();
-                
+
                 let total_mem = sys.total_memory();
                 let used_mem = sys.used_memory();
                 let ram = if total_mem > 0 {
@@ -319,11 +336,17 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                     discovered_services: get_docker_services(),
                 };
 
-                let url = format!("{}/api/v1/agents/metrics", ctrl_url_metrics.trim_end_matches('/'));
+                let url = format!(
+                    "{}/api/v1/agents/metrics",
+                    ctrl_url_metrics.trim_end_matches('/')
+                );
                 match client.post(&url).json(&payload).send().await {
                     Ok(resp) => {
                         if !resp.status().is_success() {
-                            tracing::warn!("Controller metrics endpoint returned error: {}", resp.status());
+                            tracing::warn!(
+                                "Controller metrics endpoint returned error: {}",
+                                resp.status()
+                            );
                         }
                     }
                     Err(e) => {
@@ -343,7 +366,7 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                 let ws_url = format!("{}/ws/agent", ctrl_url_ws.trim_end_matches('/'))
                     .replace("http://", "ws://")
                     .replace("https://", "wss://");
-                
+
                 info!("Connecting to Controller config WebSocket at {}...", ws_url);
                 match tokio_tungstenite::connect_async(&ws_url).await {
                     Ok((mut ws_stream, _)) => {
@@ -351,7 +374,9 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                         while let Some(msg) = ws_stream.next().await {
                             match msg {
                                 Ok(tokio_tungstenite::tungstenite::Message::Text(text)) => {
-                                    if let Ok(new_cfg) = serde_json::from_str::<config::Config>(&text) {
+                                    if let Ok(new_cfg) =
+                                        serde_json::from_str::<config::Config>(&text)
+                                    {
                                         if let Ok(mut lock) = config_arc_ws.write() {
                                             *lock = new_cfg;
                                             info!("Dynamic configuration updated via Controller WebSocket push");
@@ -383,22 +408,29 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
 
     // Build application state
     let blocklist = Arc::new(std::sync::RwLock::new(std::collections::HashSet::new()));
+    let http_client =
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+            .build_http();
     let state = AppState {
         config: config_arc.clone(),
         log_tx,
         blocklist: blocklist.clone(),
+        http_client,
     };
 
     // Spawn background threat intelligence / reputation blocklist sync task
     let blocklist_clone = blocklist.clone();
     let controller_url_clone = controller.clone();
-    
+
     tokio::spawn(async move {
         let client = crate::logging::build_client();
         loop {
             if let Some(ctrl_url) = &controller_url_clone {
                 // Agent Mode: Fetch blocklist from Controller
-                let url = format!("{}/api/v1/reputation/blocklist", ctrl_url.trim_end_matches('/'));
+                let url = format!(
+                    "{}/api/v1/reputation/blocklist",
+                    ctrl_url.trim_end_matches('/')
+                );
                 match client.get(&url).send().await {
                     Ok(resp) => {
                         if resp.status().is_success() {
@@ -413,23 +445,34 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                                 }
                                 if let Ok(mut lock) = blocklist_clone.write() {
                                     *lock = new_blocklist;
-                                    tracing::debug!("Reputation blocklist synced. Active blocked IPs: {}", lock.len());
+                                    tracing::debug!(
+                                        "Reputation blocklist synced. Active blocked IPs: {}",
+                                        lock.len()
+                                    );
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        tracing::error!("Error syncing reputation blocklist from controller: {}", e);
+                        tracing::error!(
+                            "Error syncing reputation blocklist from controller: {}",
+                            e
+                        );
                     }
                 }
             } else {
                 // Standalone Mode: Query ClickHouse
-                let clickhouse_url_local = std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://localhost:8123".to_string());
+                let clickhouse_url_local = std::env::var("CLICKHOUSE_URL")
+                    .unwrap_or_else(|_| "http://localhost:8123".to_string());
                 let blocklist_standalone = blocklist_clone.clone();
                 let client_clone = client.clone();
-                
+
                 let query = "SELECT client_ip FROM request_log WHERE action = 'BLOCK' AND timestamp > now() - INTERVAL 5 MINUTE GROUP BY client_ip HAVING count() >= 5 FORMAT TSV";
-                let url = format!("{}/?query={}", clickhouse_url_local.trim_end_matches('/'), urlencoding::encode(query));
+                let url = format!(
+                    "{}/?query={}",
+                    clickhouse_url_local.trim_end_matches('/'),
+                    urlencoding::encode(query)
+                );
                 if let Ok(resp) = client_clone.get(&url).send().await {
                     if let Ok(text) = resp.text().await {
                         let mut ips = std::collections::HashSet::new();
@@ -447,7 +490,11 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                 }
             }
 
-            let sleep_secs = if controller_url_clone.is_some() { 10 } else { 60 };
+            let sleep_secs = if controller_url_clone.is_some() {
+                10
+            } else {
+                60
+            };
             tokio::time::sleep(tokio::time::Duration::from_secs(sleep_secs)).await;
         }
     });
@@ -474,7 +521,8 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
 
             let domain = {
                 let lock = config_arc_tls.read().unwrap();
-                lock.vhosts.first()
+                lock.vhosts
+                    .first()
                     .and_then(|v| v.hosts.first())
                     .map(|h| h.clone())
                     .unwrap_or_else(|| "localhost".to_string())
@@ -490,16 +538,17 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
 
             let rustls_config = match rustls::ServerConfig::builder()
                 .with_no_client_auth()
-                .with_single_cert(certs, key) {
-                    Ok(mut config) => {
-                        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-                        std::sync::Arc::new(config)
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to build ServerConfig: {}", e);
-                        return;
-                    }
-                };
+                .with_single_cert(certs, key)
+            {
+                Ok(mut config) => {
+                    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+                    std::sync::Arc::new(config)
+                }
+                Err(e) => {
+                    tracing::error!("Failed to build ServerConfig: {}", e);
+                    return;
+                }
+            };
 
             let acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
             let https_addr = SocketAddr::from(([0, 0, 0, 0], port_https));
@@ -511,7 +560,10 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                 }
             };
 
-            info!("Aegis Agent WAF listening on https://{} (HTTPS)", https_addr);
+            info!(
+                "Aegis Agent WAF listening on https://{} (HTTPS)",
+                https_addr
+            );
 
             let service = app_tls.into_make_service_with_connect_info::<SocketAddr>();
             loop {
@@ -534,14 +586,17 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                     use hyper_util::rt::TokioIo;
                     use tower::Service;
                     let io = TokioIo::new(tls_stream);
-                    let builder = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+                    let builder = hyper_util::server::conn::auto::Builder::new(
+                        hyper_util::rt::TokioExecutor::new(),
+                    );
 
                     let route_service = match service_clone.call(peer_addr).await {
                         Ok(s) => s,
                         Err(_) => return,
                     };
 
-                    let hyper_service = hyper_util::service::TowerToHyperService::new(route_service);
+                    let hyper_service =
+                        hyper_util::service::TowerToHyperService::new(route_service);
 
                     if let Err(err) = builder.serve_connection(io, hyper_service).await {
                         tracing::error!("Error serving TLS connection: {:?}", err);
@@ -553,7 +608,12 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
         tokio::spawn(async move {
             let domains: Vec<String> = {
                 let lock = config_arc_tls.read().unwrap();
-                let mut doms: Vec<String> = lock.vhosts.iter().flat_map(|v| v.hosts.clone()).filter(|h| !h.contains("*")).collect();
+                let mut doms: Vec<String> = lock
+                    .vhosts
+                    .iter()
+                    .flat_map(|v| v.hosts.clone())
+                    .filter(|h| !h.contains("*"))
+                    .collect();
                 for cert in &lock.certificates {
                     if !doms.contains(&cert.domain) {
                         doms.push(cert.domain.clone());
@@ -564,7 +624,10 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
 
             let email = {
                 let lock = config_arc_tls.read().unwrap();
-                lock.certificates.first().map(|c| c.email.clone()).unwrap_or_else(|| "admin@aegiswaf.local".to_string())
+                lock.certificates
+                    .first()
+                    .map(|c| c.email.clone())
+                    .unwrap_or_else(|| "admin@aegiswaf.local".to_string())
             };
 
             if domains.is_empty() {
@@ -572,9 +635,11 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                 return;
             }
 
+            let cert_dir: &'static std::path::Path =
+                Box::leak(std::path::PathBuf::from(tls_cfg.cert_dir.clone()).into_boxed_path());
             let mut acme_state = rustls_acme::AcmeConfig::new(domains)
                 .contact([format!("mailto:{}", email)])
-                .cache(rustls_acme::caches::DirCache::new(&tls_cfg.cert_dir))
+                .cache(rustls_acme::caches::DirCache::new(cert_dir))
                 .directory_lets_encrypt(false) // use staging by default to avoid rate limits during demo
                 .state();
 
@@ -593,7 +658,10 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                 }
             };
 
-            info!("Aegis Agent WAF listening on https://{} (ACME TLS)", https_addr);
+            info!(
+                "Aegis Agent WAF listening on https://{} (ACME TLS)",
+                https_addr
+            );
 
             // Spawn ACME worker task
             tokio::spawn(async move {
@@ -628,14 +696,17 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                     use hyper_util::rt::TokioIo;
                     use tower::Service;
                     let io = TokioIo::new(tls_stream);
-                    let builder = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+                    let builder = hyper_util::server::conn::auto::Builder::new(
+                        hyper_util::rt::TokioExecutor::new(),
+                    );
 
                     let route_service = match service_clone.call(peer_addr).await {
                         Ok(s) => s,
                         Err(_) => return,
                     };
 
-                    let hyper_service = hyper_util::service::TowerToHyperService::new(route_service);
+                    let hyper_service =
+                        hyper_util::service::TowerToHyperService::new(route_service);
 
                     if let Err(err) = builder.serve_connection(io, hyper_service).await {
                         tracing::error!("Error serving ACME TLS connection: {:?}", err);
@@ -660,7 +731,12 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
         drop_privileges();
     }
 
-    axum::serve(http_listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+    axum::serve(
+        http_listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 #[derive(Clone)]
@@ -680,8 +756,11 @@ struct ControllerState {
 async fn run_controller(port: u16, config_path: String) {
     info!("Starting Aegis WAF Controller on port {}...", port);
 
-    let clickhouse_url = std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://localhost:8123".to_string());
-    logging::init_db(&clickhouse_url).await.expect("Failed to initialize ClickHouse DB");
+    let clickhouse_url =
+        std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://localhost:8123".to_string());
+    logging::init_db(&clickhouse_url)
+        .await
+        .expect("Failed to initialize ClickHouse DB");
 
     // Initialize broadcast channel for live logs
     let (tx, _rx) = broadcast::channel(10000);
@@ -689,11 +768,13 @@ async fn run_controller(port: u16, config_path: String) {
 
     // App state
     let clickhouse_url_baseline = clickhouse_url.clone();
-    let initial_stats = logging::get_stats(&clickhouse_url_baseline, 24).await.unwrap_or(logging::Stats {
-        total_requests: 0,
-        blocked: 0,
-        rate_limited: 0,
-    });
+    let initial_stats = logging::get_stats(&clickhouse_url_baseline, 24)
+        .await
+        .unwrap_or(logging::Stats {
+            total_requests: 0,
+            blocked: 0,
+            rate_limited: 0,
+        });
     info!(
         "Loaded baseline stats from ClickHouse: total={}, blocked={}, rate_limited={}",
         initial_stats.total_requests, initial_stats.blocked, initial_stats.rate_limited
@@ -724,20 +805,38 @@ async fn run_controller(port: u16, config_path: String) {
         .route("/api/v1/agents/register", post(register_agent_handler))
         .route("/api/v1/agents/metrics", post(receive_metrics_handler))
         .route("/api/v1/agents", get(get_agents_handler))
-        .route("/api/v1/rate-limits", get(get_ratelimits_handler).post(post_ratelimits_handler))
+        .route(
+            "/api/v1/rate-limits",
+            get(get_ratelimits_handler).post(post_ratelimits_handler),
+        )
         .route("/api/v1/logs", post(receive_logs_handler))
         .route("/api/v1/logs/stream", get(sse_handler))
         .route("/api/v1/logs", get(get_logs_handler))
         .route("/api/v1/logs/db_size", get(get_db_size_handler))
         .route("/api/v1/logs/export", get(export_logs_handler))
         .route("/api/v1/logs/clear", post(clear_logs_handler))
-        .route("/api/v1/config", get(get_config_handler).post(post_config_handler))
-        .route("/api/v1/vhosts", get(get_vhosts_handler).post(post_vhosts_handler))
+        .route(
+            "/api/v1/config",
+            get(get_config_handler).post(post_config_handler),
+        )
+        .route(
+            "/api/v1/vhosts",
+            get(get_vhosts_handler).post(post_vhosts_handler),
+        )
         .route("/api/v1/stats", get(get_stats_handler))
         .route("/api/v1/reputation/blocklist", get(get_blocklist_handler))
-        .route("/api/v1/threat-intel/events", get(get_threat_intel_events_handler))
-        .route("/api/v1/ssl/certificates", get(get_ssl_certificates_handler).post(post_ssl_certificate_handler))
-        .route("/api/v1/ssl/certificates/:domain", delete(delete_ssl_certificate_handler))
+        .route(
+            "/api/v1/threat-intel/events",
+            get(get_threat_intel_events_handler),
+        )
+        .route(
+            "/api/v1/ssl/certificates",
+            get(get_ssl_certificates_handler).post(post_ssl_certificate_handler),
+        )
+        .route(
+            "/api/v1/ssl/certificates/:domain",
+            delete(delete_ssl_certificate_handler),
+        )
         .route("/api/v1/ssl/renew", post(post_ssl_renew_handler))
         .route("/ws/dashboard", get(ws_dashboard_handler))
         .route("/ws/agent", get(ws_agent_handler))
@@ -750,9 +849,17 @@ async fn run_controller(port: u16, config_path: String) {
         .await
         .expect("Cannot bind Controller port");
 
-    info!("Aegis Controller API & Dashboard available at http://{}", addr);
+    info!(
+        "Aegis Controller API & Dashboard available at http://{}",
+        addr
+    );
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 #[derive(serde::Deserialize)]
@@ -779,10 +886,11 @@ async fn serve_install_script(
     State(_state): State<ControllerState>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
-    let controller_ip = std::env::var("CONTROLLER_URL")
-        .unwrap_or_else(|_| format!("http://{}:8080", addr.ip()));
+    let controller_ip =
+        std::env::var("CONTROLLER_URL").unwrap_or_else(|_| format!("http://{}:8080", addr.ip()));
 
-    let script = format!(r#"#!/bin/bash
+    let script = format!(
+        r#"#!/bin/bash
 set -e
 echo "🛡️ Installing Aegis WAF Agent..."
 CONTROLLER_URL="${{CONTROLLER_IP:-{controller_ip}}}"
@@ -806,7 +914,8 @@ EOF
 
 systemctl daemon-reload
 echo "✅ Aegis Agent installation script configuration completed."
-"#);
+"#
+    );
 
     (
         StatusCode::OK,
@@ -820,8 +929,11 @@ async fn register_agent_handler(
     State(state): State<ControllerState>,
     Json(payload): Json<AgentRegisterRequest>,
 ) -> impl IntoResponse {
-    info!("Registered agent: {} at {}:{} running {}", payload.hostname, payload.ip, payload.port, payload.os);
-    
+    info!(
+        "Registered agent: {} at {}:{} running {}",
+        payload.hostname, payload.ip, payload.port, payload.os
+    );
+
     let info = AgentInfo {
         hostname: payload.hostname.clone(),
         ip: payload.ip.clone(),
@@ -835,11 +947,11 @@ async fn register_agent_handler(
         discovered_services: vec![],
         last_seen: std::time::Instant::now(),
     };
-    
+
     if let Ok(mut lock) = state.agent_registry.write() {
         lock.insert(payload.hostname, info);
     }
-    
+
     StatusCode::CREATED
 }
 
@@ -850,9 +962,9 @@ async fn receive_metrics_handler(
 ) -> impl IntoResponse {
     let client_ip = addr.ip().to_string();
     payload.ip = client_ip.clone();
-    
+
     let uptime_str = format_uptime(payload.uptime);
-    
+
     let info = AgentInfo {
         hostname: payload.hostname.clone(),
         ip: client_ip,
@@ -866,11 +978,11 @@ async fn receive_metrics_handler(
         discovered_services: payload.discovered_services.clone(),
         last_seen: std::time::Instant::now(),
     };
-    
+
     if let Ok(mut lock) = state.agent_registry.write() {
         lock.insert(payload.hostname, info);
     }
-    
+
     StatusCode::OK
 }
 
@@ -897,7 +1009,11 @@ async fn get_ratelimits_handler(State(state): State<ControllerState>) -> impl In
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<config::RateLimitPolicy>::new())).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(Vec::<config::RateLimitPolicy>::new()),
+            )
+                .into_response();
         }
     };
 
@@ -958,19 +1074,30 @@ async fn post_ratelimits_handler(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to serialize updated config to TOML: {:?}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize config").into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to serialize config",
+            )
+                .into_response();
         }
     };
 
     match std::fs::write(&state.config_path, toml_str) {
         Ok(_) => {
-            info!("Rate limiting policies updated successfully in {}", state.config_path);
+            info!(
+                "Rate limiting policies updated successfully in {}",
+                state.config_path
+            );
             let _ = state.config_tx.send(cfg);
             StatusCode::OK.into_response()
         }
         Err(e) => {
             tracing::error!("Failed to write updated config to disk: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to write config file").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to write config file",
+            )
+                .into_response()
         }
     }
 }
@@ -987,8 +1114,12 @@ async fn post_config_handler(
     State(state): State<ControllerState>,
     Json(payload): Json<ConfigPayload>,
 ) -> impl IntoResponse {
-    state.logging_enabled.store(payload.logging_enabled, Ordering::Relaxed);
-    state.log_size_limit_mb.store(payload.log_limit_mb, Ordering::Relaxed);
+    state
+        .logging_enabled
+        .store(payload.logging_enabled, Ordering::Relaxed);
+    state
+        .log_size_limit_mb
+        .store(payload.log_limit_mb, Ordering::Relaxed);
     StatusCode::OK
 }
 
@@ -1008,8 +1139,16 @@ async fn get_vhosts_handler(State(state): State<ControllerState>) -> impl IntoRe
             hosts: vec!["*.aegiswaf.demo".to_string()],
             backend: "127.0.0.1:8080".to_string(),
             rate_limit_tiers: vec![],
-            logging: Some(config::LoggingConfig { enabled: true, db_path: "logs/aegis-waf.db".to_string() }),
-            rules: vec!["SQLI-*".to_string(), "XSS-*".to_string(), "LFI-*".to_string(), "RFI-*".to_string()],
+            logging: Some(config::LoggingConfig {
+                enabled: true,
+                db_path: "logs/aegis-waf.db".to_string(),
+            }),
+            rules: vec![
+                "SQLI-*".to_string(),
+                "XSS-*".to_string(),
+                "LFI-*".to_string(),
+                "RFI-*".to_string(),
+            ],
             blocked_countries: vec![],
             geoblock_type: "Blocklist".to_string(),
             custom_rules: vec![],
@@ -1046,26 +1185,39 @@ async fn post_vhosts_handler(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to serialize updated config to TOML: {:?}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize config").into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to serialize config",
+            )
+                .into_response();
         }
     };
 
     match std::fs::write(&state.config_path, toml_str) {
         Ok(_) => {
-            info!("Virtual hosts configuration updated successfully in {}", state.config_path);
+            info!(
+                "Virtual hosts configuration updated successfully in {}",
+                state.config_path
+            );
             let _ = state.config_tx.send(cfg);
             StatusCode::OK.into_response()
         }
         Err(e) => {
             tracing::error!("Failed to write updated config to disk: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to write config file").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to write config file",
+            )
+                .into_response()
         }
     }
 }
 
 async fn get_db_size_handler(State(state): State<ControllerState>) -> impl IntoResponse {
-    let size_bytes = logging::get_db_size(&state.clickhouse_url).await.unwrap_or(0);
-    
+    let size_bytes = logging::get_db_size(&state.clickhouse_url)
+        .await
+        .unwrap_or(0);
+
     let formatted = if size_bytes < 1024 {
         format!("{} B", size_bytes)
     } else if size_bytes < 1024 * 1024 {
@@ -1074,13 +1226,23 @@ async fn get_db_size_handler(State(state): State<ControllerState>) -> impl IntoR
         format!("{:.1} MB", size_bytes as f64 / (1024.0 * 1024.0))
     };
 
-    (StatusCode::OK, Json(DbSizeResponse { size_bytes, formatted }))
+    (
+        StatusCode::OK,
+        Json(DbSizeResponse {
+            size_bytes,
+            formatted,
+        }),
+    )
 }
 
 async fn export_logs_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let client = crate::logging::build_client();
     let query = "SELECT * FROM request_log FORMAT TSV";
-    let url = format!("{}/?query={}", state.clickhouse_url.trim_end_matches('/'), urlencoding::encode(query));
+    let url = format!(
+        "{}/?query={}",
+        state.clickhouse_url.trim_end_matches('/'),
+        urlencoding::encode(query)
+    );
     match client.get(&url).send().await {
         Ok(resp) if resp.status().is_success() => {
             if let Ok(content) = resp.text().await {
@@ -1093,14 +1255,22 @@ async fn export_logs_handler(State(state): State<ControllerState>) -> impl IntoR
                 (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read body").into_response()
             }
         }
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to export logs from ClickHouse").into_response(),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to export logs from ClickHouse",
+        )
+            .into_response(),
     }
 }
 
 async fn clear_logs_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let client = crate::logging::build_client();
     let query = "TRUNCATE TABLE request_log";
-    let url = format!("{}/?query={}", state.clickhouse_url.trim_end_matches('/'), urlencoding::encode(query));
+    let url = format!(
+        "{}/?query={}",
+        state.clickhouse_url.trim_end_matches('/'),
+        urlencoding::encode(query)
+    );
     match client.post(&url).send().await {
         Ok(resp) if resp.status().is_success() => {
             state.total_requests.store(0, Ordering::Relaxed);
@@ -1121,19 +1291,10 @@ async fn receive_logs_handler(
         return StatusCode::OK;
     }
 
-    let client = crate::logging::build_client();
-    let mut body = String::new();
     let logs_clone = logs.clone();
-    for entry in &logs_clone {
-        if let Ok(json) = serde_json::to_string(entry) {
-            body.push_str(&json);
-            body.push('\n');
-        }
-    }
-    let url = format!("{}/?query=INSERT INTO request_log FORMAT JSONEachRow", state.clickhouse_url.trim_end_matches('/'));
-    let _ = client.post(&url).body(body).send().await;
+    let clickhouse_url = state.clickhouse_url.clone();
 
-    // Broadcast logs to connected dashboards and update in-memory stats
+    // Broadcast logs to connected dashboards and update in-memory stats immediately (non-blocking)
     let mut new_total = 0;
     let mut new_blocked = 0;
     let mut new_rate_limited = 0;
@@ -1148,7 +1309,28 @@ async fn receive_logs_handler(
     }
     state.total_requests.fetch_add(new_total, Ordering::Relaxed);
     state.blocked.fetch_add(new_blocked, Ordering::Relaxed);
-    state.rate_limited.fetch_add(new_rate_limited, Ordering::Relaxed);
+    state
+        .rate_limited
+        .fetch_add(new_rate_limited, Ordering::Relaxed);
+
+    // Spawn background task to insert logs into ClickHouse asynchronously
+    tokio::spawn(async move {
+        let client = crate::logging::build_client();
+        let mut body = String::new();
+        for entry in &logs_clone {
+            if let Ok(json) = serde_json::to_string(entry) {
+                body.push_str(&json);
+                body.push('\n');
+            }
+        }
+        let url = format!(
+            "{}/?query=INSERT INTO request_log FORMAT JSONEachRow",
+            clickhouse_url.trim_end_matches('/')
+        );
+        if let Err(e) = client.post(&url).body(body).send().await {
+            tracing::error!("Failed to insert logs to ClickHouse asynchronously: {}", e);
+        }
+    });
 
     StatusCode::OK
 }
@@ -1157,26 +1339,24 @@ async fn sse_handler(
     State(state): State<ControllerState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let rx = state.tx.subscribe();
-    let stream = BroadcastStream::new(rx).map(|res| {
-        match res {
-            Ok(log) => {
-                let json = serde_json::to_string(&log).unwrap();
-                Ok(Event::default().data(json))
-            }
-            Err(_) => {
-                Ok(Event::default().comment("lost message"))
-            }
+    let stream = BroadcastStream::new(rx).map(|res| match res {
+        Ok(log) => {
+            let json = serde_json::to_string(&log).unwrap();
+            Ok(Event::default().data(json))
         }
+        Err(_) => Ok(Event::default().comment("lost message")),
     });
     Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
-async fn get_blocklist_handler(
-    State(state): State<ControllerState>,
-) -> impl IntoResponse {
+async fn get_blocklist_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let client = crate::logging::build_client();
     let query = "SELECT client_ip FROM request_log WHERE action = 'BLOCK' AND timestamp > now() - INTERVAL 5 MINUTE GROUP BY client_ip HAVING count() >= 5 FORMAT TSV";
-    let url = format!("{}/?query={}", state.clickhouse_url.trim_end_matches('/'), urlencoding::encode(query));
+    let url = format!(
+        "{}/?query={}",
+        state.clickhouse_url.trim_end_matches('/'),
+        urlencoding::encode(query)
+    );
     if let Ok(resp) = client.get(&url).send().await {
         if let Ok(text) = resp.text().await {
             let mut ips = Vec::new();
@@ -1193,7 +1373,11 @@ async fn get_blocklist_handler(
             return (StatusCode::OK, Json(ips)).into_response();
         }
     }
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<String>::new())).into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(Vec::<String>::new()),
+    )
+        .into_response()
 }
 
 #[derive(serde::Serialize)]
@@ -1223,8 +1407,12 @@ async fn get_threat_intel_events_handler(
 ) -> impl IntoResponse {
     let client = crate::logging::build_client();
     let query = "SELECT timestamp, client_ip, rule_id FROM request_log WHERE action = 'BLOCK' ORDER BY timestamp DESC LIMIT 50 FORMAT JSONEachRow";
-    let url = format!("{}/?query={}", state.clickhouse_url.trim_end_matches('/'), urlencoding::encode(query));
-    
+    let url = format!(
+        "{}/?query={}",
+        state.clickhouse_url.trim_end_matches('/'),
+        urlencoding::encode(query)
+    );
+
     if let Ok(resp) = client.get(&url).send().await {
         if let Ok(text) = resp.text().await {
             let mut events = Vec::new();
@@ -1250,15 +1438,21 @@ async fn get_threat_intel_events_handler(
             return (StatusCode::OK, Json(events)).into_response();
         }
     }
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<ThreatEvent>::new())).into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(Vec::<ThreatEvent>::new()),
+    )
+        .into_response()
 }
 
-async fn get_logs_handler(
-    State(state): State<ControllerState>,
-) -> impl IntoResponse {
+async fn get_logs_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let client = crate::logging::build_client();
     let query = "SELECT timestamp, client_ip, method, path, action, rule_id, reason FROM request_log ORDER BY timestamp DESC LIMIT 100 FORMAT JSONEachRow";
-    let url = format!("{}/?query={}", state.clickhouse_url.trim_end_matches('/'), urlencoding::encode(query));
+    let url = format!(
+        "{}/?query={}",
+        state.clickhouse_url.trim_end_matches('/'),
+        urlencoding::encode(query)
+    );
     if let Ok(resp) = client.get(&url).send().await {
         if let Ok(text) = resp.text().await {
             let mut logs = Vec::new();
@@ -1270,12 +1464,14 @@ async fn get_logs_handler(
             return (StatusCode::OK, Json(logs)).into_response();
         }
     }
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<logging::WafLogEntry>::new())).into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(Vec::<logging::WafLogEntry>::new()),
+    )
+        .into_response()
 }
 
-async fn get_stats_handler(
-    State(state): State<ControllerState>,
-) -> impl IntoResponse {
+async fn get_stats_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let stats = logging::Stats {
         total_requests: state.total_requests.load(Ordering::Relaxed) as i64,
         blocked: state.blocked.load(Ordering::Relaxed) as i64,
@@ -1302,7 +1498,13 @@ struct SslRenewRequest {
 async fn get_ssl_certificates_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let cfg = match config::load_config(&state.config_path) {
         Ok(c) => c,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(Vec::<SslCertResponse>::new())).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(Vec::<SslCertResponse>::new()),
+            )
+                .into_response()
+        }
     };
 
     let mut certs = Vec::new();
@@ -1337,11 +1539,21 @@ async fn post_ssl_certificate_handler(
 ) -> impl IntoResponse {
     let mut cfg = match config::load_config(&state.config_path) {
         Ok(c) => c,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to load config"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "failed to load config"})),
+            )
+                .into_response()
+        }
     };
 
     if cfg.certificates.iter().any(|c| c.domain == payload.domain) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Certificate for domain already exists"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Certificate for domain already exists"})),
+        )
+            .into_response();
     }
 
     cfg.certificates.push(config::CertificateConfig {
@@ -1352,15 +1564,29 @@ async fn post_ssl_certificate_handler(
 
     let toml_str = match toml::to_string(&cfg) {
         Ok(s) => s,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to serialize config"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "failed to serialize config"})),
+            )
+                .into_response()
+        }
     };
 
     if std::fs::write(&state.config_path, toml_str).is_err() {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to write config"}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "failed to write config"})),
+        )
+            .into_response();
     }
 
     let _ = state.config_tx.send(cfg);
-    (StatusCode::OK, Json(serde_json::json!({"status": "success"}))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"status": "success"})),
+    )
+        .into_response()
 }
 
 async fn delete_ssl_certificate_handler(
@@ -1369,34 +1595,61 @@ async fn delete_ssl_certificate_handler(
 ) -> impl IntoResponse {
     let mut cfg = match config::load_config(&state.config_path) {
         Ok(c) => c,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to load config"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "failed to load config"})),
+            )
+                .into_response()
+        }
     };
 
     let initial_len = cfg.certificates.len();
     cfg.certificates.retain(|c| c.domain != domain);
 
     if cfg.certificates.len() == initial_len {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Certificate not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Certificate not found"})),
+        )
+            .into_response();
     }
 
     let toml_str = match toml::to_string(&cfg) {
         Ok(s) => s,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to serialize config"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "failed to serialize config"})),
+            )
+                .into_response()
+        }
     };
 
     if std::fs::write(&state.config_path, toml_str).is_err() {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "failed to write config"}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "failed to write config"})),
+        )
+            .into_response();
     }
 
     let _ = state.config_tx.send(cfg);
-    (StatusCode::OK, Json(serde_json::json!({"status": "success"}))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"status": "success"})),
+    )
+        .into_response()
 }
 
 async fn post_ssl_renew_handler(
     State(_state): State<ControllerState>,
     Json(payload): Json<SslRenewRequest>,
 ) -> impl IntoResponse {
-    tracing::info!("Force ACME SSL renew requested for domain: {}", payload.domain);
+    tracing::info!(
+        "Force ACME SSL renew requested for domain: {}",
+        payload.domain
+    );
     // Real ACME renew would happen here. For now, acknowledge the command.
     (StatusCode::OK, Json(serde_json::json!({"status": "success", "message": format!("ACME Challenge initiated for {}", payload.domain)}))).into_response()
 }
@@ -1467,7 +1720,11 @@ async fn handle_agent_socket(mut socket: WebSocket, state: ControllerState) {
         Err(_) => return,
     };
     if let Ok(json) = serde_json::to_string(&initial_cfg) {
-        if socket.send(axum::extract::ws::Message::Text(json)).await.is_err() {
+        if socket
+            .send(axum::extract::ws::Message::Text(json))
+            .await
+            .is_err()
+        {
             return;
         }
     }
@@ -1498,6 +1755,10 @@ pub struct AppState {
     pub config: Arc<std::sync::RwLock<config::Config>>,
     pub log_tx: tokio::sync::mpsc::Sender<logging::WafLogEntry>,
     pub blocklist: Arc<std::sync::RwLock<std::collections::HashSet<std::net::IpAddr>>>,
+    pub http_client: hyper_util::client::legacy::Client<
+        hyper_util::client::legacy::connect::HttpConnector,
+        axum::body::Body,
+    >,
 }
 
 // Main request handler for Agent

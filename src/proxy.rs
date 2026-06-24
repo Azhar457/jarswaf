@@ -294,7 +294,7 @@ pub async fn forward_request(
     }
 
     // Forward ke backend
-    let client = Client::builder(hyper_util::rt::TokioExecutor::new()).build_http();
+    let client = state.http_client.clone();
     let backend_addr_parsed = backend_addr.parse::<SocketAddr>().expect("Invalid backend address");
     let uri = format!("http://{}{}", backend_addr_parsed, path_and_query);
 

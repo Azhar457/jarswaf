@@ -1,10 +1,10 @@
 <script lang="ts">
-  import Card from './Card.svelte';
-  
+  import Card from "./Card.svelte";
+
   export let title: string;
   export let value: string | number;
-  export let iconColor: string = 'text-blue-500';
-  export let className: string = '';
+  export let iconColor: string = "text-blue-500";
+  export let className: string = "";
 </script>
 
 <Card className={`flex items-center p-6 ${className}`}>

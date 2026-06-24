@@ -1,6 +1,6 @@
 <script lang="ts">
   export let columns: string[];
-  export let className: string = '';
+  export let className: string = "";
 </script>
 
 <div class={`overflow-x-auto ${className}`}>

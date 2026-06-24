@@ -16,15 +16,16 @@
     CheckCircle,
     AlertTriangle,
   } from "lucide-svelte";
-  import { vhostsList } from '../lib/stores';
-  import { toast } from '../lib/toast';
-  import Card from '../components/ui/Card.svelte';
-  import Badge from '../components/ui/Badge.svelte';
-  import DataTable from '../components/ui/DataTable.svelte';
-  import ConfirmationModal from '../components/ui/ConfirmationModal.svelte';
-  import PresetDetailsModal from '../components/ui/PresetDetailsModal.svelte';
+  import { vhostsList } from "../lib/stores";
+  import { toast } from "../lib/toast";
+  import Card from "../components/ui/Card.svelte";
+  import Badge from "../components/ui/Badge.svelte";
+  import DataTable from "../components/ui/DataTable.svelte";
+  import ConfirmationModal from "../components/ui/ConfirmationModal.svelte";
+  import PresetDetailsModal from "../components/ui/PresetDetailsModal.svelte";
 
-  const controllerUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080';
+  const controllerUrl =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
 
   let selectedVhostIndex = 0;
 
@@ -135,13 +136,11 @@
 
     if (checked) {
       if (!activeRules.includes(pattern)) activeRules.push(pattern);
-      if (pattern === "LFI-*" && !activeRules.includes("RFI-*"))
-        activeRules.push("RFI-*");
+      if (pattern === "LFI-*" && !activeRules.includes("RFI-*")) activeRules.push("RFI-*");
       toast.info(`Module enabled: ${pattern}`);
     } else {
       activeRules = activeRules.filter((r) => r !== pattern);
-      if (pattern === "LFI-*")
-        activeRules = activeRules.filter((r) => r !== "RFI-*");
+      if (pattern === "LFI-*") activeRules = activeRules.filter((r) => r !== "RFI-*");
       toast.warning(`Module disabled: ${pattern}`);
     }
 
@@ -155,7 +154,9 @@
     showPresetModal = true;
   }
 
-  async function handleToggleGranularRule(event: CustomEvent<{ ruleId: string; enabled: boolean }>) {
+  async function handleToggleGranularRule(
+    event: CustomEvent<{ ruleId: string; enabled: boolean }>,
+  ) {
     if (!selectedPreset) return;
     const { ruleId, enabled } = event.detail;
     const host = $vhostsList[selectedVhostIndex];
@@ -164,23 +165,25 @@
     // If wildcard is active and we are disabling a single rule
     if (activeRules.includes(selectedPreset.rule_pattern)) {
       if (!enabled) {
-        activeRules = activeRules.filter(r => r !== selectedPreset.rule_pattern);
+        activeRules = activeRules.filter((r) => r !== selectedPreset.rule_pattern);
         selectedPreset.rules.forEach((r: any) => {
           if (r.id !== ruleId && !activeRules.includes(r.id)) {
             activeRules.push(r.id);
           }
         });
-        toast.info(`Converted ${selectedPreset.rule_pattern} to granular rules. Disabled ${ruleId}.`);
+        toast.info(
+          `Converted ${selectedPreset.rule_pattern} to granular rules. Disabled ${ruleId}.`,
+        );
       }
     } else {
       if (enabled) {
         if (!activeRules.includes(ruleId)) activeRules.push(ruleId);
         toast.success(`Enabled signature ${ruleId}`);
       } else {
-        activeRules = activeRules.filter(r => r !== ruleId);
+        activeRules = activeRules.filter((r) => r !== ruleId);
         toast.warning(`Disabled signature ${ruleId}`);
       }
-      
+
       const allEnabled = selectedPreset.rules.every((r: any) => activeRules.includes(r.id));
       if (allEnabled) {
         selectedPreset.rules.forEach((r: any) => {
@@ -198,8 +201,7 @@
 
   function displayCondition(rule: any): string {
     let field = rule.condition_type;
-    if (field.startsWith("header:"))
-      field = `Header [${field.substring(7).toUpperCase()}]`;
+    if (field.startsWith("header:")) field = `Header [${field.substring(7).toUpperCase()}]`;
     else field = field.toUpperCase();
     let op =
       rule.operator === "equals"
@@ -213,17 +215,17 @@
   async function toggleCustomRule(ruleId: string) {
     if ($vhostsList.length === 0) return;
     let enabledNow = false;
-    $vhostsList[selectedVhostIndex].custom_rules = $vhostsList[
-      selectedVhostIndex
-    ].custom_rules.map((r) => {
-      if (r.id === ruleId) {
-        enabledNow = !r.enabled;
-        return { ...r, enabled: enabledNow };
-      }
-      return r;
-    });
+    $vhostsList[selectedVhostIndex].custom_rules = $vhostsList[selectedVhostIndex].custom_rules.map(
+      (r) => {
+        if (r.id === ruleId) {
+          enabledNow = !r.enabled;
+          return { ...r, enabled: enabledNow };
+        }
+        return r;
+      },
+    );
     vhostsList.set($vhostsList);
-    toast.info(`Custom rule ${enabledNow ? 'enabled' : 'disabled'}.`);
+    toast.info(`Custom rule ${enabledNow ? "enabled" : "disabled"}.`);
     await saveVhosts(true);
   }
 
@@ -327,8 +329,7 @@
 
       if (
         activeRules.includes("SQLI-*") &&
-        (payloadLower.includes("union select") ||
-          payloadLower.includes("or 1=1"))
+        (payloadLower.includes("union select") || payloadLower.includes("or 1=1"))
       ) {
         simulationResult = { status: "triggered", ruleName: "SQLI-*" };
         return;
@@ -355,15 +356,12 @@
         return;
       }
 
-      const activeCustomRules = host
-        ? (host.custom_rules || []).filter((r) => r.enabled)
-        : [];
+      const activeCustomRules = host ? (host.custom_rules || []).filter((r) => r.enabled) : [];
       for (const rule of activeCustomRules) {
         let isMatch = false;
         const matchVal = rule.condition_value.toLowerCase();
         if (rule.operator === "equals") isMatch = payloadLower === matchVal;
-        else if (rule.operator === "starts_with")
-          isMatch = payloadLower.startsWith(matchVal);
+        else if (rule.operator === "starts_with") isMatch = payloadLower.startsWith(matchVal);
         else isMatch = payloadLower.includes(matchVal);
 
         if (isMatch) {
@@ -382,9 +380,7 @@
 <div class="space-y-6">
   <!-- Header -->
   <div>
-    <h1 class="text-2xl font-bold text-slate-100 tracking-tight">
-      WAF Rules Engine
-    </h1>
+    <h1 class="text-2xl font-bold text-slate-100 tracking-tight">WAF Rules Engine</h1>
     <p class="text-slate-400 mt-1">
       Configure preset protection modules and user-defined custom logic rules.
     </p>
@@ -406,9 +402,7 @@
         {/each}
       </select>
     {:else}
-      <span class="text-sm font-mono text-red-500"
-        >No virtual hosts available</span
-      >
+      <span class="text-sm font-mono text-red-500">No virtual hosts available</span>
     {/if}
   </Card>
 
@@ -417,9 +411,7 @@
     <div class="lg:col-span-2 space-y-6">
       <!-- Preset Modules -->
       <div>
-        <h2 class="text-lg font-semibold text-slate-200 mb-4">
-          Preset Modules
-        </h2>
+        <h2 class="text-lg font-semibold text-slate-200 mb-4">Preset Modules</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           {#each presetGroups as group}
             {@const hostRules = $vhostsList[selectedVhostIndex]
@@ -436,7 +428,11 @@
                     <h4 class="font-bold text-sm text-slate-200">{group.name}</h4>
                     <div class="flex items-center gap-2 mt-0.5">
                       <p class="text-xs text-slate-500">{group.rules.length} signatures</p>
-                      <button on:click={() => openPresetDetails(group)} class="text-xs text-blue-400 hover:text-blue-300 font-medium hover:underline transition-colors">Details</button>
+                      <button
+                        on:click={() => openPresetDetails(group)}
+                        class="text-xs text-blue-400 hover:text-blue-300 font-medium hover:underline transition-colors"
+                        >Details</button
+                      >
                     </div>
                   </div>
                 </div>
@@ -444,8 +440,7 @@
                   <input
                     type="checkbox"
                     checked={isEnabled}
-                    on:change={(e) =>
-                      toggleModule(group.rule_pattern, e.currentTarget.checked)}
+                    on:change={(e) => toggleModule(group.rule_pattern, e.currentTarget.checked)}
                     class="sr-only peer"
                   />
                   <div
@@ -474,41 +469,22 @@
           </button>
         </div>
         <Card className="p-0 overflow-hidden">
-          <DataTable
-            columns={[
-              "ID",
-              "Rule Name",
-              "Condition",
-              "Action",
-              "Active",
-              "Options",
-            ]}
-          >
+          <DataTable columns={["ID", "Rule Name", "Condition", "Action", "Active", "Options"]}>
             {#if $vhostsList[selectedVhostIndex]?.custom_rules?.length > 0}
               {#each $vhostsList[selectedVhostIndex].custom_rules as rule}
                 <tr
-                  class="hover:bg-slate-700/30 transition-colors {rule.enabled
-                    ? ''
-                    : 'opacity-50'}"
+                  class="hover:bg-slate-700/30 transition-colors {rule.enabled ? '' : 'opacity-50'}"
                 >
-                  <td
-                    class="px-6 py-4 whitespace-nowrap text-blue-400 font-mono text-xs"
+                  <td class="px-6 py-4 whitespace-nowrap text-blue-400 font-mono text-xs"
                     >{rule.id}</td
                   >
-                  <td
-                    class="px-6 py-4 whitespace-nowrap text-slate-200 font-medium"
-                    >{rule.name}</td
+                  <td class="px-6 py-4 whitespace-nowrap text-slate-200 font-medium">{rule.name}</td
                   >
-                  <td
-                    class="px-6 py-4 whitespace-nowrap text-slate-400 font-mono text-xs"
+                  <td class="px-6 py-4 whitespace-nowrap text-slate-400 font-mono text-xs"
                     >{displayCondition(rule)}</td
                   >
                   <td class="px-6 py-4 whitespace-nowrap">
-                    <Badge
-                      variant={rule.action === "redirect"
-                        ? "primary"
-                        : "danger"}
-                    >
+                    <Badge variant={rule.action === "redirect" ? "primary" : "danger"}>
                       {rule.action.toUpperCase()}
                     </Badge>
                   </td>
@@ -527,16 +503,18 @@
                         class="text-slate-400 hover:text-blue-400 transition-colors"
                         ><Edit2 size={16} /></button
                       >
-                      <button on:click={() => confirmDeleteRule(rule.id)} class="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={16} /></button>
+                      <button
+                        on:click={() => confirmDeleteRule(rule.id)}
+                        class="text-slate-400 hover:text-red-400 transition-colors"
+                        ><Trash2 size={16} /></button
+                      >
                     </div>
                   </td>
                 </tr>
               {/each}
             {:else}
               <tr>
-                <td
-                  colspan="6"
-                  class="px-6 py-8 text-center text-slate-500 italic"
+                <td colspan="6" class="px-6 py-8 text-center text-slate-500 italic"
                   >No custom rules defined. Click "Build Rule" to add one.</td
                 >
               </tr>
@@ -552,9 +530,7 @@
         <Card
           className="flex flex-col gap-4 border-blue-500/30 shadow-lg shadow-blue-500/10 transition-all"
         >
-          <div
-            class="flex items-center justify-between border-b border-slate-800 pb-3"
-          >
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
             <h3 class="font-bold text-slate-200 flex items-center gap-2">
               <Terminal size={18} class="text-blue-400" />
               {editingRuleId ? "Edit Rule" : "New Custom Rule"}
@@ -566,8 +542,7 @@
 
           <div class="space-y-4">
             <div class="flex flex-col gap-1.5">
-              <label
-                class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+              <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                 >Rule Name</label
               >
               <input
@@ -580,8 +555,7 @@
 
             <div class="grid grid-cols-2 gap-3">
               <div class="flex flex-col gap-1.5">
-                <label
-                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Target Field</label
                 >
                 <select
@@ -595,8 +569,7 @@
                 </select>
               </div>
               <div class="flex flex-col gap-1.5">
-                <label
-                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Operator</label
                 >
                 <select
@@ -612,8 +585,7 @@
 
             {#if conditionFieldType === "header"}
               <div class="flex flex-col gap-1.5">
-                <label
-                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Header Name</label
                 >
                 <input
@@ -626,8 +598,7 @@
             {/if}
 
             <div class="flex flex-col gap-1.5">
-              <label
-                class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+              <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                 >Match Value</label
               >
               <input
@@ -638,12 +609,8 @@
               />
             </div>
 
-            <div
-              class="flex flex-col gap-1.5 border-t border-slate-800 pt-4 mt-2"
-            >
-              <label
-                class="text-xs uppercase tracking-wider text-slate-500 font-bold"
-                >Action</label
+            <div class="flex flex-col gap-1.5 border-t border-slate-800 pt-4 mt-2">
+              <label class="text-xs uppercase tracking-wider text-slate-500 font-bold">Action</label
               >
               <select
                 bind:value={action}
@@ -656,8 +623,7 @@
 
             {#if action === "redirect"}
               <div class="flex flex-col gap-1.5">
-                <label
-                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Redirect URL</label
                 >
                 <input
@@ -687,9 +653,7 @@
 
       <!-- Sandbox -->
       <Card className="flex flex-col gap-4">
-        <div
-          class="flex items-center justify-between border-b border-slate-800 pb-3"
-        >
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 class="font-bold text-slate-200 flex items-center gap-2">
             <Play size={18} class="text-emerald-400" /> Sandbox Simulator
           </h3>
@@ -718,7 +682,7 @@
             <div
               class="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"
             ></div>
-             Simulating...
+            Simulating...
           </div>
         {:else if simulationResult.status === "triggered"}
           <div
@@ -729,8 +693,7 @@
             </div>
             <span
               class="text-slate-400 text-xs font-mono truncate max-w-[150px]"
-              title={simulationResult.ruleName}
-              >{simulationResult.ruleName}</span
+              title={simulationResult.ruleName}>{simulationResult.ruleName}</span
             >
           </div>
         {:else if simulationResult.status === "passed"}
@@ -751,13 +714,16 @@
   message="Are you sure you want to permanently delete this rule? Traffic currently matched by this rule will no longer be blocked/redirected."
   confirmText="Delete Rule"
   on:confirm={executeDeleteRule}
-  on:cancel={() => { showDeleteModal = false; ruleToDelete = null; }}
+  on:cancel={() => {
+    showDeleteModal = false;
+    ruleToDelete = null;
+  }}
 />
 
 <PresetDetailsModal
   show={showPresetModal}
   preset={selectedPreset}
   activeRules={$vhostsList[selectedVhostIndex]?.rules || []}
-  on:close={() => showPresetModal = false}
+  on:close={() => (showPresetModal = false)}
   on:toggleRule={handleToggleGranularRule}
 />

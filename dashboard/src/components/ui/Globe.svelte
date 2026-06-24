@@ -104,11 +104,8 @@
       class="globe-marker absolute pointer-events-none flex items-center gap-2 px-2 py-1 bg-slate-900/80 backdrop-blur border border-slate-700/50 rounded shadow-lg transition-opacity duration-300"
       style="bottom: 20%; left: {10 + i * 15}%; transform: translate(-50%, 0);"
     >
-      <span
-        class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444] animate-pulse"
-      ></span>
-      <span
-        class="font-mono text-[10px] font-bold tracking-widest text-red-500 uppercase"
+      <span class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444] animate-pulse"></span>
+      <span class="font-mono text-[10px] font-bold tracking-widest text-red-500 uppercase"
         >{m.action || "BLOCK"}</span
       >
       <span class="pl-2 border-l border-slate-600 text-[10px] text-slate-300">

@@ -1,8 +1,8 @@
 <script lang="ts">
-  import Card from './Card.svelte';
+  import Card from "./Card.svelte";
 
-  export let logs: { level: 'INFO' | 'ERROR' | 'WARN'; message: string; timestamp: string }[] = [];
-  export let className: string = '';
+  export let logs: { level: "INFO" | "ERROR" | "WARN"; message: string; timestamp: string }[] = [];
+  export let className: string = "";
 </script>
 
 <Card className={`p-0 overflow-hidden ${className}`}>
@@ -21,11 +21,15 @@
     {#each logs as log}
       <div class="mb-1 leading-relaxed">
         <span class="text-slate-500 mr-2">[{log.timestamp}]</span>
-        <span class={`font-semibold mr-2 ${
-          log.level === 'ERROR' ? 'text-red-500' :
-          log.level === 'WARN' ? 'text-amber-500' :
-          'text-emerald-500'
-        }`}>[{log.level}]</span>
+        <span
+          class={`font-semibold mr-2 ${
+            log.level === "ERROR"
+              ? "text-red-500"
+              : log.level === "WARN"
+                ? "text-amber-500"
+                : "text-emerald-500"
+          }`}>[{log.level}]</span
+        >
         <span class="text-slate-300">{log.message}</span>
       </div>
     {/each}
