@@ -7,10 +7,7 @@
   const paddingY = 25;
 
   // React to data changes to calculate coordinates
-  $: maxVal = Math.max(
-    10,
-    ...data.map((d) => Math.max(d.activeLimit, d.rejections))
-  );
+  $: maxVal = Math.max(10, ...data.map((d) => Math.max(d.activeLimit, d.rejections)));
 
   $: activePoints = data.map((d, i) => {
     const x = paddingX + (i / (data.length - 1 || 1)) * (width - 2 * paddingX);
@@ -47,8 +44,8 @@
 <div class="relative w-full h-full flex flex-col justify-between">
   <!-- Chart SVG -->
   <div class="w-full flex-1 min-h-0">
-    <svg 
-      viewBox="0 0 500 200" 
+    <svg
+      viewBox="0 0 500 200"
       preserveAspectRatio="xMidYMid meet"
       class="w-full h-full overflow-visible"
     >
@@ -75,13 +72,13 @@
       <!-- Grid lines -->
       {#each Array(4) as _, idx}
         {@const y = paddingY + idx * ((height - 2 * paddingY) / 3)}
-        <line 
-          x1={paddingX} 
-          y1={y} 
-          x2={width - paddingX} 
-          y2={y} 
-          stroke="var(--color-outline-variant)" 
-          stroke-dasharray="3,3" 
+        <line
+          x1={paddingX}
+          y1={y}
+          x2={width - paddingX}
+          y2={y}
+          stroke="var(--color-outline-variant)"
+          stroke-dasharray="3,3"
           opacity="0.2"
         />
       {/each}

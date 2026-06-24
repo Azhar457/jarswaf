@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher } from "svelte";
 
-  export let activeTab: string = 'overview';
+  export let activeTab: string = "overview";
   export let isCollapsed: boolean = false;
 
   const dispatch = createEventDispatcher<{
@@ -11,23 +11,23 @@
   }>();
 
   const navItems = [
-    { id: 'overview', label: 'Dashboard', icon: 'dashboard' },
-    { id: 'logs', label: 'Threat Intel', icon: 'security' },
-    { id: 'vhosts', label: 'Traffic Analysis', icon: 'analytics' },
-    { id: 'rules', label: 'Firewall Rules', icon: 'security_update_good' },
-    { id: 'rate_limits', label: 'Settings', icon: 'settings' },
+    { id: "overview", label: "Dashboard", icon: "dashboard" },
+    { id: "logs", label: "Threat Intel", icon: "security" },
+    { id: "vhosts", label: "Traffic Analysis", icon: "analytics" },
+    { id: "rules", label: "Firewall Rules", icon: "security_update_good" },
+    { id: "rate_limits", label: "Settings", icon: "settings" },
   ];
 
   function handleTabChange(tabId: string) {
-    dispatch('tabChange', tabId);
+    dispatch("tabChange", tabId);
   }
 
   function handleToggleCollapse() {
-    dispatch('toggleCollapse');
+    dispatch("toggleCollapse");
   }
 
   function handleDeployRules() {
-    dispatch('deployRules');
+    dispatch("deployRules");
   }
 </script>
 
@@ -38,15 +38,22 @@
   <!-- Logo Section -->
   <div class="mb-8 flex items-center justify-between px-4">
     {#if !isCollapsed}
-      <div class="flex items-center ">
-        <span class="material-symbols-outlined text-primary" style="font-size: 32px;">security</span>
+      <div class="flex items-center">
+        <span class="material-symbols-outlined text-primary" style="font-size: 32px;">security</span
+        >
         <div class="flex flex-col">
-          <span class="font-headline-md text-headline-md text-on-surface font-bold leading-tight">Aegis WAF</span>
-          <span class="font-code-md text-body-sm text-on-surface-variant leading-tight">v2.4.0-prod</span>
+          <span class="font-headline-md text-headline-md text-on-surface font-bold leading-tight"
+            >Aegis WAF</span
+          >
+          <span class="font-code-md text-body-sm text-on-surface-variant leading-tight"
+            >v2.4.0-prod</span
+          >
         </div>
       </div>
     {:else}
-      <span class="material-symbols-outlined text-primary mx-auto" style="font-size: 32px;">security</span>
+      <span class="material-symbols-outlined text-primary mx-auto" style="font-size: 32px;"
+        >security</span
+      >
     {/if}
   </div>
 
@@ -55,28 +62,28 @@
     <button
       on:click={handleToggleCollapse}
       class="w-full flex items-center justify-center p-2 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors"
-      title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
     >
       <span class="material-symbols-outlined">
-        {isCollapsed ? 'menu' : 'menu_open'}
+        {isCollapsed ? "menu" : "menu_open"}
       </span>
     </button>
   </div>
 
   <!-- Navigation Items -->
-  <nav class="flex flex-col  flex-1 px-2">
+  <nav class="flex flex-col flex-1 px-2">
     {#each navItems as item (item.id)}
       <button
         on:click={() => handleTabChange(item.id)}
-        class="flex items-center  p-4 rounded-lg transition-colors relative w-full text-left
+        class="flex items-center p-4 rounded-lg transition-colors relative w-full text-left
           {activeTab === item.id
-            ? 'text-primary font-bold bg-primary-container/10 border-r-2 border-primary'
-            : 'text-on-surface-variant hover:bg-surface-container-high'}"
-        title={isCollapsed ? item.label : ''}
+          ? 'text-primary font-bold bg-primary-container/10 border-r-2 border-primary'
+          : 'text-on-surface-variant hover:bg-surface-container-high'}"
+        title={isCollapsed ? item.label : ""}
       >
         <span
           class="material-symbols-outlined shrink-0"
-          style={activeTab === item.id ? "font-variation-settings: 'FILL' 1;" : ''}
+          style={activeTab === item.id ? "font-variation-settings: 'FILL' 1;" : ""}
         >
           {item.icon}
         </span>
@@ -90,12 +97,12 @@
   </nav>
 
   <!-- Bottom Section -->
-  <div class="border-t border-outline-variant pt-6 px-2 flex flex-col ">
+  <div class="border-t border-outline-variant pt-6 px-2 flex flex-col">
     <!-- Deploy Rules Button -->
     <button
       on:click={handleDeployRules}
-      class="flex items-center justify-center  p-4 rounded-lg bg-primary text-on-primary font-bold transition-colors hover:opacity-90 w-full"
-      title={isCollapsed ? 'Deploy Rules' : ''}
+      class="flex items-center justify-center p-4 rounded-lg bg-primary text-on-primary font-bold transition-colors hover:opacity-90 w-full"
+      title={isCollapsed ? "Deploy Rules" : ""}
     >
       <span class="material-symbols-outlined shrink-0">rocket_launch</span>
       {#if !isCollapsed}
@@ -105,12 +112,12 @@
 
     <!-- Footer Links -->
     {#if !isCollapsed}
-      <div class="flex flex-col  px-2 pt-2">
+      <div class="flex flex-col px-2 pt-2">
         <a
           href="https://github.com/Azhar457/aegis-waf#readme"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center  text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
+          class="flex items-center text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
         >
           <span class="material-symbols-outlined" style="font-size: 16px;">description</span>
           Documentation
@@ -119,14 +126,14 @@
           href="https://azhar457.github.io/note/"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center  text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
+          class="flex items-center text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
         >
           <span class="material-symbols-outlined" style="font-size: 16px;">support</span>
           Support
         </a>
       </div>
     {:else}
-      <div class="flex flex-col  items-center pt-2">
+      <div class="flex flex-col items-center pt-2">
         <a
           href="https://github.com/Azhar457/aegis-waf#readme"
           target="_blank"

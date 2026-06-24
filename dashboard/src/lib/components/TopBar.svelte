@@ -7,13 +7,15 @@
   function formatCount(num: number): string {
     if (num < 1000) return num.toString();
     if (num < 1000000) {
-      return (num / 1000).toFixed(1).replace('.0', '') + 'k';
+      return (num / 1000).toFixed(1).replace(".0", "") + "k";
     }
-    return (num / 1000000).toFixed(1).replace('.0', '') + 'M';
+    return (num / 1000000).toFixed(1).replace(".0", "") + "M";
   }
 </script>
 
-<header class="flex justify-between items-center h-20 px-8 bg-surface/80 backdrop-blur-md sticky top-0 z-40 border-b border-outline-variant">
+<header
+  class="flex justify-between items-center h-20 px-8 bg-surface/80 backdrop-blur-md sticky top-0 z-40 border-b border-outline-variant"
+>
   <!-- Left: Search -->
   <div class="flex items-center gap-6">
     <div class="relative w-72">
@@ -31,15 +33,21 @@
   <!-- Right: Pills + Actions -->
   <div class="flex items-center gap-4">
     <!-- Attacks Prevented Pill -->
-    <span class="text-xs px-4 py-2 bg-surface-container rounded border border-outline-variant text-on-surface-variant hidden sm:inline-block">
+    <span
+      class="text-xs px-4 py-2 bg-surface-container rounded border border-outline-variant text-on-surface-variant hidden sm:inline-block"
+    >
       Attacks Prevented: <strong class="text-error">{formatCount(blockedCount)}</strong>
     </span>
 
     <!-- System Status Pill -->
-    <div class="flex items-center  px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+    <div
+      class="flex items-center px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg"
+    >
       {#if isOnline}
         <span class="relative flex h-2.5 w-2.5">
-          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span
+            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"
+          ></span>
           <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
         </span>
         <span class="text-[11px] font-bold text-emerald-400 uppercase tracking-wider font-mono">

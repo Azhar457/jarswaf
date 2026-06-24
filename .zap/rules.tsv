@@ -1,0 +1,4 @@
+# ZAP rules file for Aegis WAF
+# ruleId	action	notes
+10096	IGNORE	Timestamp Disclosure - Unix
+10027	IGNORE	Information Disclosure - Suspicious Comments
