@@ -1,13 +1,13 @@
+use crate::{rules::RuleEngine, vhost, AppState};
 use axum::{
     body::Body,
     extract::Host,
     http::{Request, Response, StatusCode},
     response::IntoResponse,
 };
-use std::net::SocketAddr;
-use crate::{AppState, rules::RuleEngine, vhost};
-use std::collections::HashMap;
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::net::SocketAddr;
 
 pub async fn forward_request(
     state: axum::extract::State<AppState>,
@@ -17,14 +17,31 @@ pub async fn forward_request(
 ) -> Response<Body> {
     let mut req = req;
     // Read config inside a block to ensure RwLockReadGuard does not cross await boundaries
-    let (backend_addr, vhost_cfg, global_max_body_size, global_default_rate_limit, log_level, trusted_proxies, resolved_custom_rules, waf_enabled) = {
+    let (
+        backend_addr,
+        vhost_cfg,
+        global_max_body_size,
+        global_default_rate_limit,
+        log_level,
+        trusted_proxies,
+        resolved_custom_rules,
+        waf_enabled,
+    ) = {
         let config_lock = state.config.read().unwrap();
         let (b, v) = vhost::match_vhost(host.as_ref(), &*config_lock);
-        
-        let resolved = v.custom_rules.iter()
-            .filter_map(|id| config_lock.custom_rules.iter().find(|r| &r.id == id).cloned())
+
+        let resolved = v
+            .custom_rules
+            .iter()
+            .filter_map(|id| {
+                config_lock
+                    .custom_rules
+                    .iter()
+                    .find(|r| &r.id == id)
+                    .cloned()
+            })
             .collect::<Vec<crate::config::CustomRule>>();
-            
+
         (
             b.to_string(),
             v.clone(),
@@ -42,14 +59,18 @@ pub async fn forward_request(
         let peer_ip = peer_addr.ip();
         let is_trusted = if let Some(ref proxies) = trusted_proxies {
             proxies.iter().any(|p_str| {
-                p_str.parse::<std::net::IpAddr>().map(|ip| ip == peer_ip).unwrap_or(false)
+                p_str
+                    .parse::<std::net::IpAddr>()
+                    .map(|ip| ip == peer_ip)
+                    .unwrap_or(false)
             })
         } else {
             crate::is_local_ip(&peer_ip)
         };
 
         if is_trusted {
-            if let Some(xff) = req.headers()
+            if let Some(xff) = req
+                .headers()
                 .get("x-forwarded-for")
                 .and_then(|v| v.to_str().ok())
             {
@@ -60,7 +81,10 @@ pub async fn forward_request(
                     if let Ok(parsed_ip) = part.parse::<std::net::IpAddr>() {
                         let is_part_trusted = if let Some(ref proxies) = trusted_proxies {
                             proxies.iter().any(|p_str| {
-                                p_str.parse::<std::net::IpAddr>().map(|ip| ip == parsed_ip).unwrap_or(false)
+                                p_str
+                                    .parse::<std::net::IpAddr>()
+                                    .map(|ip| ip == parsed_ip)
+                                    .unwrap_or(false)
                             })
                         } else {
                             crate::is_local_ip(&parsed_ip)
@@ -85,7 +109,11 @@ pub async fn forward_request(
     let method = req.method().clone();
     let path = req.uri().path().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
-    let path_and_query = req.uri().path_and_query().map(|x| x.as_str().to_string()).unwrap_or_else(|| "/".to_string());
+    let path_and_query = req
+        .uri()
+        .path_and_query()
+        .map(|x| x.as_str().to_string())
+        .unwrap_or_else(|| "/".to_string());
     let headers_map: HashMap<String, String> = req
         .headers()
         .iter()
@@ -95,37 +123,40 @@ pub async fn forward_request(
     if !waf_enabled {
         let (parts, body) = req.into_parts();
         let mut req = Request::from_parts(parts, Body::empty());
-        
+
         let client = state.http_client.clone();
-        let uri_str = if backend_addr.starts_with("http://") || backend_addr.starts_with("https://") {
+        let uri_str = if backend_addr.starts_with("http://") || backend_addr.starts_with("https://")
+        {
             format!("{}{}", backend_addr, path_and_query)
         } else {
             format!("http://{}{}", backend_addr, path_and_query)
         };
-        
+
         let uri = match uri_str.parse::<axum::http::Uri>() {
             Ok(u) => u,
             Err(e) => {
                 tracing::error!("Invalid backend URI '{}': {}", uri_str, e);
-                return (StatusCode::BAD_GATEWAY, "Invalid backend address configuration").into_response();
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    "Invalid backend address configuration",
+                )
+                    .into_response();
             }
         };
-        
-        let mut backend_req = Request::builder()
-            .method(method.clone())
-            .uri(uri);
+
+        let mut backend_req = Request::builder().method(method.clone()).uri(uri);
         for (key, value) in &headers_map {
             backend_req = backend_req.header(key.as_str(), value.as_str());
         }
         let backend_req = backend_req.body(body).unwrap();
-        
+
         let is_upgrade = req.headers().get(axum::http::header::UPGRADE).is_some();
         let client_upgrade = if is_upgrade {
             Some(hyper::upgrade::on(&mut req))
         } else {
             None
         };
-        
+
         let backend_timeout = tokio::time::Duration::from_secs(30);
         match tokio::time::timeout(backend_timeout, client.request(backend_req)).await {
             Ok(Ok(mut resp)) => {
@@ -138,12 +169,21 @@ pub async fn forward_request(
                                     use hyper_util::rt::TokioIo;
                                     let mut client_io = TokioIo::new(client_io);
                                     let mut backend_io = TokioIo::new(backend_io);
-                                    if let Err(e) = tokio::io::copy_bidirectional(&mut client_io, &mut backend_io).await {
+                                    if let Err(e) = tokio::io::copy_bidirectional(
+                                        &mut client_io,
+                                        &mut backend_io,
+                                    )
+                                    .await
+                                    {
                                         tracing::debug!("WebSocket proxy tunnel closed: {:?}", e);
                                     }
                                 }
-                                (Err(e1), _) => tracing::error!("Client WS upgrade failed: {:?}", e1),
-                                (_, Err(e2)) => tracing::error!("Backend WS upgrade failed: {:?}", e2),
+                                (Err(e1), _) => {
+                                    tracing::error!("Client WS upgrade failed: {:?}", e1)
+                                }
+                                (_, Err(e2)) => {
+                                    tracing::error!("Backend WS upgrade failed: {:?}", e2)
+                                }
                             }
                         });
                     }
@@ -176,10 +216,15 @@ pub async fn forward_request(
             path: path_and_query.clone(),
             action: "BLOCK".to_string(),
             rule_id: "COLLAB-001".to_string(),
-            reason: "Blocked by Aegis WAF Collaborative Threat Intelligence (Reputation)".to_string(),
+            reason: "Blocked by Aegis WAF Collaborative Threat Intelligence (Reputation)"
+                .to_string(),
         };
         let _ = state.log_tx.try_send(entry);
-        return (StatusCode::FORBIDDEN, "Blocked by Aegis WAF Collaborative Threat Intelligence").into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            "Blocked by Aegis WAF Collaborative Threat Intelligence",
+        )
+            .into_response();
     }
 
     // Check Geoblocking (Lock by Country)
@@ -204,14 +249,25 @@ pub async fn forward_request(
             ),
         };
         let _ = state.log_tx.try_send(entry);
-        return (StatusCode::FORBIDDEN, format!("Blocked by Aegis WAF Geoblock: Access restricted for {}", country)).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            format!(
+                "Blocked by Aegis WAF Geoblock: Access restricted for {}",
+                country
+            ),
+        )
+            .into_response();
     }
 
     // Body inspect: baca hanya jika kecil dan path tidak dikecualikan
     // Parse max body size per vhost (e.g. "10MB"), falling back to global max_body_size if empty/invalid
     let max_body_size = {
         let parsed = crate::config::parse_size(&vhost_cfg.max_body);
-        if parsed > 0 { parsed } else { global_max_body_size }
+        if parsed > 0 {
+            parsed
+        } else {
+            global_max_body_size
+        }
     };
 
     // Check Content-Length header upfront to prevent oversized bodies from being processed or forwarded
@@ -219,7 +275,11 @@ pub async fn forward_request(
         if let Ok(cl_str) = cl_header.to_str() {
             if let Ok(cl_val) = cl_str.parse::<usize>() {
                 if cl_val > max_body_size {
-                    return (StatusCode::PAYLOAD_TOO_LARGE, "Request payload exceeds configured limit").into_response();
+                    return (
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "Request payload exceeds configured limit",
+                    )
+                        .into_response();
                 }
             }
         }
@@ -242,7 +302,11 @@ pub async fn forward_request(
             }
             Err(_) => {
                 // If it fails (due to exceeding limit or connection issues), reject the request
-                return (StatusCode::PAYLOAD_TOO_LARGE, "Payload too large or read error").into_response();
+                return (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "Payload too large or read error",
+                )
+                    .into_response();
             }
         }
     } else {
@@ -263,7 +327,10 @@ pub async fn forward_request(
             "body" => Some(&body_str),
             _ => {
                 if rule.condition_type.starts_with("header:") {
-                    let header_key = rule.condition_type.trim_start_matches("header:").to_lowercase();
+                    let header_key = rule
+                        .condition_type
+                        .trim_start_matches("header:")
+                        .to_lowercase();
                     headers_map.get(&header_key)
                 } else {
                     None
@@ -288,7 +355,10 @@ pub async fn forward_request(
                         path: path_and_query.clone(),
                         action: "REDIRECT".to_string(),
                         rule_id: rule.id.clone(),
-                        reason: format!("Redirected by Custom Rule [{}]: to {}", rule.name, rule.action_value),
+                        reason: format!(
+                            "Redirected by Custom Rule [{}]: to {}",
+                            rule.name, rule.action_value
+                        ),
                     };
                     let _ = state.log_tx.try_send(entry);
 
@@ -306,10 +376,17 @@ pub async fn forward_request(
                         path: path_and_query.clone(),
                         action: "BLOCK".to_string(),
                         rule_id: rule.id.clone(),
-                        reason: format!("Blocked by Custom Rule [{}]: {}", rule.name, rule.condition_value),
+                        reason: format!(
+                            "Blocked by Custom Rule [{}]: {}",
+                            rule.name, rule.condition_value
+                        ),
                     };
                     let _ = state.log_tx.try_send(entry);
-                    return (StatusCode::FORBIDDEN, format!("Blocked by Aegis WAF Custom Rule: {}", rule.name)).into_response();
+                    return (
+                        StatusCode::FORBIDDEN,
+                        format!("Blocked by Aegis WAF Custom Rule: {}", rule.name),
+                    )
+                        .into_response();
                 }
             }
         }
@@ -340,13 +417,20 @@ pub async fn forward_request(
         if crate::rules::record_block(client_ip) {
             if let Ok(mut lock) = state.blocklist.write() {
                 if lock.insert(client_ip) {
-                    tracing::warn!("IP {} blocked multiple times, added to in-memory blocklist (Reputation)", client_ip);
+                    tracing::warn!(
+                        "IP {} blocked multiple times, added to in-memory blocklist (Reputation)",
+                        client_ip
+                    );
                 }
             }
         }
-        
+
         let _ = state.log_tx.try_send(entry);
-        return (StatusCode::FORBIDDEN, format!("Blocked by Aegis WAF: {msg}")).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            format!("Blocked by Aegis WAF: {msg}"),
+        )
+            .into_response();
     }
 
     // Rate limit check (pakai tier atau default vhost rate limit)
@@ -357,7 +441,11 @@ pub async fn forward_request(
         .map(|t| t.limit)
         .unwrap_or_else(|| {
             let parsed = crate::config::parse_rate_limit(&vhost_cfg.rate_limit);
-            if parsed > 0 { parsed } else { global_default_rate_limit }
+            if parsed > 0 {
+                parsed
+            } else {
+                global_default_rate_limit
+            }
         });
     if !rule_engine.check_rate_limit(client_ip, rate_limit) {
         // Log rate limit via async channel
@@ -386,13 +474,15 @@ pub async fn forward_request(
         Ok(u) => u,
         Err(e) => {
             tracing::error!("Invalid backend URI '{}': {}", uri_str, e);
-            return (StatusCode::BAD_GATEWAY, "Invalid backend address configuration").into_response();
+            return (
+                StatusCode::BAD_GATEWAY,
+                "Invalid backend address configuration",
+            )
+                .into_response();
         }
     };
 
-    let mut backend_req = Request::builder()
-        .method(method.clone())
-        .uri(uri);
+    let mut backend_req = Request::builder().method(method.clone()).uri(uri);
     for (key, value) in &headers_map {
         backend_req = backend_req.header(key.as_str(), value.as_str());
     }
@@ -431,7 +521,10 @@ pub async fn forward_request(
                                 use hyper_util::rt::TokioIo;
                                 let mut client_io = TokioIo::new(client_io);
                                 let mut backend_io = TokioIo::new(backend_io);
-                                if let Err(e) = tokio::io::copy_bidirectional(&mut client_io, &mut backend_io).await {
+                                if let Err(e) =
+                                    tokio::io::copy_bidirectional(&mut client_io, &mut backend_io)
+                                        .await
+                                {
                                     tracing::debug!("WebSocket proxy tunnel closed: {:?}", e);
                                 }
                             }
@@ -447,7 +540,11 @@ pub async fn forward_request(
             Response::from_parts(parts, Body::new(body))
         }
         Ok(Err(e)) => {
-            if log_level == "verbose" || log_level == "all" || log_level == "anomaly" || log_level == "errors" {
+            if log_level == "verbose"
+                || log_level == "all"
+                || log_level == "anomaly"
+                || log_level == "errors"
+            {
                 let entry = crate::logging::WafLogEntry {
                     timestamp: chrono::Utc::now().to_rfc3339(),
                     client_ip: client_ip.to_string(),
@@ -462,7 +559,11 @@ pub async fn forward_request(
             (StatusCode::BAD_GATEWAY, format!("Backend error: {}", e)).into_response()
         }
         Err(_) => {
-            if log_level == "verbose" || log_level == "all" || log_level == "anomaly" || log_level == "errors" {
+            if log_level == "verbose"
+                || log_level == "all"
+                || log_level == "anomaly"
+                || log_level == "errors"
+            {
                 let entry = crate::logging::WafLogEntry {
                     timestamp: chrono::Utc::now().to_rfc3339(),
                     client_ip: client_ip.to_string(),
@@ -474,20 +575,23 @@ pub async fn forward_request(
                 };
                 let _ = state.log_tx.try_send(entry);
             }
-            (StatusCode::GATEWAY_TIMEOUT, "Gateway Timeout: Backend did not respond in time".to_string()).into_response()
+            (
+                StatusCode::GATEWAY_TIMEOUT,
+                "Gateway Timeout: Backend did not respond in time".to_string(),
+            )
+                .into_response()
         }
     }
 }
 
-static GEOIP_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> = Lazy::new(|| {
-    maxminddb::Reader::open_readfile("GeoLite2-Country.mmdb").ok()
-});
+static GEOIP_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> =
+    Lazy::new(|| maxminddb::Reader::open_readfile("GeoLite2-Country.mmdb").ok());
 
 pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
     if crate::is_local_ip(ip) {
         return "LOCAL".to_string();
     }
-    
+
     if let Some(reader) = GEOIP_READER.as_ref() {
         if let Ok(record) = reader.lookup::<maxminddb::geoip2::Country>(*ip) {
             if let Some(country) = record.country.and_then(|c| c.iso_code) {
@@ -495,6 +599,6 @@ pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
             }
         }
     }
-    
+
     "XX".to_string()
 }

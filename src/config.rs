@@ -26,9 +26,9 @@ pub struct CertificateConfig {
 pub struct RateLimitPolicy {
     pub name: String,
     pub limit: String,
-      pub burst: u32,
-      pub path: String,
-      pub description: String,
+    pub burst: u32,
+    pub path: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -141,11 +141,26 @@ pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
 pub fn parse_size(s: &str) -> usize {
     let s = s.trim().to_uppercase();
     if s.ends_with("MB") {
-        s.trim_end_matches("MB").trim().parse::<usize>().unwrap_or(10) * 1024 * 1024
+        s.trim_end_matches("MB")
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(10)
+            * 1024
+            * 1024
     } else if s.ends_with("KB") {
-        s.trim_end_matches("KB").trim().parse::<usize>().unwrap_or(10) * 1024
+        s.trim_end_matches("KB")
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(10)
+            * 1024
     } else if s.ends_with("GB") {
-        s.trim_end_matches("GB").trim().parse::<usize>().unwrap_or(1) * 1024 * 1024 * 1024
+        s.trim_end_matches("GB")
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(1)
+            * 1024
+            * 1024
+            * 1024
     } else {
         s.parse::<usize>().unwrap_or(10 * 1024 * 1024)
     }

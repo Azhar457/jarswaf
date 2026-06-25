@@ -1,7 +1,9 @@
+use rcgen::{
+    BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
+};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs;
 use std::path::Path;
-use rustls_pki_types::{CertificateDer, PrivateKeyDer};
-use rcgen::{CertificateParams, KeyPair, IsCa, BasicConstraints, KeyUsagePurpose, ExtendedKeyUsagePurpose};
 
 #[allow(dead_code)]
 pub struct LocalCA {
@@ -37,10 +39,7 @@ impl LocalCA {
 
         let mut params = CertificateParams::new(vec!["Aegis Local CA".to_string()])?;
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        params.key_usages = vec![
-            KeyUsagePurpose::KeyCertSign,
-            KeyUsagePurpose::CrlSign,
-        ];
+        params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
 
         let key_pair = KeyPair::generate()?;
         let cert = params.self_signed(&key_pair)?;
@@ -54,14 +53,19 @@ impl LocalCA {
         Ok(())
     }
 
-    pub fn generate_server_cert(&self, domain: &str) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Box<dyn std::error::Error>> {
+    pub fn generate_server_cert(
+        &self,
+        domain: &str,
+    ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Box<dyn std::error::Error>>
+    {
         let ca_cert_pem = fs::read_to_string(&self.cert_path)?;
         let ca_key_pem = fs::read_to_string(&self.key_path)?;
 
         let ca_key = KeyPair::from_pem(&ca_key_pem)?;
         let ca = rcgen::Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key)?;
 
-        let mut server_params = CertificateParams::new(vec![domain.to_string(), "localhost".to_string()])?;
+        let mut server_params =
+            CertificateParams::new(vec![domain.to_string(), "localhost".to_string()])?;
         server_params.key_usages = vec![
             KeyUsagePurpose::DigitalSignature,
             KeyUsagePurpose::KeyEncipherment,

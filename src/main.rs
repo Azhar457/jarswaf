@@ -782,9 +782,15 @@ async fn run_controller(port: u16, config_path: String) {
             if let Ok(toml_str) = toml::to_string(&cfg) {
                 if std::fs::write(&config_path, toml_str).is_ok() {
                     println!("\n\n");
-                    println!("========================================================================");
-                    println!("                   AEGIS WAF - SECURITY INITIALIZATION                  ");
-                    println!("========================================================================");
+                    println!(
+                        "========================================================================"
+                    );
+                    println!(
+                        "                   AEGIS WAF - SECURITY INITIALIZATION                  "
+                    );
+                    println!(
+                        "========================================================================"
+                    );
                     println!("  A secure random administrator token has been generated for you:");
                     println!("  ");
                     println!("  Admin Token:  \x1b[1;33m{}\x1b[0m", generated);
@@ -792,7 +798,9 @@ async fn run_controller(port: u16, config_path: String) {
                     println!("  \x1b[1;31mIMPORTANT:\x1b[0m Please copy and save this key in a safe place (e.g., Notepad).");
                     println!("  It is used to access the dashboard and register agents.");
                     println!("  This token will NOT be shown again.");
-                    println!("========================================================================");
+                    println!(
+                        "========================================================================"
+                    );
                     println!("\n\n");
                 }
             }
@@ -888,7 +896,10 @@ async fn run_controller(port: u16, config_path: String) {
         .route("/api/v1/ssl/renew", post(post_ssl_renew_handler))
         .route("/ws/dashboard", get(ws_dashboard_handler))
         .route("/ws/agent", get(ws_agent_handler))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), auth_middleware));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
 
     let app = Router::new()
         .route("/install.sh", get(serve_install_script))
@@ -1191,13 +1202,21 @@ async fn post_config_handler(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to serialize updated config to TOML: {:?}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize config").into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to serialize config",
+            )
+                .into_response();
         }
     };
 
     if let Err(e) = std::fs::write(&state.config_path, toml_str) {
         tracing::error!("Failed to write updated config to disk: {:?}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to write config file").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to write config file",
+        )
+            .into_response();
     }
 
     // Update in-memory atomics
@@ -1243,19 +1262,30 @@ async fn post_custom_rules_handler(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to serialize updated config to TOML: {:?}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize config").into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to serialize config",
+            )
+                .into_response();
         }
     };
 
     match std::fs::write(&state.config_path, toml_str) {
         Ok(_) => {
-            info!("Custom rules configuration updated successfully in {}", state.config_path);
+            info!(
+                "Custom rules configuration updated successfully in {}",
+                state.config_path
+            );
             let _ = state.config_tx.send(cfg);
             StatusCode::OK.into_response()
         }
         Err(e) => {
             tracing::error!("Failed to write updated config to disk: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to write config file").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to write config file",
+            )
+                .into_response()
         }
     }
 }
@@ -1273,7 +1303,7 @@ async fn auth_middleware(
     if let Some(expected_token) = admin_token {
         if !expected_token.is_empty() {
             let mut auth_valid = false;
-            
+
             if let Some(auth_header) = req.headers().get(axum::http::header::AUTHORIZATION) {
                 if let Ok(auth_str) = auth_header.to_str() {
                     if auth_str.starts_with("Bearer ") {
@@ -1300,7 +1330,10 @@ async fn auth_middleware(
             }
 
             if !auth_valid {
-                tracing::warn!("Unauthorized WAF API access attempt to {}", req.uri().path());
+                tracing::warn!(
+                    "Unauthorized WAF API access attempt to {}",
+                    req.uri().path()
+                );
                 return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
             }
         }

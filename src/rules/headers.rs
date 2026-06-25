@@ -1,13 +1,16 @@
-use super::{Rule, RequestInfo, Phase, Action, Severity};
-use regex::Regex;
+use super::{Action, Phase, RequestInfo, Rule, Severity};
 use once_cell::sync::Lazy;
+use regex::Regex;
 
 static BOT_001_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(sqlmap|nikto|nmap|masscan|zgrab|gobuster|dirb|wfuzz|nessus|openvas|w3af|arachni|skipfish|wapiti|vega|netsparker|acunetix|burpsuite|metasploit|nuclei)").unwrap()
 });
 
 static XFF_001_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(^10\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^192\.168\.|^127\.|^0\.0\.0\.0|::1|::ffff:)").unwrap()
+    Regex::new(
+        r"(?i)(^10\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^192\.168\.|^127\.|^0\.0\.0\.0|::1|::ffff:)",
+    )
+    .unwrap()
 });
 
 fn check_bot_001(req: &RequestInfo) -> bool {
@@ -22,7 +25,9 @@ fn check_host_001(req: &RequestInfo) -> bool {
     if let Some(host) = req.headers.get("host") {
         let hostname = host.split(':').next().unwrap_or("");
         hostname.parse::<std::net::IpAddr>().is_ok()
-            || hostname.chars().any(|c| !c.is_alphanumeric() && c != '.' && c != '-')
+            || hostname
+                .chars()
+                .any(|c| !c.is_alphanumeric() && c != '.' && c != '-')
     } else {
         false
     }
