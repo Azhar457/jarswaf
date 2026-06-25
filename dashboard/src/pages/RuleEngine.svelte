@@ -611,10 +611,11 @@
 
           <div class="space-y-4">
             <div class="flex flex-col gap-1.5">
-              <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+              <label for="custom_rule_name" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                 >Rule Name</label
               >
               <input
+                id="custom_rule_name"
                 type="text"
                 placeholder="e.g. Block login scanner"
                 bind:value={ruleName}
@@ -624,10 +625,11 @@
 
             <div class="grid grid-cols-2 gap-3">
               <div class="flex flex-col gap-1.5">
-                <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label for="custom_rule_field" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Target Field</label
                 >
                 <select
+                  id="custom_rule_field"
                   bind:value={conditionFieldType}
                   class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-blue-500 outline-none"
                 >
@@ -638,10 +640,11 @@
                 </select>
               </div>
               <div class="flex flex-col gap-1.5">
-                <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label for="custom_rule_op" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Operator</label
                 >
                 <select
+                  id="custom_rule_op"
                   bind:value={operator}
                   class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-blue-500 outline-none"
                 >
@@ -654,10 +657,11 @@
 
             {#if conditionFieldType === "header"}
               <div class="flex flex-col gap-1.5">
-                <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label for="custom_rule_header" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Header Name</label
                 >
                 <input
+                  id="custom_rule_header"
                   type="text"
                   placeholder="e.g. User-Agent"
                   bind:value={customHeaderName}
@@ -667,10 +671,11 @@
             {/if}
 
             <div class="flex flex-col gap-1.5">
-              <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+              <label for="custom_rule_val" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                 >Match Value</label
               >
               <input
+                id="custom_rule_val"
                 type="text"
                 placeholder="e.g. /wp-admin"
                 bind:value={conditionValue}
@@ -679,9 +684,9 @@
             </div>
 
             <div class="flex flex-col gap-1.5 border-t border-slate-800 pt-4 mt-2">
-              <label class="text-xs uppercase tracking-wider text-slate-500 font-bold">Action</label
-              >
+              <label for="custom_rule_action" class="text-xs uppercase tracking-wider text-slate-500 font-bold">Action</label>
               <select
+                id="custom_rule_action"
                 bind:value={action}
                 class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-blue-500 outline-none font-bold"
               >
@@ -692,10 +697,11 @@
 
             {#if action === "redirect"}
               <div class="flex flex-col gap-1.5">
-                <label class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label for="custom_rule_redirect" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Redirect URL</label
                 >
                 <input
+                  id="custom_rule_redirect"
                   type="text"
                   placeholder="http://..."
                   bind:value={redirectUrl}

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { Shield, Activity, Lock, Globe, Server, Menu, LayoutDashboard } from "lucide-svelte";
+  import { Shield, Activity, Lock, Globe, Server, Menu, LayoutDashboard, ShieldCheck } from "lucide-svelte";
   import SidebarItem from "./SidebarItem.svelte";
 
   export let activeTab: string = "dashboard";
@@ -22,6 +22,7 @@
         { id: "threats", label: "Threat Intel", icon: Shield },
         { id: "rules", label: "WAF Rules", icon: Shield },
         { id: "rate_limits", label: "Rate Limiting", icon: Activity },
+        { id: "access_control", label: "Access Control", icon: ShieldCheck },
       ],
     },
     {

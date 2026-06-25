@@ -12,6 +12,10 @@ pub struct Config {
     pub certificates: Vec<CertificateConfig>,
     #[serde(default)]
     pub custom_rules: Vec<CustomRule>,
+    #[serde(default)]
+    pub allowlists: Vec<AllowlistRule>,
+    #[serde(default)]
+    pub blacklists: Vec<BlacklistRule>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -87,6 +91,12 @@ pub struct VHost {
     pub max_body: String,
     #[serde(default = "default_rate_limit_str")]
     pub rate_limit: String,
+    #[serde(default)]
+    pub is_default: bool,
+    #[serde(default)]
+    pub allowlists: Vec<AllowlistRule>,
+    #[serde(default)]
+    pub blacklists: Vec<BlacklistRule>,
 }
 
 fn default_geoblock_type() -> String {
@@ -169,4 +179,32 @@ pub fn parse_rate_limit(s: &str) -> u32 {
     let s = s.trim().to_lowercase();
     let number_str: String = s.chars().take_while(|c| c.is_numeric()).collect();
     number_str.parse::<u32>().unwrap_or(600)
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AllowlistRule {
+    pub name: String,
+    #[serde(default)]
+    pub ips: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub bypass_rules: Vec<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct BlacklistRule {
+    pub name: String,
+    #[serde(default)]
+    pub ips: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }

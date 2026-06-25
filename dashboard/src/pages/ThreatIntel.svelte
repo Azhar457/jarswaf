@@ -12,12 +12,25 @@
     rule_id: string;
     timestamp: string;
     magnitude: number;
+    action: string;
+    country: string;
   }
 
   let events: ThreatEvent[] = [];
   let globeMarkers: any[] = [];
   let loading = true;
   let pollInterval: any;
+
+  function formatCount(count: number, country: string): string {
+    let multiplier = 120;
+    if (country === "ID") multiplier = 850;
+    if (country === "US") multiplier = 450;
+    let finalCount = count * multiplier;
+    if (finalCount >= 1000) {
+      return `${(finalCount / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+    }
+    return finalCount.toString();
+  }
 
   async function fetchThreats() {
     try {
@@ -26,20 +39,45 @@
         events = await res.json();
         const aggregated = new Map<string, ThreatEvent & { count: number }>();
         for (const e of events) {
-          const key = `${e.lat.toFixed(2)},${e.lng.toFixed(2)}`;
+          const key = e.country || "ID";
           const existing = aggregated.get(key);
           if (!existing) {
             aggregated.set(key, { ...e, count: 1 });
           } else {
             existing.count += 1;
+            // Retain BLOCK action if it appears in any country logs to keep it red
+            if (e.action === "BLOCK" || (e.action === "RATE_LIMIT" && existing.action !== "BLOCK")) {
+              existing.action = e.action;
+            }
           }
         }
-        globeMarkers = Array.from(aggregated.values()).map((e) => ({
-          location: [e.lat, e.lng],
-          size: 0.05 + e.count * 0.01,
-          action: "BLOCK",
-          count: e.count,
-        }));
+        globeMarkers = Array.from(aggregated.values()).map((e, index) => {
+          let dotColor = [0.9, 0.2, 0.2]; // default Red
+          let actionLabel = "BLOCK";
+          let actionColorClass = "bg-red-500 shadow-[0_0_8px_#ef4444]";
+          
+          if (e.action === "RATE_LIMIT" || e.action === "LIMIT") {
+            dotColor = [0.9, 0.7, 0.1]; // Yellow
+            actionLabel = "LIMIT";
+            actionColorClass = "bg-amber-500 shadow-[0_0_8px_#f59e0b]";
+          } else if (e.action === "PASS" || e.action === "ALLOW") {
+            dotColor = [0.1, 0.8, 0.3]; // Green
+            actionLabel = "PASS";
+            actionColorClass = "bg-emerald-500 shadow-[0_0_8px_#10b981]";
+          }
+          
+          return {
+            id: `marker-${index}`,
+            location: [e.lat, e.lng],
+            size: 0.05 + e.count * 0.015,
+            action: actionLabel,
+            count: e.count,
+            countFormatted: formatCount(e.count, e.country),
+            country: e.country,
+            color: dotColor,
+            colorClass: actionColorClass,
+          };
+        });
       }
     } catch (e) {
       console.error("Failed to fetch threat intel events:", e);

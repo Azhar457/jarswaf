@@ -53,6 +53,9 @@ export interface VHost {
   ssl: string;
   max_body: string;
   rate_limit: string;
+  is_default?: boolean;
+  allowlists?: any[];
+  blacklists?: any[];
 }
 
 export interface RateLimitPolicy {

@@ -138,6 +138,49 @@ impl RuleEngine {
             ip,
         };
 
+        // AST / Semantic WAF Engine checks
+        if is_rule_enabled("SQLI-AST", enabled_rules) {
+            if let Some(msg) = check_sql_injection_semantic(&norm_query) {
+                return Some((
+                    "SQLI-AST".to_string(),
+                    format!("Semantic SQLi block: {}", msg),
+                ));
+            }
+            if let Some(msg) = check_sql_injection_semantic(&norm_body) {
+                return Some((
+                    "SQLI-AST".to_string(),
+                    format!("Semantic SQLi block: {}", msg),
+                ));
+            }
+            if let Some(msg) = check_sql_injection_semantic(&norm_path) {
+                return Some((
+                    "SQLI-AST".to_string(),
+                    format!("Semantic SQLi block: {}", msg),
+                ));
+            }
+        }
+
+        if is_rule_enabled("XSS-AST", enabled_rules) {
+            if let Some(msg) = check_xss_injection_semantic(&norm_query) {
+                return Some((
+                    "XSS-AST".to_string(),
+                    format!("Semantic XSS block: {}", msg),
+                ));
+            }
+            if let Some(msg) = check_xss_injection_semantic(&norm_body) {
+                return Some((
+                    "XSS-AST".to_string(),
+                    format!("Semantic XSS block: {}", msg),
+                ));
+            }
+            if let Some(msg) = check_xss_injection_semantic(&norm_path) {
+                return Some((
+                    "XSS-AST".to_string(),
+                    format!("Semantic XSS block: {}", msg),
+                ));
+            }
+        }
+
         // Phase 1: Headers
         for rule in headers::HEADER_RULES {
             if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
@@ -246,6 +289,350 @@ fn is_rule_enabled(rule_id: &str, enabled_rules: &[String]) -> bool {
     false
 }
 
+// ==========================================
+// AST & Tokenization Semantic WAF Core Engine
+// ==========================================
+
+#[derive(Debug, PartialEq, Clone)]
+enum SqlToken {
+    Keyword(String),
+    Numeric(String),
+    StringLiteral(String),
+    Operator(String),
+    Symbol(char),
+    Comment,
+    Other(String),
+}
+
+fn tokenize_sql(input: &str) -> Vec<SqlToken> {
+    let mut tokens = Vec::new();
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c == '-' && i + 1 < chars.len() && chars[i + 1] == '-' {
+            tokens.push(SqlToken::Comment);
+            break;
+        }
+        if c == '#' {
+            tokens.push(SqlToken::Comment);
+            break;
+        }
+        if c == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            tokens.push(SqlToken::Comment);
+            i += 2;
+            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+                i += 1;
+            }
+            i += 2;
+            continue;
+        }
+        if c == '\'' || c == '"' {
+            let quote = c;
+            let mut val = String::new();
+            i += 1;
+            let mut escaped = false;
+            while i < chars.len() {
+                let next_c = chars[i];
+                if escaped {
+                    val.push(next_c);
+                    escaped = false;
+                } else if next_c == '\\' {
+                    escaped = true;
+                } else if next_c == quote {
+                    i += 1;
+                    break;
+                } else {
+                    val.push(next_c);
+                }
+                i += 1;
+            }
+            tokens.push(SqlToken::StringLiteral(val));
+            continue;
+        }
+        if c == '=' || c == '<' || c == '>' || c == '!' {
+            let mut op = c.to_string();
+            if i + 1 < chars.len() && (chars[i + 1] == '=' || chars[i + 1] == '>') {
+                op.push(chars[i + 1]);
+                i += 1;
+            }
+            tokens.push(SqlToken::Operator(op));
+            i += 1;
+            continue;
+        }
+        if c == '(' || c == ')' || c == ',' || c == ';' {
+            tokens.push(SqlToken::Symbol(c));
+            i += 1;
+            continue;
+        }
+        if c.is_ascii_digit() {
+            let mut num = String::new();
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                num.push(chars[i]);
+                i += 1;
+            }
+            tokens.push(SqlToken::Numeric(num));
+            continue;
+        }
+        if c.is_alphabetic() || c == '_' {
+            let mut word = String::new();
+            while i < chars.len()
+                && (chars[i].is_alphanumeric() || chars[i] == '_' || chars[i] == '.')
+            {
+                word.push(chars[i]);
+                i += 1;
+            }
+            let word_upper = word.to_uppercase();
+            match word_upper.as_str() {
+                "SELECT" | "UNION" | "OR" | "AND" | "INSERT" | "WHERE" | "FROM" | "DROP"
+                | "DELETE" | "UPDATE" | "INTO" | "TABLE" | "LIKE" | "HAVING" => {
+                    tokens.push(SqlToken::Keyword(word_upper));
+                }
+                _ => {
+                    tokens.push(SqlToken::Other(word));
+                }
+            }
+            continue;
+        }
+        tokens.push(SqlToken::Other(c.to_string()));
+        i += 1;
+    }
+    tokens
+}
+
+fn check_sql_injection_semantic(input: &str) -> Option<String> {
+    let tokens = tokenize_sql(input);
+    if tokens.contains(&SqlToken::Comment) {
+        let mut has_sql_indicator = false;
+        for t in &tokens {
+            match t {
+                SqlToken::Keyword(k) => {
+                    if k == "UNION"
+                        || k == "SELECT"
+                        || k == "OR"
+                        || k == "AND"
+                        || k == "DROP"
+                        || k == "DELETE"
+                    {
+                        has_sql_indicator = true;
+                    }
+                }
+                SqlToken::Operator(_) => {
+                    has_sql_indicator = true;
+                }
+                _ => {}
+            }
+        }
+        if has_sql_indicator {
+            return Some("Comment token injection detected".to_string());
+        }
+    }
+    for i in 0..tokens.len() {
+        if let SqlToken::Keyword(ref k) = tokens[i] {
+            if k == "OR" || k == "AND" {
+                if i + 3 < tokens.len() {
+                    let val_a = &tokens[i + 1];
+                    let op = &tokens[i + 2];
+                    let val_b = &tokens[i + 3];
+                    if let SqlToken::Operator(ref o) = op {
+                        if o == "=" {
+                            let is_equal = match (val_a, val_b) {
+                                (SqlToken::Numeric(a), SqlToken::Numeric(b)) => a == b,
+                                (SqlToken::StringLiteral(a), SqlToken::StringLiteral(b)) => a == b,
+                                (SqlToken::Other(a), SqlToken::Other(b)) => a == b,
+                                _ => false,
+                            };
+                            if is_equal {
+                                return Some(format!(
+                                    "Tautology bypass detected via {} {} = {}",
+                                    k,
+                                    format_token(val_a),
+                                    format_token(val_b)
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut seen_union = false;
+    for t in &tokens {
+        if let SqlToken::Keyword(ref k) = t {
+            if k == "UNION" {
+                seen_union = true;
+            } else if k == "SELECT" && seen_union {
+                return Some("UNION SELECT injection detected".to_string());
+            }
+        }
+    }
+    None
+}
+
+fn format_token(t: &SqlToken) -> String {
+    match t {
+        SqlToken::Keyword(s) => s.to_string(),
+        SqlToken::Numeric(s) => s.to_string(),
+        SqlToken::StringLiteral(s) => format!("'{}'", s),
+        SqlToken::Operator(s) => s.to_string(),
+        SqlToken::Symbol(c) => c.to_string(),
+        SqlToken::Comment => "--".to_string(),
+        SqlToken::Other(s) => s.to_string(),
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum XssToken {
+    TagStart(String),
+    TagEnd,
+    Attribute(String, String),
+    JsProtocol,
+    JsEvent(String),
+    HtmlComment,
+}
+
+fn tokenize_xss(input: &str) -> Vec<XssToken> {
+    let mut tokens = Vec::new();
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '<'
+            && i + 3 < chars.len()
+            && chars[i + 1] == '!'
+            && chars[i + 2] == '-'
+            && chars[i + 3] == '-'
+        {
+            tokens.push(XssToken::HtmlComment);
+            i += 4;
+            continue;
+        }
+        if c == 'j' && i + 10 < chars.len() {
+            let potential: String = chars[i..i + 11].iter().collect();
+            if potential.to_lowercase().starts_with("javascript:") {
+                tokens.push(XssToken::JsProtocol);
+                i += 11;
+                continue;
+            }
+        }
+        if c == '<' && i + 1 < chars.len() && (chars[i + 1].is_alphabetic() || chars[i + 1] == '/')
+        {
+            i += 1;
+            let mut tag_name = String::new();
+            if chars[i] == '/' {
+                tag_name.push('/');
+                i += 1;
+            }
+            while i < chars.len() && chars[i].is_alphanumeric() {
+                tag_name.push(chars[i]);
+                i += 1;
+            }
+            tokens.push(XssToken::TagStart(tag_name.to_lowercase()));
+            while i < chars.len() && chars[i] != '>' {
+                let ac = chars[i];
+                if ac.is_whitespace() {
+                    i += 1;
+                    continue;
+                }
+                if ac.is_alphabetic() {
+                    let mut attr_name = String::new();
+                    while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '-') {
+                        attr_name.push(chars[i]);
+                        i += 1;
+                    }
+                    let attr_name_lower = attr_name.to_lowercase();
+                    if attr_name_lower.starts_with("on") {
+                        tokens.push(XssToken::JsEvent(attr_name_lower.clone()));
+                    }
+                    while i < chars.len() && chars[i].is_whitespace() {
+                        i += 1;
+                    }
+                    if i < chars.len() && chars[i] == '=' {
+                        i += 1;
+                        while i < chars.len() && chars[i].is_whitespace() {
+                            i += 1;
+                        }
+                        if i < chars.len() {
+                            let val_c = chars[i];
+                            let mut val = String::new();
+                            if val_c == '\'' || val_c == '"' {
+                                i += 1;
+                                while i < chars.len() && chars[i] != val_c {
+                                    val.push(chars[i]);
+                                    i += 1;
+                                }
+                                i += 1;
+                            } else {
+                                while i < chars.len()
+                                    && !chars[i].is_whitespace()
+                                    && chars[i] != '>'
+                                {
+                                    val.push(chars[i]);
+                                    i += 1;
+                                }
+                            }
+                            tokens.push(XssToken::Attribute(attr_name_lower, val));
+                        }
+                    } else {
+                        tokens.push(XssToken::Attribute(attr_name_lower, String::new()));
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            if i < chars.len() && chars[i] == '>' {
+                tokens.push(XssToken::TagEnd);
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    tokens
+}
+
+fn check_xss_injection_semantic(input: &str) -> Option<String> {
+    let tokens = tokenize_xss(input);
+    for t in &tokens {
+        match t {
+            XssToken::TagStart(name) => {
+                if name == "script" || name == "iframe" || name == "object" || name == "embed" {
+                    return Some(format!("Dangerous HTML tag '<{}' injection detected", name));
+                }
+            }
+            XssToken::JsEvent(event_name) => {
+                return Some(format!(
+                    "HTML JS event handler '{}=' injection detected",
+                    event_name
+                ));
+            }
+            XssToken::JsProtocol => {
+                return Some("JavaScript protocol 'javascript:' URI schema detected".to_string());
+            }
+            XssToken::Attribute(name, val) => {
+                if name == "src" || name == "href" {
+                    let val_lower = val.to_lowercase();
+                    if val_lower.starts_with("javascript:")
+                        || val_lower.starts_with("data:text/html")
+                    {
+                        return Some(format!(
+                            "Dangerous URL scheme in attribute {}='{}'",
+                            name, val
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 impl RuleEngine {
     /// Rate limiter check (token bucket). Return true jika diizinkan.
     pub fn check_rate_limit(&self, ip: IpAddr, limit: u32) -> bool {
@@ -312,6 +699,8 @@ mod tests {
             rate_limit_policies: vec![],
             certificates: vec![],
             custom_rules: vec![],
+            allowlists: vec![],
+            blacklists: vec![],
         }
     }
 
@@ -405,5 +794,76 @@ mod tests {
         let (rule_id, msg) = result.unwrap();
         assert_eq!(rule_id, "LFI-001");
         assert!(msg.contains("Local File Inclusion"));
+    }
+
+    #[test]
+    fn test_sqli_ast_semantic_blocked() {
+        let engine = RuleEngine::new(&test_config());
+        let headers = HashMap::new();
+
+        // Test SQLi AST Tautology
+        let result = engine.check_request(
+            "/",
+            "id=1%20OR%20'abc'='abc'",
+            &headers,
+            "",
+            None,
+            "GET",
+            &["SQLI-AST".to_string()],
+        );
+        assert!(result.is_some());
+        let (rule_id, msg) = result.unwrap();
+        assert_eq!(rule_id, "SQLI-AST");
+        assert!(msg.contains("Tautology bypass detected"));
+
+        // Test SQLi AST Comment Injection
+        let result = engine.check_request(
+            "/",
+            "q=admin'--",
+            &headers,
+            "",
+            None,
+            "GET",
+            &["SQLI-AST".to_string()],
+        );
+        assert!(result.is_some());
+        let (rule_id, _) = result.unwrap();
+        assert_eq!(rule_id, "SQLI-AST");
+    }
+
+    #[test]
+    fn test_xss_ast_semantic_blocked() {
+        let engine = RuleEngine::new(&test_config());
+        let headers = HashMap::new();
+
+        // Test XSS tag injection
+        let result = engine.check_request(
+            "/",
+            "input=<script>alert(1)</script>",
+            &headers,
+            "",
+            None,
+            "GET",
+            &["XSS-AST".to_string()],
+        );
+        assert!(result.is_some());
+        let (rule_id, msg) = result.unwrap();
+        assert_eq!(rule_id, "XSS-AST");
+        assert!(msg.contains("Dangerous HTML tag"));
+
+        // Test XSS Event Handler
+        let result = engine.check_request(
+            "/",
+            "input=<img%20src=x%20onerror=alert(1)>",
+            &headers,
+            "",
+            None,
+            "GET",
+            &["XSS-AST".to_string()],
+        );
+        assert!(result.is_some());
+        let (rule_id, msg) = result.unwrap();
+        assert_eq!(rule_id, "XSS-AST");
+        assert!(msg.contains("HTML JS event handler"));
     }
 }

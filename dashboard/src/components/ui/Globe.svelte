@@ -41,21 +41,54 @@
         mapSamples: 16000,
         mapBrightness: 8,
         baseColor: [0.05, 0.05, 0.1], // Dark slate
-        markerColor: [0.9, 0.2, 0.2], // Red markers
+        markerColor: [0.9, 0.2, 0.2], // Fallback marker color
         glowColor: [0.1, 0.1, 0.3], // Blueish glow
-        markerElevation: 0.05,
-        markers: markers.map((m) => ({ location: m.location, size: 0.05 })),
+        markerElevation: 0.08,
+        markers: markers.map((m) => ({ location: m.location, size: m.size || 0.05, color: m.color })),
         onRender: (state: any) => {
           if (!isPointerInteracting) {
             phi += speed;
           }
           state.phi = phi + pointerInteractionMovement;
-          // Keep markers synced with rotation
+          
+          const r = width / 2;
+          const cx = width / 2;
+          const cy = width / 2;
+          
           const markersElements = document.querySelectorAll(".globe-marker");
-          markersElements.forEach((el, i) => {
-            const mPhi = (markers[i].location[1] * Math.PI) / 180;
-            const dist = Math.cos(state.phi + mPhi);
-            (el as HTMLElement).style.opacity = dist > 0 ? "1" : "0";
+          markersElements.forEach((el, idx) => {
+            const m = markers[idx];
+            if (!m) return;
+            
+            const lat = m.location[0] * (Math.PI / 180);
+            const lon = m.location[1] * (Math.PI / 180);
+            
+            // Cartesian coordinates
+            const x = Math.cos(lat) * Math.sin(-lon);
+            const y = Math.sin(-lat);
+            const z = Math.cos(lat) * Math.cos(-lon);
+            
+            // Rotate Y (longitude)
+            const x_rot = x * Math.cos(state.phi) - z * Math.sin(state.phi);
+            const z_rot = x * Math.sin(state.phi) + z * Math.cos(state.phi);
+            
+            // Rotate X (latitude/tilt)
+            const y_rot = y * Math.cos(state.theta) - z_rot * Math.sin(state.theta);
+            const z_final = y * Math.sin(state.theta) + z_rot * Math.cos(state.theta);
+            
+            const htmlEl = el as HTMLElement;
+            if (z_final > 0) {
+              const screenX = cx + x_rot * r * 0.88;
+              const screenY = cy - y_rot * r * 0.88;
+              
+              htmlEl.style.left = `${screenX}px`;
+              htmlEl.style.top = `${screenY}px`;
+              htmlEl.style.opacity = "1";
+              htmlEl.style.display = "flex";
+            } else {
+              htmlEl.style.opacity = "0";
+              htmlEl.style.display = "none";
+            }
           });
         },
       });
@@ -99,18 +132,15 @@
     }}
   ></canvas>
 
-  {#each markers as m, i}
+  {#each markers as m}
     <div
-      class="globe-marker absolute pointer-events-none flex items-center gap-2 px-2 py-1 bg-slate-900/80 backdrop-blur border border-slate-700/50 rounded shadow-lg transition-opacity duration-300"
-      style="bottom: 20%; left: {10 + i * 15}%; transform: translate(-50%, 0);"
+      class="globe-marker absolute pointer-events-none flex items-center gap-2 px-2 py-1 bg-slate-900/90 backdrop-blur border border-slate-700/50 rounded shadow-lg transition-opacity duration-150"
+      style="transform: translate(-50%, -100%); display: none; opacity: 0;"
     >
-      <span class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444] animate-pulse"></span>
-      <span class="font-mono text-[10px] font-bold tracking-widest text-red-500 uppercase"
-        >{m.action || "BLOCK"}</span
+      <span class="w-2 h-2 rounded-full {m.colorClass || 'bg-red-500 shadow-[0_0_8px_#ef4444]'} animate-pulse"></span>
+      <span class="font-mono text-[10px] font-bold tracking-widest text-slate-100 uppercase"
+        >{m.country || 'ID'} | {m.countFormatted || '1'}</span
       >
-      <span class="pl-2 border-l border-slate-600 text-[10px] text-slate-300">
-        {m.count || 1} Req
-      </span>
     </div>
   {/each}
 </div>

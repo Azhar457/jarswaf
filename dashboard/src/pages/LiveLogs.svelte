@@ -46,10 +46,12 @@
       tagColor = "\x1b[1;33m"; // Bold yellow
     }
 
+    const displayPath = path.length > 40 ? path.slice(0, 37) + "..." : path;
+
     const actionTag = `${tagColor}[${action}]\x1b[0m`;
     const timeTag = `\x1b[90m[${timeStr}]\x1b[0m`;
     const methodTag = `\x1b[1;36m${method}\x1b[0m`;
-    const pathTag = `\x1b[37m${path}\x1b[0m`;
+    const pathTag = `\x1b[37m${displayPath}\x1b[0m`;
     const ipTag = `\x1b[1;35m${ip}\x1b[0m`;
     const reasonTag = reason ? ` \x1b[33m(${reason})\x1b[0m` : "";
 

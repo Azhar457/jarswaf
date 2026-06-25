@@ -159,6 +159,201 @@ fn get_docker_services() -> Vec<DiscoveredService> {
     services
 }
 
+fn get_system_services() -> Vec<DiscoveredService> {
+    let mut services = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(tcp_services) = parse_proc_net_tcp("/proc/net/tcp", "TCP") {
+            services.extend(tcp_services);
+        }
+        if let Ok(tcp6_services) = parse_proc_net_tcp("/proc/net/tcp6", "TCP") {
+            services.extend(tcp6_services);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(cmd_output) = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Get-NetTCPConnection -State Listen | Select-Object LocalPort, OwningProcess | ConvertTo-Json -Compress"])
+            .output()
+        {
+            if cmd_output.status.success() {
+                let out_str = String::from_utf8_lossy(&cmd_output.stdout);
+                if !out_str.trim().is_empty() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&out_str) {
+                        let mut sys = sysinfo::System::new();
+                        sys.refresh_processes();
+
+                        let parse_item = |item: &serde_json::Value| -> Option<DiscoveredService> {
+                            let port = item.get("LocalPort")?.as_u64()? as u16;
+                            if port == 8080 || port == 80 || port == 443 {
+                                return None;
+                            }
+                            let pid = item.get("OwningProcess")?.as_u64()? as u32;
+                            let proc_name = sys.process(sysinfo::Pid::from(pid as usize))
+                                .map(|p| p.name().to_string())
+                                .unwrap_or_else(|| format!("PID {pid}"));
+                            Some(DiscoveredService {
+                                name: proc_name,
+                                port,
+                                protocol: "TCP".to_string(),
+                                source: "System".to_string(),
+                            })
+                        };
+
+                        if let Some(arr) = val.as_array() {
+                            for item in arr {
+                                if let Some(srv) = parse_item(item) {
+                                    services.push(srv);
+                                }
+                            }
+                        } else if let Some(srv) = parse_item(&val) {
+                            services.push(srv);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(cmd_output) = std::process::Command::new("lsof")
+            .args(["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pN"])
+            .output()
+        {
+            if cmd_output.status.success() {
+                let out_str = String::from_utf8_lossy(&cmd_output.stdout);
+                let mut current_pid = 0u32;
+                let mut sys = sysinfo::System::new();
+                sys.refresh_processes();
+
+                for line in out_str.lines() {
+                    if line.starts_with('p') {
+                        if let Ok(pid) = line[1..].parse::<u32>() {
+                            current_pid = pid;
+                        }
+                    } else if line.starts_with('N') {
+                        if let Some(port_idx) = line.rfind(':') {
+                            if let Ok(port) = line[port_idx+1..].parse::<u16>() {
+                                if port != 8080 && port != 80 && port != 443 {
+                                    let proc_name = sys.process(sysinfo::Pid::from(current_pid as usize))
+                                        .map(|p| p.name().to_string())
+                                        .unwrap_or_else(|| format!("PID {current_pid}"));
+                                    services.push(DiscoveredService {
+                                        name: proc_name,
+                                        port,
+                                        protocol: "TCP".to_string(),
+                                        source: "System".to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    services.sort_by_key(|s| s.port);
+    services.dedup_by(|a, b| a.port == b.port);
+    services
+}
+
+#[cfg(target_os = "linux")]
+fn parse_proc_net_tcp(file_path: &str, protocol: &str) -> Result<Vec<DiscoveredService>, std::io::Error> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+    
+    let file = File::open(file_path)?;
+    let reader = BufReader::new(file);
+    let mut services = Vec::new();
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes();
+
+    let inode_map = get_linux_socket_inodes();
+
+    for (idx, line) in reader.lines().enumerate() {
+        if idx == 0 {
+            continue;
+        }
+        let line = line?;
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 10 {
+            continue;
+        }
+
+        let state = parts[3];
+        if state != "0A" {
+            continue;
+        }
+
+        let local_addr = parts[1];
+        let addr_parts: Vec<&str> = local_addr.split(':').collect();
+        if addr_parts.len() != 2 {
+            continue;
+        }
+
+        let port = u16::from_str_radix(addr_parts[1], 16).unwrap_or(0);
+        if port == 8080 || port == 80 || port == 443 || port == 0 {
+            continue;
+        }
+
+        let inode = parts[9];
+        let mut process_name = "Unknown".to_string();
+
+        if let Some(&pid) = inode_map.get(inode) {
+            if let Some(p) = sys.process(sysinfo::Pid::from(pid as usize)) {
+                process_name = p.name().to_string();
+            } else if let Ok(cmd) = std::fs::read_to_string(format!("/proc/{}/comm", pid)) {
+                process_name = cmd.trim().to_string();
+            }
+        }
+
+        services.push(DiscoveredService {
+            name: process_name,
+            port,
+            protocol: protocol.to_string(),
+            source: "System".to_string(),
+        });
+    }
+
+    Ok(services)
+}
+
+#[cfg(target_os = "linux")]
+fn get_linux_socket_inodes() -> std::collections::HashMap<String, u32> {
+    let mut map = std::collections::HashMap::new();
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if let Some(name_str) = path.file_name().and_then(|s| s.to_str()) {
+                    if let Ok(pid) = name_str.parse::<u32>() {
+                        let fd_path = format!("/proc/{}/fd", pid);
+                        if let Ok(fd_entries) = std::fs::read_dir(fd_path) {
+                            for fd_entry in fd_entries {
+                                if let Ok(fd_entry) = fd_entry {
+                                    if let Ok(link) = std::fs::read_link(fd_entry.path()) {
+                                        if let Some(link_str) = link.to_str() {
+                                            if link_str.starts_with("socket:[") && link_str.ends_with(']') {
+                                                let inode = &link_str[8..link_str.len() - 1];
+                                                map.insert(inode.to_string(), pid);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
 fn get_network_interfaces() -> Vec<String> {
     let networks = Networks::new_with_refreshed_list();
     networks.keys().map(|name| name.to_string()).collect()
@@ -335,7 +530,13 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                     disk,
                     uptime: sysinfo::System::uptime(),
                     network_interfaces: get_network_interfaces(),
-                    discovered_services: get_docker_services(),
+                    discovered_services: {
+                        let mut srvs = get_docker_services();
+                        srvs.extend(get_system_services());
+                        srvs.sort_by_key(|s| s.port);
+                        srvs.dedup_by(|a, b| a.port == b.port);
+                        srvs
+                    },
                 };
 
                 let url = format!(
@@ -879,6 +1080,14 @@ async fn run_controller(port: u16, config_path: String) {
             "/api/v1/custom-rules",
             get(get_custom_rules_handler).post(post_custom_rules_handler),
         )
+        .route(
+            "/api/v1/allowlists",
+            get(get_allowlists_handler).post(post_allowlists_handler),
+        )
+        .route(
+            "/api/v1/blacklists",
+            get(get_blacklists_handler).post(post_blacklists_handler),
+        )
         .route("/api/v1/stats", get(get_stats_handler))
         .route("/api/v1/reputation/blocklist", get(get_blocklist_handler))
         .route(
@@ -1290,6 +1499,120 @@ async fn post_custom_rules_handler(
     }
 }
 
+async fn get_allowlists_handler(State(state): State<ControllerState>) -> impl IntoResponse {
+    let cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load config").into_response();
+        }
+    };
+    (StatusCode::OK, Json(cfg.allowlists)).into_response()
+}
+
+async fn post_allowlists_handler(
+    State(state): State<ControllerState>,
+    Json(allowlists): Json<Vec<config::AllowlistRule>>,
+) -> impl IntoResponse {
+    let mut cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load config").into_response();
+        }
+    };
+
+    cfg.allowlists = allowlists;
+
+    let toml_str = match toml::to_string(&cfg) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Failed to serialize updated config to TOML: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to serialize config",
+            )
+                .into_response();
+        }
+    };
+
+    match std::fs::write(&state.config_path, toml_str) {
+        Ok(_) => {
+            info!(
+                "Allowlists configuration updated successfully in {}",
+                state.config_path
+            );
+            let _ = state.config_tx.send(cfg);
+            StatusCode::OK.into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to write updated config to disk: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to write config file",
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn get_blacklists_handler(State(state): State<ControllerState>) -> impl IntoResponse {
+    let cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load config").into_response();
+        }
+    };
+    (StatusCode::OK, Json(cfg.blacklists)).into_response()
+}
+
+async fn post_blacklists_handler(
+    State(state): State<ControllerState>,
+    Json(blacklists): Json<Vec<config::BlacklistRule>>,
+) -> impl IntoResponse {
+    let mut cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load config").into_response();
+        }
+    };
+
+    cfg.blacklists = blacklists;
+
+    let toml_str = match toml::to_string(&cfg) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Failed to serialize updated config to TOML: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to serialize config",
+            )
+                .into_response();
+        }
+    };
+
+    match std::fs::write(&state.config_path, toml_str) {
+        Ok(_) => {
+            info!(
+                "Blacklists configuration updated successfully in {}",
+                state.config_path
+            );
+            let _ = state.config_tx.send(cfg);
+            StatusCode::OK.into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to write updated config to disk: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to write config file",
+            )
+                .into_response()
+        }
+    }
+}
+
 async fn auth_middleware(
     State(state): State<ControllerState>,
     req: Request<Body>,
@@ -1374,6 +1697,9 @@ async fn get_vhosts_handler(State(state): State<ControllerState>) -> impl IntoRe
             ssl: "Auto (Local CA)".to_string(),
             max_body: "10MB".to_string(),
             rate_limit: "600 req/min".to_string(),
+            is_default: false,
+            allowlists: vec![],
+            blacklists: vec![],
         };
         cfg.vhosts.push(dummy);
         // Save it back to config file so it is persisted!
@@ -1607,25 +1933,38 @@ struct ThreatEvent {
     rule_id: String,
     timestamp: String,
     magnitude: f64,
+    action: String,
+    country: String,
 }
 
-fn hash_ip_to_coords(ip: &str) -> (f64, f64) {
+fn get_country_and_coords_for_ip(ip: &str) -> (&'static str, f64, f64) {
     let mut hash = 5381u32;
     for c in ip.bytes() {
         hash = hash.wrapping_mul(33).wrapping_add(c as u32);
     }
-    // Lat from -90 to 90
-    let lat = ((hash % 18000) as f64 / 100.0) - 90.0;
-    // Lng from -180 to 180
-    let lng = ((hash / 18000 % 36000) as f64 / 100.0) - 180.0;
-    (lat, lng)
+    
+    let countries = [
+        ("ID", -0.7893, 113.9213),  // Indonesia
+        ("US", 37.0902, -95.7129),  // United States
+        ("CN", 35.8617, 104.1954),  // China
+        ("SG", 1.3521, 103.8198),   // Singapore
+        ("JP", 36.2048, 138.2529),  // Japan
+        ("GB", 55.3781, -3.4360),   // United Kingdom
+        ("DE", 51.1657, 10.4515),   // Germany
+        ("FR", 46.2276, 2.2137),    // France
+        ("AU", -25.2744, 133.7751), // Australia
+        ("NL", 52.1326, 5.2913),    // Netherlands
+    ];
+    
+    let idx = (hash as usize) % countries.len();
+    countries[idx]
 }
 
 async fn get_threat_intel_events_handler(
     State(state): State<ControllerState>,
 ) -> impl IntoResponse {
     let client = crate::logging::build_client();
-    let query = "SELECT timestamp, client_ip, rule_id FROM request_log WHERE action = 'BLOCK' ORDER BY timestamp DESC LIMIT 50 FORMAT JSONEachRow";
+    let query = "SELECT timestamp, client_ip, rule_id, action FROM request_log ORDER BY timestamp DESC LIMIT 100 FORMAT JSONEachRow";
     let url = format!(
         "{}/?query={}",
         state.clickhouse_url.trim_end_matches('/'),
@@ -1637,19 +1976,22 @@ async fn get_threat_intel_events_handler(
             let mut events = Vec::new();
             for line in text.lines() {
                 if let Ok(log) = serde_json::from_str::<serde_json::Value>(line) {
-                    if let (Some(ip), Some(ts), Some(rule)) = (
-                        log.get("client_ip").and_then(|v| v.as_str()),
-                        log.get("timestamp").and_then(|v| v.as_str()),
-                        log.get("rule_id").and_then(|v| v.as_str()),
+                    if let (Some(ip), Some(ts), Some(action)) = (
+                         log.get("client_ip").and_then(|v| v.as_str()),
+                         log.get("timestamp").and_then(|v| v.as_str()),
+                         log.get("action").and_then(|v| v.as_str()),
                     ) {
-                        let (lat, lng) = hash_ip_to_coords(ip);
+                        let rule = log.get("rule_id").and_then(|v| v.as_str()).unwrap_or("-");
+                        let (country, lat, lng) = get_country_and_coords_for_ip(ip);
                         events.push(ThreatEvent {
                             ip: ip.to_string(),
                             lat,
                             lng,
                             rule_id: rule.to_string(),
                             timestamp: ts.to_string(),
-                            magnitude: 0.1, // Fixed size for UI rendering
+                            magnitude: 0.1,
+                            action: action.to_string(),
+                            country: country.to_string(),
                         });
                     }
                 }
