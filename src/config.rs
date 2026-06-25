@@ -11,6 +11,8 @@ pub struct Config {
     pub vhosts: Vec<VHost>,
     #[serde(default)]
     pub certificates: Vec<CertificateConfig>,
+    #[serde(default)]
+    pub custom_rules: Vec<CustomRule>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -39,6 +41,10 @@ pub struct GlobalConfig {
     #[serde(default = "default_log_level")]
     pub log_level: String,
     pub trusted_proxies: Option<Vec<String>>,
+    #[serde(default)]
+    pub admin_token: Option<String>,
+    #[serde(default = "default_waf_enabled")]
+    pub waf_enabled: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -75,7 +81,7 @@ pub struct VHost {
     #[serde(default = "default_geoblock_type")]
     pub geoblock_type: String,
     #[serde(default)]
-    pub custom_rules: Vec<CustomRule>,
+    pub custom_rules: Vec<String>,
     #[serde(default = "default_ssl")]
     pub ssl: String,
     #[serde(default = "default_max_body")]
@@ -102,6 +108,10 @@ fn default_rate_limit_str() -> String {
 
 fn default_log_level() -> String {
     "security".to_string()
+}
+
+fn default_waf_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

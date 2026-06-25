@@ -6,7 +6,7 @@
   import ConfirmationModal from "../components/ui/ConfirmationModal.svelte";
   import { toast } from "../lib/toast";
 
-  import { vhostsList } from "../lib/stores";
+  import { vhostsList, token } from "../lib/stores";
 
   const controllerUrl =
     typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
@@ -27,9 +27,13 @@
 
   async function saveToServer() {
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if ($token) {
+        headers["Authorization"] = `Bearer ${$token}`;
+      }
       const response = await fetch(`${controllerUrl}/api/v1/vhosts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify($vhostsList),
       });
       if (!response.ok) throw new Error("Failed to save");

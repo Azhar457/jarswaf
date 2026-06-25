@@ -4,7 +4,6 @@ use axum::{
     http::{Request, Response, StatusCode},
     response::IntoResponse,
 };
-use hyper_util::client::legacy::Client;
 use std::net::SocketAddr;
 use crate::{AppState, rules::RuleEngine, vhost};
 use std::collections::HashMap;
@@ -16,10 +15,16 @@ pub async fn forward_request(
     host: Option<Host>,
     req: Request<Body>,
 ) -> Response<Body> {
+    let mut req = req;
     // Read config inside a block to ensure RwLockReadGuard does not cross await boundaries
-    let (backend_addr, vhost_cfg, global_max_body_size, global_default_rate_limit, log_level, trusted_proxies) = {
+    let (backend_addr, vhost_cfg, global_max_body_size, global_default_rate_limit, log_level, trusted_proxies, resolved_custom_rules, waf_enabled) = {
         let config_lock = state.config.read().unwrap();
         let (b, v) = vhost::match_vhost(host.as_ref(), &*config_lock);
+        
+        let resolved = v.custom_rules.iter()
+            .filter_map(|id| config_lock.custom_rules.iter().find(|r| &r.id == id).cloned())
+            .collect::<Vec<crate::config::CustomRule>>();
+            
         (
             b.to_string(),
             v.clone(),
@@ -27,6 +32,8 @@ pub async fn forward_request(
             config_lock.global.default_rate_limit,
             config_lock.global.log_level.to_lowercase(),
             config_lock.global.trusted_proxies.clone(),
+            resolved,
+            config_lock.global.waf_enabled,
         )
     };
 
@@ -84,6 +91,76 @@ pub async fn forward_request(
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
+
+    if !waf_enabled {
+        let (parts, body) = req.into_parts();
+        let mut req = Request::from_parts(parts, Body::empty());
+        
+        let client = state.http_client.clone();
+        let uri_str = if backend_addr.starts_with("http://") || backend_addr.starts_with("https://") {
+            format!("{}{}", backend_addr, path_and_query)
+        } else {
+            format!("http://{}{}", backend_addr, path_and_query)
+        };
+        
+        let uri = match uri_str.parse::<axum::http::Uri>() {
+            Ok(u) => u,
+            Err(e) => {
+                tracing::error!("Invalid backend URI '{}': {}", uri_str, e);
+                return (StatusCode::BAD_GATEWAY, "Invalid backend address configuration").into_response();
+            }
+        };
+        
+        let mut backend_req = Request::builder()
+            .method(method.clone())
+            .uri(uri);
+        for (key, value) in &headers_map {
+            backend_req = backend_req.header(key.as_str(), value.as_str());
+        }
+        let backend_req = backend_req.body(body).unwrap();
+        
+        let is_upgrade = req.headers().get(axum::http::header::UPGRADE).is_some();
+        let client_upgrade = if is_upgrade {
+            Some(hyper::upgrade::on(&mut req))
+        } else {
+            None
+        };
+        
+        let backend_timeout = tokio::time::Duration::from_secs(30);
+        match tokio::time::timeout(backend_timeout, client.request(backend_req)).await {
+            Ok(Ok(mut resp)) => {
+                if is_upgrade && resp.status() == StatusCode::SWITCHING_PROTOCOLS {
+                    if let Some(c_upgrade) = client_upgrade {
+                        let b_upgrade = hyper::upgrade::on(&mut resp);
+                        tokio::spawn(async move {
+                            match tokio::join!(c_upgrade, b_upgrade) {
+                                (Ok(client_io), Ok(backend_io)) => {
+                                    use hyper_util::rt::TokioIo;
+                                    let mut client_io = TokioIo::new(client_io);
+                                    let mut backend_io = TokioIo::new(backend_io);
+                                    if let Err(e) = tokio::io::copy_bidirectional(&mut client_io, &mut backend_io).await {
+                                        tracing::debug!("WebSocket proxy tunnel closed: {:?}", e);
+                                    }
+                                }
+                                (Err(e1), _) => tracing::error!("Client WS upgrade failed: {:?}", e1),
+                                (_, Err(e2)) => tracing::error!("Backend WS upgrade failed: {:?}", e2),
+                            }
+                        });
+                    }
+                }
+                let (parts, body) = resp.into_parts();
+                return Response::from_parts(parts, Body::new(body));
+            }
+            Ok(Err(e)) => {
+                tracing::error!("Backend proxy request failed: {:?}", e);
+                return (StatusCode::BAD_GATEWAY, "Backend service unavailable").into_response();
+            }
+            Err(_) => {
+                tracing::error!("Backend proxy request timed out");
+                return (StatusCode::GATEWAY_TIMEOUT, "Backend gateway timeout").into_response();
+            }
+        }
+    }
 
     // Check Collaborative IP Threat Intelligence Blocklist
     let is_reputation_blocked = {
@@ -155,8 +232,10 @@ pub async fn forward_request(
         .map(|t| t.body_inspection)
         .unwrap_or(true);
 
+    let (parts, body) = req.into_parts();
+
     let (body_str, new_body) = if body_inspection {
-        match axum::body::to_bytes(req.into_body(), max_body_size).await {
+        match axum::body::to_bytes(body, max_body_size).await {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes).to_string();
                 (text, Body::from(bytes))
@@ -168,11 +247,13 @@ pub async fn forward_request(
         }
     } else {
         // Jangan inspeksi, langsung forward
-        (String::new(), req.into_body())
+        (String::new(), body)
     };
 
+    let mut req = Request::from_parts(parts, Body::empty());
+
     // Check Custom Rules
-    for rule in &vhost_cfg.custom_rules {
+    for rule in &resolved_custom_rules {
         if !rule.enabled {
             continue;
         }
@@ -295,20 +376,38 @@ pub async fn forward_request(
 
     // Forward ke backend
     let client = state.http_client.clone();
-    let backend_addr_parsed = backend_addr.parse::<SocketAddr>().expect("Invalid backend address");
-    let uri = format!("http://{}{}", backend_addr_parsed, path_and_query);
+    let uri_str = if backend_addr.starts_with("http://") || backend_addr.starts_with("https://") {
+        format!("{}{}", backend_addr, path_and_query)
+    } else {
+        format!("http://{}{}", backend_addr, path_and_query)
+    };
+
+    let uri = match uri_str.parse::<axum::http::Uri>() {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!("Invalid backend URI '{}': {}", uri_str, e);
+            return (StatusCode::BAD_GATEWAY, "Invalid backend address configuration").into_response();
+        }
+    };
 
     let mut backend_req = Request::builder()
         .method(method.clone())
-        .uri(&uri);
+        .uri(uri);
     for (key, value) in &headers_map {
         backend_req = backend_req.header(key.as_str(), value.as_str());
     }
     let backend_req = backend_req.body(new_body).unwrap();
 
+    let is_upgrade = req.headers().get(axum::http::header::UPGRADE).is_some();
+    let client_upgrade = if is_upgrade {
+        Some(hyper::upgrade::on(&mut req))
+    } else {
+        None
+    };
+
     let backend_timeout = tokio::time::Duration::from_secs(30);
     match tokio::time::timeout(backend_timeout, client.request(backend_req)).await {
-        Ok(Ok(resp)) => {
+        Ok(Ok(mut resp)) => {
             if log_level == "verbose" || log_level == "all" {
                 let status = resp.status();
                 let entry = crate::logging::WafLogEntry {
@@ -322,6 +421,27 @@ pub async fn forward_request(
                 };
                 let _ = state.log_tx.try_send(entry);
             }
+
+            if is_upgrade && resp.status() == StatusCode::SWITCHING_PROTOCOLS {
+                if let Some(c_upgrade) = client_upgrade {
+                    let b_upgrade = hyper::upgrade::on(&mut resp);
+                    tokio::spawn(async move {
+                        match tokio::join!(c_upgrade, b_upgrade) {
+                            (Ok(client_io), Ok(backend_io)) => {
+                                use hyper_util::rt::TokioIo;
+                                let mut client_io = TokioIo::new(client_io);
+                                let mut backend_io = TokioIo::new(backend_io);
+                                if let Err(e) = tokio::io::copy_bidirectional(&mut client_io, &mut backend_io).await {
+                                    tracing::debug!("WebSocket proxy tunnel closed: {:?}", e);
+                                }
+                            }
+                            (Err(e1), _) => tracing::error!("Client WS upgrade failed: {:?}", e1),
+                            (_, Err(e2)) => tracing::error!("Backend WS upgrade failed: {:?}", e2),
+                        }
+                    });
+                }
+            }
+
             // Convert hyper response to axum response
             let (parts, body) = resp.into_parts();
             Response::from_parts(parts, Body::new(body))

@@ -1,3 +1,5 @@
+certificates = []
+
 [global]
 port_http = 80
 port_https = 443
@@ -5,6 +7,8 @@ max_body_size = 10485760
 default_rate_limit = 600
 log_dir = "./logs"
 log_level = "verbose"
+admin_token = "6476d3eb0e7043f7b72272c308fce8bc"
+waf_enabled = true
 
 [tls]
 mode = "local_ca"
@@ -39,14 +43,28 @@ path = "/static/*, *.css, *.js, *.png"
 description = "Exempted assets to reduce WAF engine evaluation overhead."
 
 [[vhosts]]
-name = "development"
-hosts = ["dev.azharmtq.my.id"]
-backend = "http://127.0.0.1:9500"
+name = "aegis-demo"
+hosts = ["*.aegiswaf.demo"]
+backend = "127.0.0.1:8080"
 rate_limit_tiers = []
-rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "CMDI-*", "BOT-*", "SSRF-*"]
+rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*"]
 blocked_countries = []
-geoblock_type = "blacklist"
-custom_rules = []
-ssl = "None (HTTP only)"
+geoblock_type = "Blocklist"
+custom_rules = ["CR-825"]
+ssl = "Auto (Local CA)"
 max_body = "10MB"
-rate_limit = "100/m"
+rate_limit = "600 req/min"
+
+[vhosts.logging]
+enabled = true
+db_path = "logs/aegis-waf.db"
+
+[[custom_rules]]
+id = "CR-825"
+name = "Block Admin"
+condition_type = "path"
+operator = "contains"
+condition_value = "/wp-admin"
+action = "redirect"
+action_value = "https://www.youtube.com/watch?v=xvFZjo5PgG0"
+enabled = true

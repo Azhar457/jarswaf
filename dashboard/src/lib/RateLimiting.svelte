@@ -275,7 +275,7 @@
             stroke-width="10"
           ></circle>
           <circle
-            class="text-primary/30 blur-[4px] transition-all duration-700 ease-out"
+            class="text-primary/30 blur-4px transition-all duration-700 ease-out"
             cx="112"
             cy="112"
             fill="transparent"

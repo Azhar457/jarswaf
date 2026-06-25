@@ -16,7 +16,7 @@
     CheckCircle,
     AlertTriangle,
   } from "lucide-svelte";
-  import { vhostsList } from "../lib/stores";
+  import { vhostsList, customRulesList, token } from "../lib/stores";
   import { toast } from "../lib/toast";
   import Card from "../components/ui/Card.svelte";
   import Badge from "../components/ui/Badge.svelte";
@@ -117,14 +117,18 @@
 
   async function saveVhosts(silent = false) {
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if ($token) {
+        headers["Authorization"] = `Bearer ${$token}`;
+      }
       await fetch(`${controllerUrl}/api/v1/vhosts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify($vhostsList),
       });
       if (!silent) toast.success("Configuration saved successfully!");
     } catch (e) {
-      console.error("Failed to save rules:", e);
+      console.error("Failed to save WAF configuration:", e);
       toast.error("Failed to save configuration. Please check backend connection.");
     }
   }
@@ -212,21 +216,52 @@
     return `${field} ${op} "${rule.condition_value}"`;
   }
 
+  async function saveCustomRules() {
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if ($token) {
+        headers["Authorization"] = `Bearer ${$token}`;
+      }
+      const response = await fetch(`${controllerUrl}/api/v1/custom-rules`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify($customRulesList),
+      });
+      if (!response.ok) throw new Error("Failed to save rules");
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to save custom rules to backend.");
+    }
+  }
+
+  function isRuleBound(ruleId: string): boolean {
+    if ($vhostsList.length === 0) return false;
+    const vhost = $vhostsList[selectedVhostIndex];
+    return vhost.custom_rules ? vhost.custom_rules.includes(ruleId) : false;
+  }
+
   async function toggleCustomRule(ruleId: string) {
     if ($vhostsList.length === 0) return;
-    let enabledNow = false;
-    $vhostsList[selectedVhostIndex].custom_rules = $vhostsList[selectedVhostIndex].custom_rules.map(
-      (r) => {
-        if (r.id === ruleId) {
-          enabledNow = !r.enabled;
-          return { ...r, enabled: enabledNow };
-        }
-        return r;
-      },
-    );
+    const vhost = $vhostsList[selectedVhostIndex];
+    if (!vhost.custom_rules) vhost.custom_rules = [];
+
+    if (vhost.custom_rules.includes(ruleId)) {
+      vhost.custom_rules = vhost.custom_rules.filter((id) => id !== ruleId);
+      toast.info("Rule unbound from Virtual Host.");
+    } else {
+      vhost.custom_rules = [...vhost.custom_rules, ruleId];
+      toast.info("Rule bound to Virtual Host.");
+    }
     vhostsList.set($vhostsList);
-    toast.info(`Custom rule ${enabledNow ? "enabled" : "disabled"}.`);
     await saveVhosts(true);
+  }
+
+  async function toggleRuleGlobalEnabled(ruleId: string) {
+    $customRulesList = $customRulesList.map((r) =>
+      r.id === ruleId ? { ...r, enabled: !r.enabled } : r,
+    );
+    toast.info("Global rule state updated.");
+    await saveCustomRules();
   }
 
   function confirmDeleteRule(ruleId: string) {
@@ -236,11 +271,19 @@
 
   async function executeDeleteRule() {
     if (!ruleToDelete) return;
-    $vhostsList[selectedVhostIndex].custom_rules = $vhostsList[
-      selectedVhostIndex
-    ].custom_rules.filter((r) => r.id !== ruleToDelete);
+    $customRulesList = $customRulesList.filter((r) => r.id !== ruleToDelete);
+
+    // Also clean up references from vhosts
+    $vhostsList = $vhostsList.map((v) => {
+      if (v.custom_rules) {
+        v.custom_rules = v.custom_rules.filter((id) => id !== ruleToDelete);
+      }
+      return v;
+    });
+
     vhostsList.set($vhostsList);
-    toast.success("Custom rule deleted successfully.");
+    toast.success("Custom rule deleted globally.");
+    await saveCustomRules();
     await saveVhosts(true);
     showDeleteModal = false;
     ruleToDelete = null;
@@ -274,8 +317,8 @@
     showForm = false;
   }
 
-  function handleSaveCustomRule() {
-    if ($vhostsList.length === 0 || !ruleName || !conditionValue) {
+  async function handleSaveCustomRule() {
+    if (!ruleName || !conditionValue) {
       toast.warning("Please fill in all required fields.");
       return;
     }
@@ -288,8 +331,6 @@
       conditionFieldType === "header"
         ? `header:${customHeaderName.trim().toLowerCase()}`
         : conditionFieldType;
-    const currentVhost = $vhostsList[selectedVhostIndex];
-    if (!currentVhost.custom_rules) currentVhost.custom_rules = [];
 
     const newRuleData = {
       name: ruleName,
@@ -301,21 +342,33 @@
     };
 
     if (editingRuleId) {
-      currentVhost.custom_rules = currentVhost.custom_rules.map((r) =>
+      $customRulesList = $customRulesList.map((r) =>
         r.id === editingRuleId ? { ...r, ...newRuleData } : r,
       );
       toast.success("Custom rule updated successfully!");
     } else {
-      currentVhost.custom_rules.push({
-        id: "CR-" + Math.floor(100 + Math.random() * 900),
-        ...newRuleData,
-        enabled: true,
-      });
-      toast.success("New custom rule created!");
+      const newId = "CR-" + Math.floor(100 + Math.random() * 900);
+      $customRulesList = [
+        ...$customRulesList,
+        {
+          id: newId,
+          ...newRuleData,
+          enabled: true,
+        },
+      ];
+
+      // Auto-bind newly created rule to the selected vhost
+      if ($vhostsList.length > 0) {
+        const vhost = $vhostsList[selectedVhostIndex];
+        if (!vhost.custom_rules) vhost.custom_rules = [];
+        vhost.custom_rules = [...vhost.custom_rules, newId];
+        vhostsList.set($vhostsList);
+        await saveVhosts(true);
+      }
+      toast.success("New custom rule created and bound!");
     }
 
-    vhostsList.set($vhostsList);
-    saveVhosts(true);
+    await saveCustomRules();
     cancelEdit();
   }
 
@@ -356,7 +409,12 @@
         return;
       }
 
-      const activeCustomRules = host ? (host.custom_rules || []).filter((r) => r.enabled) : [];
+      const activeCustomRules =
+        host && host.custom_rules
+          ? host.custom_rules
+              .map((id) => $customRulesList.find((r) => r.id === id))
+              .filter((r): r is any => r !== undefined && r.enabled)
+          : [];
       for (const rule of activeCustomRules) {
         let isMatch = false;
         const matchVal = rule.condition_value.toLowerCase();
@@ -469,9 +527,11 @@
           </button>
         </div>
         <Card className="p-0 overflow-hidden">
-          <DataTable columns={["ID", "Rule Name", "Condition", "Action", "Active", "Options"]}>
-            {#if $vhostsList[selectedVhostIndex]?.custom_rules?.length > 0}
-              {#each $vhostsList[selectedVhostIndex].custom_rules as rule}
+          <DataTable
+            columns={["ID", "Rule Name", "Condition", "Action", "Enabled", "Active", "Options"]}
+          >
+            {#if $customRulesList && $customRulesList.length > 0}
+              {#each $customRulesList as rule}
                 <tr
                   class="hover:bg-slate-700/30 transition-colors {rule.enabled ? '' : 'opacity-50'}"
                 >
@@ -492,8 +552,17 @@
                     <input
                       type="checkbox"
                       checked={rule.enabled}
+                      on:change={() => toggleRuleGlobalEnabled(rule.id)}
+                      class="rounded border-slate-600 bg-slate-800 text-emerald-500 cursor-pointer"
+                    />
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-center">
+                    <input
+                      type="checkbox"
+                      checked={isRuleBound(rule.id)}
                       on:change={() => toggleCustomRule(rule.id)}
                       class="rounded border-slate-600 bg-slate-800 text-blue-500 cursor-pointer"
+                      disabled={$vhostsList.length === 0}
                     />
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-right">
@@ -514,7 +583,7 @@
               {/each}
             {:else}
               <tr>
-                <td colspan="6" class="px-6 py-8 text-center text-slate-500 italic"
+                <td colspan="7" class="px-6 py-8 text-center text-slate-500 italic"
                   >No custom rules defined. Click "Build Rule" to add one.</td
                 >
               </tr>

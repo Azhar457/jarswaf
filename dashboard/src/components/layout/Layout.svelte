@@ -21,8 +21,12 @@
   <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
     <Topbar systemStatus="online" on:deploy />
 
-    <main class="flex-1 overflow-y-auto bg-slate-950 p-6 md:p-8">
-      <div class="max-w-7xl mx-auto">
+    <main
+      class={`flex-1 bg-slate-950 p-6 md:p-8 ${activeTab === "traffic" ? "flex flex-col overflow-hidden min-h-0" : "overflow-y-auto"}`}
+    >
+      <div
+        class={`max-w-7xl mx-auto w-full ${activeTab === "traffic" ? "flex-1 flex flex-col overflow-hidden min-h-0" : ""}`}
+      >
         <slot />
       </div>
     </main>

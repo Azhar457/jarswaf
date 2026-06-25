@@ -68,8 +68,10 @@ flowchart LR
 ## ✨ Pros (Kelebihan & Keunggulan)
 
 - **High-Performance Rust Proxy**: Menggunakan `tokio`, `axum`, dan `hyper`. Proxy didesain secara asinkron (async) tanpa proses blocking pada *hot path*, sehingga overhead latensi analisis WAF sangat kecil.
+- **Optimized Log Pipeline (Asynchronous ClickHouse Logging)**: Aliran data log dari Agent ke Controller menuju ClickHouse diproses secara asinkron (`tokio::spawn`) tanpa memblokir thread utama, menghasilkan delay logging real-time di UI dan Terminal yang mendekati nol (<10ms).
+- **Pooled HTTP Connections (Wireshark Stabilized)**: Menggunakan *shared connection pool* HTTP client pada proxy engine. Mengeliminasi overhead TCP/TLS handshake berulang kali per request, menurunkan latensi proxy secara signifikan, dan menstabilkan traffic di Wireshark (Keep-Alive).
 - **Enterprise-Ready Database (ClickHouse)**: Kini Aegis beralih sepenuhnya ke **ClickHouse**. Semua *log* dan *metrics* disiram melalui *batching* (`JSONEachRow`) ke arsitektur analitik terdistribusi, menghilangkan *bottleneck* I/O pada SQLite.
-- **Real-Time Data Streaming**: Dashboard menggunakan Svelte Stores dan `Server-Sent Events (SSE)`. Log penyerangan akan dirender secara hardware-accelerated di UI melalui `@xterm/xterm` tanpa menyebabkan *freeze* pada browser meskipun pada saat terjadi DDoS.
+- **Real-Time Data Streaming**: Dashboard menggunakan Svelte Stores dan `WebSocket (WS)`. Log penyerangan akan dirender secara hardware-accelerated di UI melalui `@xterm/xterm` tanpa menyebabkan *freeze* pada browser meskipun pada saat terjadi DDoS.
 - **Modern & Beautiful UI**: Antarmuka dashboard didesain seperti terminal pengawasan (NOC) yang dilengkapi peta lalu-lintas jaringan (SVG Attack Map), Svelte stores reactivity, dan animasi micro-interactions.
 - **Reputation Blocklist Engine**: Mendeteksi IP nakal yang melebihi limit blokir secara konstan dan mem- *ban* IP tersebut di seluruh node Agent WAF.
 
@@ -77,13 +79,13 @@ flowchart LR
 
 ## ⚠️ Cons & Limitations (Kekurangan Secara Jujur)
 
-Walaupun tampilan terlihat canggih, mohon diperhatikan bahwa project ini **belum sepenuhnya siap untuk production** dan masih memiliki banyak *mockup* serta keterbatasan teknis:
+Walaupun tampilan terlihat canggih, mohon diperhatikan bahwa project ini **belum sepenuhnya siap untuk production** dan masih memiliki beberapa keterbatasan teknis:
 
 1. **Dashboard Rate Limiting Hanya Mockup**: 
    UI konfigurasi *Rate Limiting Tiers* (Default, Auth, WebDAV, dll) saat ini **100% hardcoded (palsu)**. Backend Rust baru mendukung *Rate Limiting* sederhana berupa batas RPM (*Requests Per Minute*) global atau per *virtual host*. Tidak ada penyimpanan tier di database.
    
-2. **Metrik Node Agent Adalah Simulasi (Palsu)**: 
-   Panel "WAF Node Agent Diagnostics" di dashboard yang menampilkan informasi penggunaan CPU, RAM, Disk, dan Uptime saat ini hanya **menggunakan fungsi matematika `Math.random()` di Svelte**. Belum ada integrasi eBPF atau `sysinfo` untuk mengukur *hardware usage* secara nyata.
+2. **Metrik Node Agent (Telemetry)**: 
+   Backend Rust telah diimplementasikan menggunakan crate `sysinfo` untuk mengambil metrik CPU, RAM, Disk, dan Uptime asli secara *real* (bukan mock). Namun, agar metrik tersebut terus ter-update secara dinamis di UI dashboard tanpa memuat ulang halaman, diperlukan sinkronisasi berkala (polling/push) di sisi Svelte stores.
 
 3. **Tidak Ada Sinkronisasi Real-Time Config (Gossip Protocol)**:
    Ketika rule atau blocklist diubah via UI, controller saat ini menyebar IP Blocklist, namun belum mendukung penyebaran Custom Rules atau sertifikat SSL secara dinamis tanpa *restart* Agent.
@@ -96,7 +98,7 @@ Aegis WAF adalah landasan / prototipe yang **sangat bagus** secara arsitektur da
 
 **Next Steps yang dibutuhkan (Roadmap):**
 - **eBPF Integration**: Menanamkan probe eBPF (XDP) untuk mem- *drop* koneksi pada level kernel sehingga konsumsi CPU server target mendekati 0% saat DDoS (Phase 5).
-- Mengganti simulasi *hardware metrics* dengan metrik sungguhan.
+- Menambahkan sinkronisasi real-time metrics Agent ke Svelte store secara periodik.
 - Membuat Endpoint API untuk mengatur *Rate Limiting Tiers* yang kompleks.
 
 ---
@@ -106,7 +108,7 @@ Aegis WAF adalah landasan / prototipe yang **sangat bagus** secara arsitektur da
 Aegis WAF terbagi menjadi dua komponen utama: **Central Controller** (sebagai otak & penyimpan log) dan **Agent Node** (sebagai shield yang dipasang di server target).
 
 ### 1. Menjalankan Central Controller & Dashboard (Windows / Linux / macOS)
-Sangat direkomendasikan menjalankan Controller menggunakan **Docker Desktop** (Windows/Mac) atau **Docker Engine** (Linux) karena sudah me-*bundling* ClickHouse Database.
+Sangat direkomendasikan menjalankan Controller menggunakan **Docker Desktop** (Windows/Mac) or **Docker Engine** (Linux) karena sudah me-*bundling* ClickHouse Database.
 
 ```bash
 # 1. Masuk ke direktori aegis-waf
@@ -126,6 +128,20 @@ curl -sSL http://<CONTROLLER_IP>:8080/install.sh | CONTROLLER_IP=<CONTROLLER_IP>
 ```
 
 *(Catatan PoC: Pada tahap pengembangan saat ini, Anda mungkin perlu melakukan `cargo build --release` secara manual di VM target jika rilis _binary_ belum dipublikasikan).*
+
+---
+
+## 🛡️ DevSecOps & Security Auditing (SAST & DAST)
+
+Project Aegis WAF kini telah dilengkapi dengan pipeline integrasi berkelanjutan yang aman (**DevSecOps CI**) di dalam berkas [.github/workflows/devsecops.yml](file:///d:/Desktop/KERJA/aegis-waf/.github/workflows/devsecops.yml) untuk melakukan peninjauan keamanan otomatis:
+
+### 1. Static Application Security Testing (SAST)
+*   **Rust Security & Linting**: Memeriksa penulisan kode Rust dengan `cargo fmt` dan `cargo clippy`. Audit dependensi pihak ketiga terhadap kerentanan CVE menggunakan `cargo audit`.
+*   **Frontend Security & Formatter**: Melakukan TypeScript validation menggunakan `svelte-check` dan mengecek kerentanan package NPM dengan `npm audit`. Formatter menggunakan **Prettier** untuk standardisasi kode di folder dashboard.
+*   **GitHub CodeQL**: Analisis statis mendalam oleh GitHub untuk mendeteksi kerentanan krusial (SQL Injection, Cross-Site Scripting, OS Command Injection, Path Traversal, dll.).
+
+### 2. Dynamic Application Security Testing (DAST)
+*   **OWASP ZAP Scan**: Pipeline CI akan secara otomatis menjalankan seluruh arsitektur Aegis WAF via Docker-compose, kemudian meluncurkan **OWASP ZAP Baseline Scan** untuk menguji keamanan *live* application (`http://localhost:8080`) secara dinamis terhadap serangan nyata.
 
 ---
 

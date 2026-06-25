@@ -147,7 +147,7 @@
         <span class="material-symbols-outlined text-sm">download</span>
         Export Logs
       </button>
-      <div class="h-8 w-[1px] bg-outline-variant mx-sm"></div>
+      <div class="h-8 w-1px bg-outline-variant mx-sm"></div>
       <div class="flex flex-col items-end">
         <span class="text-[10px] text-on-surface-variant uppercase tracking-tighter"
           >Filtered Events</span
@@ -262,7 +262,7 @@
   <footer
     class="px-lg py-md bg-surface-container-lowest border-t border-outline-variant flex gap-xl overflow-x-auto custom-scrollbar rounded-xl"
   >
-    <div class="flex-shrink-0 flex items-center gap-md">
+    <div class="shrink-0 flex items-center gap-md">
       <div class="p-sm bg-error/10 border border-error/20 rounded">
         <span class="material-symbols-outlined text-error">gpp_maybe</span>
       </div>
@@ -276,9 +276,9 @@
       </div>
     </div>
 
-    <div class="w-[1px] h-10 bg-outline-variant"></div>
+    <div class="w-1px h-10 bg-outline-variant"></div>
 
-    <div class="flex-shrink-0 flex items-center gap-md">
+    <div class="shrink-0 flex items-center gap-md">
       <div class="p-sm bg-tertiary-container/10 border border-tertiary-container/20 rounded">
         <span class="material-symbols-outlined text-tertiary-container">speed</span>
       </div>
@@ -292,9 +292,9 @@
       </div>
     </div>
 
-    <div class="w-[1px] h-10 bg-outline-variant"></div>
+    <div class="w-1px h-10 bg-outline-variant"></div>
 
-    <div class="flex-shrink-0 flex items-center gap-md">
+    <div class="shrink-0 flex items-center gap-md">
       <div class="p-sm bg-primary/10 border border-primary/20 rounded">
         <span class="material-symbols-outlined text-primary">public</span>
       </div>

@@ -26,16 +26,17 @@ use reqwest::header::{HeaderMap, HeaderValue};
 // Membuat HTTP Client dengan Header Autentikasi ClickHouse otomatis
 pub fn build_client() -> reqwest::Client {
     let mut headers = HeaderMap::new();
-    if let Ok(user) = std::env::var("CLICKHOUSE_USER") {
-        if let Ok(val) = HeaderValue::from_str(&user) {
-            headers.insert("X-ClickHouse-User", val);
-        }
+    
+    let user = std::env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "default".to_string());
+    if let Ok(val) = HeaderValue::from_str(&user) {
+        headers.insert("X-ClickHouse-User", val);
     }
-    if let Ok(pass) = std::env::var("CLICKHOUSE_PASSWORD") {
-        if let Ok(val) = HeaderValue::from_str(&pass) {
-            headers.insert("X-ClickHouse-Key", val);
-        }
+    
+    let pass = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "aegis".to_string());
+    if let Ok(val) = HeaderValue::from_str(&pass) {
+        headers.insert("X-ClickHouse-Key", val);
     }
+    
     reqwest::Client::builder()
         .default_headers(headers)
         .build()
@@ -141,6 +142,7 @@ pub async fn log_worker(
     clickhouse_url: String,
     controller_url: Option<String>,
     log_dir: String,
+    token: Option<String>,
 ) {
     let client = build_client();
     let batch_interval = Duration::from_secs(1);
@@ -158,14 +160,14 @@ pub async fn log_worker(
                 
                 batch.push(entry);
                 if batch.len() >= max_batch_size {
-                    flush_logs(&batch, &clickhouse_url, &controller_url, &client).await;
+                    flush_logs(&batch, &clickhouse_url, &controller_url, &client, &token).await;
                     batch.clear();
                     last_flush = tokio::time::Instant::now();
                 }
             }
             _ = tokio::time::sleep(timeout) => {
                 if !batch.is_empty() {
-                    flush_logs(&batch, &clickhouse_url, &controller_url, &client).await;
+                    flush_logs(&batch, &clickhouse_url, &controller_url, &client, &token).await;
                     batch.clear();
                 }
                 last_flush = tokio::time::Instant::now();
@@ -174,13 +176,23 @@ pub async fn log_worker(
     }
 }
 
-async fn flush_logs(batch: &[WafLogEntry], clickhouse_url: &str, controller_url: &Option<String>, client: &reqwest::Client) {
+async fn flush_logs(
+    batch: &[WafLogEntry],
+    clickhouse_url: &str,
+    controller_url: &Option<String>,
+    client: &reqwest::Client,
+    token: &Option<String>,
+) {
     if batch.is_empty() { return; }
 
     if let Some(ctrl_url) = controller_url {
         // Mode Agent: Kirim JSON Array ke Controller
         let url = format!("{}/api/v1/logs", ctrl_url.trim_end_matches('/'));
-        if let Err(e) = client.post(&url).json(batch).send().await {
+        let mut req = client.post(&url).json(batch);
+        if let Some(ref t) = token {
+            req = req.header("Authorization", format!("Bearer {t}"));
+        }
+        if let Err(e) = req.send().await {
             tracing::error!("Error posting logs to controller: {}", e);
         }
     } else {

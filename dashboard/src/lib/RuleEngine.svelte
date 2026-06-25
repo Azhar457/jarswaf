@@ -434,7 +434,7 @@
 
 <div class="flex flex-col lg:flex-row gap-6 h-[calc(100vh-240px)] overflow-hidden">
   <!-- Left panel: Rule Lists & Toggles -->
-  <div class="flex-grow flex flex-col gap-6 overflow-y-auto no-scrollbar pr-1">
+  <div class="grow flex flex-col gap-6 overflow-y-auto no-scrollbar pr-1">
     <!-- Title -->
     <div>
       <h2 class="font-headline-md text-headline-md text-on-surface">Active Policy Engine</h2>
@@ -612,7 +612,7 @@
   </div>
 
   <!-- Right panel: Custom Rule Builder & Simulation Sandbox -->
-  <div class="w-full lg:w-[420px] flex-shrink-0 flex flex-col gap-6 overflow-y-auto no-scrollbar">
+  <div class="w-full lg:w-[420px] shrink-0 flex flex-col gap-6 overflow-y-auto no-scrollbar">
     <CustomRuleBuilder
       bind:editingRuleId
       bind:ruleName

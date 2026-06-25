@@ -12,10 +12,22 @@ WORKDIR /app
 # Install required build dependencies
 RUN apt-get update && apt-get install -y pkg-config libssl-dev curl
 
+# Copy dependency manifests
 COPY Cargo.toml Cargo.lock ./
+COPY xtask/Cargo.toml ./xtask/Cargo.toml
+
+# Create dummy source files for dependency caching
+RUN mkdir -p src xtask/src && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "fn main() {}" > xtask/src/main.rs && \
+    cargo build --release && \
+    rm -rf src xtask/src
+
+# Copy actual source code
 COPY src ./src
-COPY xtask ./xtask
-# Build the release binary
+COPY xtask/src ./xtask/src
+
+# Rebuild actual application code
 RUN cargo build --release
 
 # Stage 3: Final Runtime Image

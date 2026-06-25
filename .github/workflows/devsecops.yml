@@ -113,3 +113,25 @@ jobs:
           target: 'http://localhost:8080/'
           rules_file_name: '.zap/rules.tsv'
           fail_action: false # Report findings without breaking builds immediately
+
+  # -------------------------------------------------------------
+  # Job 4: CD - Auto Deploy to VM via SSH
+  # -------------------------------------------------------------
+  deploy:
+    name: Auto Deploy to VM
+    runs-on: ubuntu-latest
+    needs: [sast_audit]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - name: Deploy to Remote VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_PORT || 22 }}
+          script: |
+            cd /app/aegis-waf # Ganti dengan path folder project Aegis WAF di VM Anda
+            git pull origin main || git pull origin master
+            docker compose down
+            docker compose up -d --build

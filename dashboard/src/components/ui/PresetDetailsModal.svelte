@@ -29,7 +29,7 @@
 
 {#if show && preset}
   <div
-    class="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm"
+    class="fixed inset-0 z-150 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm"
     in:fade={{ duration: 200 }}
     out:fade={{ duration: 150 }}
   >
