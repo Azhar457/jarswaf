@@ -20,7 +20,10 @@
 
   const controllerUrl =
     typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
-  let activeTab = typeof window !== "undefined" ? localStorage.getItem("aegis_active_tab") || "dashboard" : "dashboard";
+  let activeTab =
+    typeof window !== "undefined"
+      ? localStorage.getItem("aegis_active_tab") || "dashboard"
+      : "dashboard";
   $: if (typeof window !== "undefined") {
     localStorage.setItem("aegis_active_tab", activeTab);
   }

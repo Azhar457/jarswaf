@@ -46,7 +46,10 @@
           } else {
             existing.count += 1;
             // Retain BLOCK action if it appears in any country logs to keep it red
-            if (e.action === "BLOCK" || (e.action === "RATE_LIMIT" && existing.action !== "BLOCK")) {
+            if (
+              e.action === "BLOCK" ||
+              (e.action === "RATE_LIMIT" && existing.action !== "BLOCK")
+            ) {
               existing.action = e.action;
             }
           }
@@ -55,7 +58,7 @@
           let dotColor = [0.9, 0.2, 0.2]; // default Red
           let actionLabel = "BLOCK";
           let actionColorClass = "bg-red-500 shadow-[0_0_8px_#ef4444]";
-          
+
           if (e.action === "RATE_LIMIT" || e.action === "LIMIT") {
             dotColor = [0.9, 0.7, 0.1]; // Yellow
             actionLabel = "LIMIT";
@@ -65,7 +68,7 @@
             actionLabel = "PASS";
             actionColorClass = "bg-emerald-500 shadow-[0_0_8px_#10b981]";
           }
-          
+
           return {
             id: `marker-${index}`,
             location: [e.lat, e.lng],

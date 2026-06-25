@@ -59,7 +59,10 @@
   let formBlacklists: any[] = [];
 
   function addAllowlistRule() {
-    formAllowlists = [...formAllowlists, { name: "", ips: [], paths: [], bypass_rules: ["*"], enabled: true }];
+    formAllowlists = [
+      ...formAllowlists,
+      { name: "", ips: [], paths: [], bypass_rules: ["*"], enabled: true },
+    ];
   }
 
   function removeAllowlistRule(idx: number) {
@@ -171,7 +174,12 @@
   function handleListInput(e: Event, callback: (arr: string[]) => void) {
     const target = e.target as HTMLInputElement;
     if (target) {
-      callback(target.value.split(",").map((s: string) => s.trim()).filter((s: string) => s.length > 0));
+      callback(
+        target.value
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0),
+      );
     }
   }
 </script>
@@ -218,7 +226,9 @@
       <div class="space-y-5">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-5 font-sans">
           <div class="space-y-1.5">
-            <label for="vhost_name_input" class="text-sm font-medium text-slate-300">VHost Name</label>
+            <label for="vhost_name_input" class="text-sm font-medium text-slate-300"
+              >VHost Name</label
+            >
             <input
               id="vhost_name_input"
               type="text"
@@ -229,7 +239,9 @@
           </div>
 
           <div class="space-y-1.5">
-            <label for="vhost_domains_input" class="text-sm font-medium text-slate-300">Domains (Comma Separated)</label>
+            <label for="vhost_domains_input" class="text-sm font-medium text-slate-300"
+              >Domains (Comma Separated)</label
+            >
             <input
               id="vhost_domains_input"
               type="text"
@@ -241,7 +253,9 @@
         </div>
 
         <div class="space-y-1.5 font-sans">
-          <label for="vhost_backend_input" class="text-sm font-medium text-slate-300">Backend Proxy Target</label>
+          <label for="vhost_backend_input" class="text-sm font-medium text-slate-300"
+            >Backend Proxy Target</label
+          >
           <div class="flex flex-col md:flex-row gap-3">
             {#if discoveredServices.length > 0}
               <select
@@ -271,14 +285,19 @@
             bind:checked={formIsDefault}
             class="w-4 h-4 rounded border-slate-800 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer"
           />
-          <label for="is_default" class="text-sm font-medium text-slate-300 cursor-pointer select-none">
+          <label
+            for="is_default"
+            class="text-sm font-medium text-slate-300 cursor-pointer select-none"
+          >
             Set as Default / Fallback VHost (General Proxy without domain mapping)
           </label>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-5 font-sans">
           <div class="space-y-1.5">
-            <label for="vhost_ssl_select" class="text-sm font-medium text-slate-300">SSL Configuration</label>
+            <label for="vhost_ssl_select" class="text-sm font-medium text-slate-300"
+              >SSL Configuration</label
+            >
             <select
               id="vhost_ssl_select"
               bind:value={formSsl}
@@ -291,7 +310,9 @@
           </div>
 
           <div class="space-y-1.5">
-            <label for="vhost_maxbody_select" class="text-sm font-medium text-slate-300">Max Body Size</label>
+            <label for="vhost_maxbody_select" class="text-sm font-medium text-slate-300"
+              >Max Body Size</label
+            >
             <select
               id="vhost_maxbody_select"
               bind:value={formMaxBody}
@@ -305,7 +326,9 @@
           </div>
 
           <div class="space-y-1.5">
-            <label for="vhost_ratelimit_select" class="text-sm font-medium text-slate-300">Default Rate Limit</label>
+            <label for="vhost_ratelimit_select" class="text-sm font-medium text-slate-300"
+              >Default Rate Limit</label
+            >
             <select
               id="vhost_ratelimit_select"
               bind:value={formRateLimit}
@@ -325,7 +348,9 @@
           <div class="flex justify-between items-center">
             <div>
               <h3 class="text-sm font-bold text-slate-200">VHost Allowlists (Exceptions)</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Bypass WAF rules for specific client IPs or request paths.</p>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Bypass WAF rules for specific client IPs or request paths.
+              </p>
             </div>
             <button
               type="button"
@@ -337,13 +362,17 @@
           </div>
 
           {#if formAllowlists.length === 0}
-            <div class="text-xs text-slate-500 italic bg-slate-955/45 border border-slate-800/60 rounded-xl p-4 text-center font-sans">
+            <div
+              class="text-xs text-slate-500 italic bg-slate-955/45 border border-slate-800/60 rounded-xl p-4 text-center font-sans"
+            >
               No VHost-specific allowlists defined.
             </div>
           {:else}
             <div class="space-y-4">
               {#each formAllowlists as rule, idx}
-                <div class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-3 relative group">
+                <div
+                  class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-3 relative group"
+                >
                   <button
                     type="button"
                     on:click={() => removeAllowlistRule(idx)}
@@ -355,7 +384,9 @@
 
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pr-8 font-sans">
                     <div class="space-y-1">
-                      <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      <label
+                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
+                      >
                         Rule Name
                         <input
                           type="text"
@@ -366,12 +397,16 @@
                       </label>
                     </div>
                     <div class="space-y-1">
-                      <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      <label
+                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
+                      >
                         Bypass Rules (Comma Separated)
                         <input
                           type="text"
-                          value={Array.isArray(rule.bypass_rules) ? rule.bypass_rules.join(", ") : rule.bypass_rules}
-                          on:input={(e) => handleListInput(e, (arr) => rule.bypass_rules = arr)}
+                          value={Array.isArray(rule.bypass_rules)
+                            ? rule.bypass_rules.join(", ")
+                            : rule.bypass_rules}
+                          on:input={(e) => handleListInput(e, (arr) => (rule.bypass_rules = arr))}
                           placeholder="e.g. SQLI-AST, or * for all WAF rules"
                           class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
                         />
@@ -381,24 +416,28 @@
 
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
                     <div class="space-y-1">
-                      <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      <label
+                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
+                      >
                         IP Addresses (Comma Separated)
                         <input
                           type="text"
                           value={Array.isArray(rule.ips) ? rule.ips.join(", ") : rule.ips}
-                          on:input={(e) => handleListInput(e, (arr) => rule.ips = arr)}
+                          on:input={(e) => handleListInput(e, (arr) => (rule.ips = arr))}
                           placeholder="e.g. 192.168.1.100, 10.0.0.0/24"
                           class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
                         />
                       </label>
                     </div>
                     <div class="space-y-1">
-                      <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      <label
+                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
+                      >
                         Paths (Comma Separated)
                         <input
                           type="text"
                           value={Array.isArray(rule.paths) ? rule.paths.join(", ") : rule.paths}
-                          on:input={(e) => handleListInput(e, (arr) => rule.paths = arr)}
+                          on:input={(e) => handleListInput(e, (arr) => (rule.paths = arr))}
                           placeholder="e.g. /wp-json/*, /healthz"
                           class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
                         />
@@ -413,7 +452,10 @@
                       bind:checked={rule.enabled}
                       class="w-3.5 h-3.5 rounded border-slate-800 bg-slate-900 text-blue-600 focus:ring-blue-500 cursor-pointer"
                     />
-                    <label for={`allow_enabled_${idx}`} class="text-xs font-semibold text-slate-400 cursor-pointer select-none">
+                    <label
+                      for={`allow_enabled_${idx}`}
+                      class="text-xs font-semibold text-slate-400 cursor-pointer select-none"
+                    >
                       Rule Enabled
                     </label>
                   </div>
@@ -428,7 +470,9 @@
           <div class="flex justify-between items-center">
             <div>
               <h3 class="text-sm font-bold text-slate-200">VHost Blacklists (Blocking)</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Explicitly block access from specific client IPs or request paths.</p>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Explicitly block access from specific client IPs or request paths.
+              </p>
             </div>
             <button
               type="button"
@@ -440,13 +484,17 @@
           </div>
 
           {#if formBlacklists.length === 0}
-            <div class="text-xs text-slate-500 italic bg-slate-955/45 border border-slate-800/60 rounded-xl p-4 text-center font-sans">
+            <div
+              class="text-xs text-slate-500 italic bg-slate-955/45 border border-slate-800/60 rounded-xl p-4 text-center font-sans"
+            >
               No VHost-specific blacklists defined.
             </div>
           {:else}
             <div class="space-y-4">
               {#each formBlacklists as rule, idx}
-                <div class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-3 relative group">
+                <div
+                  class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-3 relative group"
+                >
                   <button
                     type="button"
                     on:click={() => removeBlacklistRule(idx)}
@@ -457,7 +505,9 @@
                   </button>
 
                   <div class="space-y-1 pr-8 font-sans">
-                    <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    <label
+                      class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
+                    >
                       Rule Name
                       <input
                         type="text"
@@ -470,24 +520,28 @@
 
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
                     <div class="space-y-1">
-                      <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      <label
+                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
+                      >
                         IP Addresses (Comma Separated)
                         <input
                           type="text"
                           value={Array.isArray(rule.ips) ? rule.ips.join(", ") : rule.ips}
-                          on:input={(e) => handleListInput(e, (arr) => rule.ips = arr)}
+                          on:input={(e) => handleListInput(e, (arr) => (rule.ips = arr))}
                           placeholder="e.g. 192.168.1.100, 10.0.0.0/24"
                           class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
                         />
                       </label>
                     </div>
                     <div class="space-y-1">
-                      <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      <label
+                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
+                      >
                         Paths (Comma Separated)
                         <input
                           type="text"
                           value={Array.isArray(rule.paths) ? rule.paths.join(", ") : rule.paths}
-                          on:input={(e) => handleListInput(e, (arr) => rule.paths = arr)}
+                          on:input={(e) => handleListInput(e, (arr) => (rule.paths = arr))}
                           placeholder="e.g. /admin/config/*, /config.php"
                           class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
                         />
@@ -502,7 +556,10 @@
                       bind:checked={rule.enabled}
                       class="w-3.5 h-3.5 rounded border-slate-800 bg-slate-900 text-blue-600 focus:ring-blue-500 cursor-pointer"
                     />
-                    <label for={`black_enabled_${idx}`} class="text-xs font-semibold text-slate-400 cursor-pointer select-none">
+                    <label
+                      for={`black_enabled_${idx}`}
+                      class="text-xs font-semibold text-slate-400 cursor-pointer select-none"
+                    >
                       Rule Enabled
                     </label>
                   </div>
@@ -554,7 +611,10 @@
                   <div class="flex items-center gap-2">
                     <span class="text-slate-200 font-bold">{host.name}</span>
                     {#if host.is_default}
-                      <span class="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-400 border border-blue-500/20 tracking-wider uppercase">FALLBACK</span>
+                      <span
+                        class="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-400 border border-blue-500/20 tracking-wider uppercase"
+                        >FALLBACK</span
+                      >
                     {/if}
                   </div>
                   <span class="text-slate-500 text-xs mt-0.5"

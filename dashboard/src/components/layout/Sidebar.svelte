@@ -1,6 +1,15 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { Shield, Activity, Lock, Globe, Server, Menu, LayoutDashboard, ShieldCheck } from "lucide-svelte";
+  import {
+    Shield,
+    Activity,
+    Lock,
+    Globe,
+    Server,
+    Menu,
+    LayoutDashboard,
+    ShieldCheck,
+  } from "lucide-svelte";
   import SidebarItem from "./SidebarItem.svelte";
 
   export let activeTab: string = "dashboard";

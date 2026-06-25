@@ -334,26 +334,48 @@ fn tokenize_sql(input: &str) -> Vec<SqlToken> {
         }
         if c == '\'' || c == '"' {
             let quote = c;
-            let mut val = String::new();
-            i += 1;
+            // Check if there is a matching closing quote in the remaining characters
+            let mut has_closing = false;
+            let mut j = i + 1;
             let mut escaped = false;
-            while i < chars.len() {
-                let next_c = chars[i];
+            while j < chars.len() {
                 if escaped {
-                    val.push(next_c);
                     escaped = false;
-                } else if next_c == '\\' {
+                } else if chars[j] == '\\' {
                     escaped = true;
-                } else if next_c == quote {
-                    i += 1;
+                } else if chars[j] == quote {
+                    has_closing = true;
                     break;
-                } else {
-                    val.push(next_c);
                 }
-                i += 1;
+                j += 1;
             }
-            tokens.push(SqlToken::StringLiteral(val));
-            continue;
+
+            if has_closing {
+                let mut val = String::new();
+                i += 1;
+                let mut local_escaped = false;
+                while i < chars.len() {
+                    let next_c = chars[i];
+                    if local_escaped {
+                        val.push(next_c);
+                        local_escaped = false;
+                    } else if next_c == '\\' {
+                        local_escaped = true;
+                    } else if next_c == quote {
+                        i += 1;
+                        break;
+                    } else {
+                        val.push(next_c);
+                    }
+                    i += 1;
+                }
+                tokens.push(SqlToken::StringLiteral(val));
+                continue;
+            } else {
+                tokens.push(SqlToken::Symbol(c));
+                i += 1;
+                continue;
+            }
         }
         if c == '=' || c == '<' || c == '>' || c == '!' {
             let mut op = c.to_string();
@@ -434,27 +456,25 @@ fn check_sql_injection_semantic(input: &str) -> Option<String> {
     }
     for i in 0..tokens.len() {
         if let SqlToken::Keyword(ref k) = tokens[i] {
-            if k == "OR" || k == "AND" {
-                if i + 3 < tokens.len() {
-                    let val_a = &tokens[i + 1];
-                    let op = &tokens[i + 2];
-                    let val_b = &tokens[i + 3];
-                    if let SqlToken::Operator(ref o) = op {
-                        if o == "=" {
-                            let is_equal = match (val_a, val_b) {
-                                (SqlToken::Numeric(a), SqlToken::Numeric(b)) => a == b,
-                                (SqlToken::StringLiteral(a), SqlToken::StringLiteral(b)) => a == b,
-                                (SqlToken::Other(a), SqlToken::Other(b)) => a == b,
-                                _ => false,
-                            };
-                            if is_equal {
-                                return Some(format!(
-                                    "Tautology bypass detected via {} {} = {}",
-                                    k,
-                                    format_token(val_a),
-                                    format_token(val_b)
-                                ));
-                            }
+            if (k == "OR" || k == "AND") && i + 3 < tokens.len() {
+                let val_a = &tokens[i + 1];
+                let op = &tokens[i + 2];
+                let val_b = &tokens[i + 3];
+                if let SqlToken::Operator(ref o) = op {
+                    if o == "=" {
+                        let is_equal = match (val_a, val_b) {
+                            (SqlToken::Numeric(a), SqlToken::Numeric(b)) => a == b,
+                            (SqlToken::StringLiteral(a), SqlToken::StringLiteral(b)) => a == b,
+                            (SqlToken::Other(a), SqlToken::Other(b)) => a == b,
+                            _ => false,
+                        };
+                        if is_equal {
+                            return Some(format!(
+                                "Tautology bypass detected via {} {} = {}",
+                                k,
+                                format_token(val_a),
+                                format_token(val_b)
+                            ));
                         }
                     }
                 }
@@ -614,17 +634,13 @@ fn check_xss_injection_semantic(input: &str) -> Option<String> {
             XssToken::JsProtocol => {
                 return Some("JavaScript protocol 'javascript:' URI schema detected".to_string());
             }
-            XssToken::Attribute(name, val) => {
-                if name == "src" || name == "href" {
-                    let val_lower = val.to_lowercase();
-                    if val_lower.starts_with("javascript:")
-                        || val_lower.starts_with("data:text/html")
-                    {
-                        return Some(format!(
-                            "Dangerous URL scheme in attribute {}='{}'",
-                            name, val
-                        ));
-                    }
+            XssToken::Attribute(name, val) if name == "src" || name == "href" => {
+                let val_lower = val.to_lowercase();
+                if val_lower.starts_with("javascript:") || val_lower.starts_with("data:text/html") {
+                    return Some(format!(
+                        "Dangerous URL scheme in attribute {}='{}'",
+                        name, val
+                    ));
                 }
             }
             _ => {}
@@ -755,7 +771,7 @@ mod tests {
             "username=admin' OR 1=1 --",
             None,
             "POST",
-            &[],
+            &["SQLI-001".to_string()],
         );
         assert!(result.is_some());
         let (rule_id, msg) = result.unwrap();
@@ -776,7 +792,7 @@ mod tests {
             "",
             None,
             "GET",
-            &[],
+            &["SQLI-001".to_string()],
         );
         assert!(result.is_some());
         let (rule_id, msg) = result.unwrap();

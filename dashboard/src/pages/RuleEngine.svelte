@@ -611,8 +611,9 @@
 
           <div class="space-y-4">
             <div class="flex flex-col gap-1.5">
-              <label for="custom_rule_name" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
-                >Rule Name</label
+              <label
+                for="custom_rule_name"
+                class="text-xs uppercase tracking-wider text-slate-500 font-bold">Rule Name</label
               >
               <input
                 id="custom_rule_name"
@@ -625,7 +626,9 @@
 
             <div class="grid grid-cols-2 gap-3">
               <div class="flex flex-col gap-1.5">
-                <label for="custom_rule_field" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label
+                  for="custom_rule_field"
+                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Target Field</label
                 >
                 <select
@@ -640,8 +643,9 @@
                 </select>
               </div>
               <div class="flex flex-col gap-1.5">
-                <label for="custom_rule_op" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
-                  >Operator</label
+                <label
+                  for="custom_rule_op"
+                  class="text-xs uppercase tracking-wider text-slate-500 font-bold">Operator</label
                 >
                 <select
                   id="custom_rule_op"
@@ -657,7 +661,9 @@
 
             {#if conditionFieldType === "header"}
               <div class="flex flex-col gap-1.5">
-                <label for="custom_rule_header" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label
+                  for="custom_rule_header"
+                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Header Name</label
                 >
                 <input
@@ -671,8 +677,9 @@
             {/if}
 
             <div class="flex flex-col gap-1.5">
-              <label for="custom_rule_val" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
-                >Match Value</label
+              <label
+                for="custom_rule_val"
+                class="text-xs uppercase tracking-wider text-slate-500 font-bold">Match Value</label
               >
               <input
                 id="custom_rule_val"
@@ -684,7 +691,10 @@
             </div>
 
             <div class="flex flex-col gap-1.5 border-t border-slate-800 pt-4 mt-2">
-              <label for="custom_rule_action" class="text-xs uppercase tracking-wider text-slate-500 font-bold">Action</label>
+              <label
+                for="custom_rule_action"
+                class="text-xs uppercase tracking-wider text-slate-500 font-bold">Action</label
+              >
               <select
                 id="custom_rule_action"
                 bind:value={action}
@@ -697,7 +707,9 @@
 
             {#if action === "redirect"}
               <div class="flex flex-col gap-1.5">
-                <label for="custom_rule_redirect" class="text-xs uppercase tracking-wider text-slate-500 font-bold"
+                <label
+                  for="custom_rule_redirect"
+                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
                   >Redirect URL</label
                 >
                 <input

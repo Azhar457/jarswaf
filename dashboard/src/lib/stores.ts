@@ -237,7 +237,7 @@ export async function toggleWafStatus(controllerUrl: string, enabled: boolean) {
   if (currentToken) {
     headers["Authorization"] = `Bearer ${currentToken}`;
   }
-  
+
   try {
     const res = await fetch(`${controllerUrl}/api/v1/config`, { headers });
     if (res.ok) {
@@ -247,7 +247,7 @@ export async function toggleWafStatus(controllerUrl: string, enabled: boolean) {
         log_limit_mb: data.log_limit_mb,
         waf_enabled: enabled,
       };
-      
+
       const postRes = await fetch(`${controllerUrl}/api/v1/config`, {
         method: "POST",
         headers,

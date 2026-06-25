@@ -1,6 +1,19 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Plus, Trash2, Edit2, Shield, Activity, Save, ToggleLeft, ToggleRight, Check, X, ShieldAlert, ShieldCheck } from "lucide-svelte";
+  import {
+    Plus,
+    Trash2,
+    Edit2,
+    Shield,
+    Activity,
+    Save,
+    ToggleLeft,
+    ToggleRight,
+    Check,
+    X,
+    ShieldAlert,
+    ShieldCheck,
+  } from "lucide-svelte";
   import Card from "../components/ui/Card.svelte";
   import DataTable from "../components/ui/DataTable.svelte";
   import Badge from "../components/ui/Badge.svelte";
@@ -45,10 +58,10 @@
       if ($token) {
         headers["Authorization"] = `Bearer ${$token}`;
       }
-      
+
       const [allowRes, blackRes] = await Promise.all([
         fetch(`${controllerUrl}/api/v1/allowlists`, { headers }),
-        fetch(`${controllerUrl}/api/v1/blacklists`, { headers })
+        fetch(`${controllerUrl}/api/v1/blacklists`, { headers }),
       ]);
 
       if (allowRes.status === 401 || blackRes.status === 401) {
@@ -238,7 +251,9 @@
   <div class="flex justify-between items-center">
     <div>
       <h1 class="text-2xl font-bold text-slate-100 tracking-tight">Access Control</h1>
-      <p class="text-slate-400 mt-1">Configure global client IP and path exceptions (Allowlists & Blacklists).</p>
+      <p class="text-slate-400 mt-1">
+        Configure global client IP and path exceptions (Allowlists & Blacklists).
+      </p>
     </div>
     {#if showForm}
       <button
@@ -296,7 +311,9 @@
           {:else}
             <ShieldAlert class="text-red-500" size={20} />
           {/if}
-          {editingIndex !== null ? "Edit Rule" : "Create New Rule"} ({ruleType === "allowlist" ? "Allowlist" : "Blacklist"})
+          {editingIndex !== null ? "Edit Rule" : "Create New Rule"} ({ruleType === "allowlist"
+            ? "Allowlist"
+            : "Blacklist"})
         </h2>
         <p class="text-sm text-slate-500 mt-1">
           Define matching patterns for client IPs and paths to apply exceptions.
@@ -306,7 +323,9 @@
       <div class="space-y-5">
         <div class="grid grid-cols-1 gap-5">
           <div class="space-y-1.5">
-            <label for="global_rule_name" class="text-sm font-medium text-slate-300">Rule Name</label>
+            <label for="global_rule_name" class="text-sm font-medium text-slate-300"
+              >Rule Name</label
+            >
             <input
               id="global_rule_name"
               type="text"
@@ -318,7 +337,9 @@
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div class="space-y-1.5">
-              <label for="global_rule_ips" class="text-sm font-medium text-slate-300">IP Addresses (Comma Separated)</label>
+              <label for="global_rule_ips" class="text-sm font-medium text-slate-300"
+                >IP Addresses (Comma Separated)</label
+              >
               <input
                 id="global_rule_ips"
                 type="text"
@@ -326,11 +347,15 @@
                 placeholder="e.g. 192.168.1.0/24, 10.0.0.5"
                 class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
               />
-              <p class="text-xs text-slate-500">Supports single IP or CIDR subnets. Leave blank if path-only.</p>
+              <p class="text-xs text-slate-500">
+                Supports single IP or CIDR subnets. Leave blank if path-only.
+              </p>
             </div>
 
             <div class="space-y-1.5">
-              <label for="global_rule_paths" class="text-sm font-medium text-slate-300">Path Patterns (Comma Separated)</label>
+              <label for="global_rule_paths" class="text-sm font-medium text-slate-300"
+                >Path Patterns (Comma Separated)</label
+              >
               <input
                 id="global_rule_paths"
                 type="text"
@@ -338,13 +363,17 @@
                 placeholder="e.g. /api/webhook/*, /nova/*"
                 class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
               />
-              <p class="text-xs text-slate-500">Supports wildcards (e.g. `*` prefix or suffix). Leave blank if IP-only.</p>
+              <p class="text-xs text-slate-500">
+                Supports wildcards (e.g. `*` prefix or suffix). Leave blank if IP-only.
+              </p>
             </div>
           </div>
 
           {#if ruleType === "allowlist"}
             <div class="space-y-1.5 border-t border-slate-800 pt-4">
-              <label for="global_rule_bypass" class="text-sm font-medium text-slate-300">Bypass Rules (Comma Separated)</label>
+              <label for="global_rule_bypass" class="text-sm font-medium text-slate-300"
+                >Bypass Rules (Comma Separated)</label
+              >
               <input
                 id="global_rule_bypass"
                 type="text"
@@ -353,7 +382,8 @@
                 class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
               />
               <p class="text-xs text-slate-500">
-                Specify which rule IDs to bypass. Use `*` or leave empty to bypass the entire WAF engine.
+                Specify which rule IDs to bypass. Use `*` or leave empty to bypass the entire WAF
+                engine.
               </p>
             </div>
           {/if}
@@ -365,7 +395,10 @@
               bind:checked={formEnabled}
               class="w-4 h-4 rounded border-slate-800 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer"
             />
-            <label for="rule_enabled" class="text-sm font-medium text-slate-300 cursor-pointer select-none">
+            <label
+              for="rule_enabled"
+              class="text-sm font-medium text-slate-300 cursor-pointer select-none"
+            >
               Rule Enabled
             </label>
           </div>
@@ -410,7 +443,9 @@
             <tr class="hover:bg-slate-700/30 transition-colors group">
               <td class="px-6 py-4 whitespace-nowrap">
                 <div class="flex items-center gap-3">
-                  <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500 border border-emerald-500/20">
+                  <div
+                    class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500 border border-emerald-500/20"
+                  >
                     <ShieldCheck size={16} />
                   </div>
                   <span class="text-slate-200 font-bold">{rule.name}</span>
@@ -440,12 +475,16 @@
                   title={rule.enabled ? "Disable Rule" : "Enable Rule"}
                 >
                   {#if rule.enabled}
-                    <span class="text-emerald-500 hover:text-emerald-400 flex items-center gap-1.5 cursor-pointer">
+                    <span
+                      class="text-emerald-500 hover:text-emerald-400 flex items-center gap-1.5 cursor-pointer"
+                    >
                       <ToggleRight size={24} />
                       <span class="text-xs font-semibold uppercase tracking-wider">Active</span>
                     </span>
                   {:else}
-                    <span class="text-slate-500 hover:text-slate-400 flex items-center gap-1.5 cursor-pointer">
+                    <span
+                      class="text-slate-500 hover:text-slate-400 flex items-center gap-1.5 cursor-pointer"
+                    >
                       <ToggleLeft size={24} />
                       <span class="text-xs font-semibold uppercase tracking-wider">Disabled</span>
                     </span>
@@ -453,7 +492,9 @@
                 </button>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right font-sans">
-                <div class="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div
+                  class="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
                   <button
                     on:click={() => openEditForm("allowlist", i)}
                     class="text-slate-400 hover:text-blue-400 transition-colors p-1 cursor-pointer"
@@ -482,15 +523,7 @@
       </Card>
     {:else}
       <Card className="p-0 overflow-hidden border-slate-800">
-        <DataTable
-          columns={[
-            "Rule Name",
-            "Matched IPs",
-            "Matched Paths",
-            "Status",
-            "Actions",
-          ]}
-        >
+        <DataTable columns={["Rule Name", "Matched IPs", "Matched Paths", "Status", "Actions"]}>
           {#each blacklists as rule, i}
             <tr class="hover:bg-slate-700/30 transition-colors group">
               <td class="px-6 py-4 whitespace-nowrap">
@@ -514,12 +547,16 @@
                   title={rule.enabled ? "Disable Rule" : "Enable Rule"}
                 >
                   {#if rule.enabled}
-                    <span class="text-red-500 hover:text-red-400 flex items-center gap-1.5 cursor-pointer">
+                    <span
+                      class="text-red-500 hover:text-red-400 flex items-center gap-1.5 cursor-pointer"
+                    >
                       <ToggleRight size={24} />
                       <span class="text-xs font-semibold uppercase tracking-wider">Blocking</span>
                     </span>
                   {:else}
-                    <span class="text-slate-500 hover:text-slate-400 flex items-center gap-1.5 cursor-pointer">
+                    <span
+                      class="text-slate-500 hover:text-slate-400 flex items-center gap-1.5 cursor-pointer"
+                    >
                       <ToggleLeft size={24} />
                       <span class="text-xs font-semibold uppercase tracking-wider">Disabled</span>
                     </span>
@@ -527,7 +564,9 @@
                 </button>
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right font-sans">
-                <div class="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div
+                  class="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
                   <button
                     on:click={() => openEditForm("blacklist", i)}
                     class="text-slate-400 hover:text-blue-400 transition-colors p-1 cursor-pointer"

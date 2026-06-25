@@ -124,18 +124,22 @@ pub async fn forward_request(
     let is_globally_blacklisted = {
         let config_lock = state.config.read().unwrap();
         config_lock.blacklists.iter().any(|rule| {
-            rule.enabled && (
-                rule.ips.iter().any(|ip_pat| match_ip(&client_ip, ip_pat)) ||
-                rule.paths.iter().any(|path_pat| match_path(&path, path_pat))
-            )
+            rule.enabled
+                && (rule.ips.iter().any(|ip_pat| match_ip(&client_ip, ip_pat))
+                    || rule
+                        .paths
+                        .iter()
+                        .any(|path_pat| match_path(&path, path_pat)))
         })
     };
 
     let is_vhost_blacklisted = vhost_cfg.blacklists.iter().any(|rule| {
-        rule.enabled && (
-            rule.ips.iter().any(|ip_pat| match_ip(&client_ip, ip_pat)) ||
-            rule.paths.iter().any(|path_pat| match_path(&path, path_pat))
-        )
+        rule.enabled
+            && (rule.ips.iter().any(|ip_pat| match_ip(&client_ip, ip_pat))
+                || rule
+                    .paths
+                    .iter()
+                    .any(|path_pat| match_path(&path, path_pat)))
     });
 
     if is_globally_blacklisted || is_vhost_blacklisted {
@@ -149,11 +153,7 @@ pub async fn forward_request(
             reason: "Blocked by Aegis Configured Blacklist Rule".to_string(),
         };
         let _ = state.log_tx.try_send(entry);
-        return (
-            StatusCode::FORBIDDEN,
-            "Blocked by Aegis WAF Blacklist",
-        )
-            .into_response();
+        return (StatusCode::FORBIDDEN, "Blocked by Aegis WAF Blacklist").into_response();
     }
 
     // 2. Allowlist Check
@@ -162,8 +162,11 @@ pub async fn forward_request(
 
     let check_allowlist_rule = |rule: &crate::config::AllowlistRule| {
         let ip_match = rule.ips.iter().any(|ip_pat| match_ip(&client_ip, ip_pat));
-        let path_match = rule.paths.iter().any(|path_pat| match_path(&path, path_pat));
-        
+        let path_match = rule
+            .paths
+            .iter()
+            .any(|path_pat| match_path(&path, path_pat));
+
         if !rule.ips.is_empty() && !rule.paths.is_empty() {
             ip_match && path_match
         } else if !rule.ips.is_empty() {
@@ -474,7 +477,7 @@ pub async fn forward_request(
 
     // Rule engine check
     let rule_engine = RuleEngine::new(&state.config.read().unwrap());
-    
+
     let mut active_rules = Vec::new();
     for r in &vhost_cfg.rules {
         let is_bypassed = bypassed_rules.iter().any(|bypass_pat| {
@@ -709,29 +712,36 @@ fn match_ip(client_ip: &std::net::IpAddr, pattern: &str) -> bool {
     if pattern.contains('/') {
         let parts: Vec<&str> = pattern.split('/').collect();
         if parts.len() == 2 {
-            if let (Ok(subnet_ip), Ok(prefix_len)) = (parts[0].parse::<std::net::IpAddr>(), parts[1].parse::<u8>()) {
+            if let (Ok(subnet_ip), Ok(prefix_len)) =
+                (parts[0].parse::<std::net::IpAddr>(), parts[1].parse::<u8>())
+            {
                 match (client_ip, subnet_ip) {
-                    (std::net::IpAddr::V4(c_ip), std::net::IpAddr::V4(s_ip)) => {
-                        if prefix_len <= 32 {
-                            let mask = if prefix_len == 0 { 0u32 } else { !0u32 << (32 - prefix_len) };
-                            let c_u32 = u32::from(*c_ip);
-                            let s_u32 = u32::from(s_ip);
-                            return (c_u32 & mask) == (s_u32 & mask);
-                        }
+                    (std::net::IpAddr::V4(c_ip), std::net::IpAddr::V4(s_ip))
+                        if prefix_len <= 32 =>
+                    {
+                        let mask = if prefix_len == 0 {
+                            0u32
+                        } else {
+                            !0u32 << (32 - prefix_len)
+                        };
+                        let c_u32 = u32::from(*c_ip);
+                        let s_u32 = u32::from(s_ip);
+                        return (c_u32 & mask) == (s_u32 & mask);
                     }
-                    (std::net::IpAddr::V6(c_ip), std::net::IpAddr::V6(s_ip)) => {
-                        if prefix_len <= 128 {
-                            let c_oct = c_ip.octets();
-                            let s_oct = s_ip.octets();
-                            let bytes_to_check = (prefix_len / 8) as usize;
-                            if c_oct[0..bytes_to_check] == s_oct[0..bytes_to_check] {
-                                let rem_bits = prefix_len % 8;
-                                if rem_bits == 0 {
-                                    return true;
-                                }
-                                let mask = 0xffu8 << (8 - rem_bits);
-                                return (c_oct[bytes_to_check] & mask) == (s_oct[bytes_to_check] & mask);
+                    (std::net::IpAddr::V6(c_ip), std::net::IpAddr::V6(s_ip))
+                        if prefix_len <= 128 =>
+                    {
+                        let c_oct = c_ip.octets();
+                        let s_oct = s_ip.octets();
+                        let bytes_to_check = (prefix_len / 8) as usize;
+                        if c_oct[0..bytes_to_check] == s_oct[0..bytes_to_check] {
+                            let rem_bits = prefix_len % 8;
+                            if rem_bits == 0 {
+                                return true;
                             }
+                            let mask = 0xffu8 << (8 - rem_bits);
+                            return (c_oct[bytes_to_check] & mask)
+                                == (s_oct[bytes_to_check] & mask);
                         }
                     }
                     _ => {}
