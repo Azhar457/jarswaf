@@ -236,9 +236,10 @@ fn get_system_services() -> Vec<DiscoveredService> {
                         }
                     } else if line.starts_with('N') {
                         if let Some(port_idx) = line.rfind(':') {
-                            if let Ok(port) = line[port_idx+1..].parse::<u16>() {
+                            if let Ok(port) = line[port_idx + 1..].parse::<u16>() {
                                 if port != 8080 && port != 80 && port != 443 {
-                                    let proc_name = sys.process(sysinfo::Pid::from(current_pid as usize))
+                                    let proc_name = sys
+                                        .process(sysinfo::Pid::from(current_pid as usize))
                                         .map(|p| p.name().to_string())
                                         .unwrap_or_else(|| format!("PID {current_pid}"));
                                     services.push(DiscoveredService {
@@ -262,10 +263,13 @@ fn get_system_services() -> Vec<DiscoveredService> {
 }
 
 #[cfg(target_os = "linux")]
-fn parse_proc_net_tcp(file_path: &str, protocol: &str) -> Result<Vec<DiscoveredService>, std::io::Error> {
+fn parse_proc_net_tcp(
+    file_path: &str,
+    protocol: &str,
+) -> Result<Vec<DiscoveredService>, std::io::Error> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
-    
+
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
     let mut services = Vec::new();
@@ -337,7 +341,9 @@ fn get_linux_socket_inodes() -> std::collections::HashMap<String, u32> {
                                 if let Ok(fd_entry) = fd_entry {
                                     if let Ok(link) = std::fs::read_link(fd_entry.path()) {
                                         if let Some(link_str) = link.to_str() {
-                                            if link_str.starts_with("socket:[") && link_str.ends_with(']') {
+                                            if link_str.starts_with("socket:[")
+                                                && link_str.ends_with(']')
+                                            {
                                                 let inode = &link_str[8..link_str.len() - 1];
                                                 map.insert(inode.to_string(), pid);
                                             }
@@ -1942,7 +1948,7 @@ fn get_country_and_coords_for_ip(ip: &str) -> (&'static str, f64, f64) {
     for c in ip.bytes() {
         hash = hash.wrapping_mul(33).wrapping_add(c as u32);
     }
-    
+
     let countries = [
         ("ID", -0.7893, 113.9213),  // Indonesia
         ("US", 37.0902, -95.7129),  // United States
@@ -1955,7 +1961,7 @@ fn get_country_and_coords_for_ip(ip: &str) -> (&'static str, f64, f64) {
         ("AU", -25.2744, 133.7751), // Australia
         ("NL", 52.1326, 5.2913),    // Netherlands
     ];
-    
+
     let idx = (hash as usize) % countries.len();
     countries[idx]
 }
@@ -1977,9 +1983,9 @@ async fn get_threat_intel_events_handler(
             for line in text.lines() {
                 if let Ok(log) = serde_json::from_str::<serde_json::Value>(line) {
                     if let (Some(ip), Some(ts), Some(action)) = (
-                         log.get("client_ip").and_then(|v| v.as_str()),
-                         log.get("timestamp").and_then(|v| v.as_str()),
-                         log.get("action").and_then(|v| v.as_str()),
+                        log.get("client_ip").and_then(|v| v.as_str()),
+                        log.get("timestamp").and_then(|v| v.as_str()),
+                        log.get("action").and_then(|v| v.as_str()),
                     ) {
                         let rule = log.get("rule_id").and_then(|v| v.as_str()).unwrap_or("-");
                         let (country, lat, lng) = get_country_and_coords_for_ip(ip);

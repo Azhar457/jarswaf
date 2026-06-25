@@ -3,7 +3,7 @@
   // @ts-ignore
   import createGlobe from "https://esm.sh/cobe@0.6.3";
 
-  export let markers = [
+  export let markers: any[] = [
     { id: "sf", location: [37.78, -122.44] },
     { id: "london", location: [51.51, -0.13] },
     { id: "tokyo", location: [35.68, 139.65] },
@@ -44,43 +44,47 @@
         markerColor: [0.9, 0.2, 0.2], // Fallback marker color
         glowColor: [0.1, 0.1, 0.3], // Blueish glow
         markerElevation: 0.08,
-        markers: markers.map((m) => ({ location: m.location, size: m.size || 0.05, color: m.color })),
+        markers: markers.map((m) => ({
+          location: m.location,
+          size: m.size || 0.05,
+          color: m.color,
+        })),
         onRender: (state: any) => {
           if (!isPointerInteracting) {
             phi += speed;
           }
           state.phi = phi + pointerInteractionMovement;
-          
+
           const r = width / 2;
           const cx = width / 2;
           const cy = width / 2;
-          
+
           const markersElements = document.querySelectorAll(".globe-marker");
           markersElements.forEach((el, idx) => {
             const m = markers[idx];
             if (!m) return;
-            
+
             const lat = m.location[0] * (Math.PI / 180);
             const lon = m.location[1] * (Math.PI / 180);
-            
+
             // Cartesian coordinates
             const x = Math.cos(lat) * Math.sin(-lon);
             const y = Math.sin(-lat);
             const z = Math.cos(lat) * Math.cos(-lon);
-            
+
             // Rotate Y (longitude)
             const x_rot = x * Math.cos(state.phi) - z * Math.sin(state.phi);
             const z_rot = x * Math.sin(state.phi) + z * Math.cos(state.phi);
-            
+
             // Rotate X (latitude/tilt)
             const y_rot = y * Math.cos(state.theta) - z_rot * Math.sin(state.theta);
             const z_final = y * Math.sin(state.theta) + z_rot * Math.cos(state.theta);
-            
+
             const htmlEl = el as HTMLElement;
             if (z_final > 0) {
               const screenX = cx + x_rot * r * 0.88;
               const screenY = cy - y_rot * r * 0.88;
-              
+
               htmlEl.style.left = `${screenX}px`;
               htmlEl.style.top = `${screenY}px`;
               htmlEl.style.opacity = "1";
@@ -137,9 +141,12 @@
       class="globe-marker absolute pointer-events-none flex items-center gap-2 px-2 py-1 bg-slate-900/90 backdrop-blur border border-slate-700/50 rounded shadow-lg transition-opacity duration-150"
       style="transform: translate(-50%, -100%); display: none; opacity: 0;"
     >
-      <span class="w-2 h-2 rounded-full {m.colorClass || 'bg-red-500 shadow-[0_0_8px_#ef4444]'} animate-pulse"></span>
+      <span
+        class="w-2 h-2 rounded-full {m.colorClass ||
+          'bg-red-500 shadow-[0_0_8px_#ef4444]'} animate-pulse"
+      ></span>
       <span class="font-mono text-[10px] font-bold tracking-widest text-slate-100 uppercase"
-        >{m.country || 'ID'} | {m.countFormatted || '1'}</span
+        >{m.country || "ID"} | {m.countFormatted || "1"}</span
       >
     </div>
   {/each}

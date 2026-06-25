@@ -127,7 +127,9 @@
     term.writeln("(c) Microsoft Corporation. All rights reserved.");
     term.writeln("");
     term.writeln("C:\\AegisWAF> aegis-waf --stream --verbose");
-    term.writeln("\x1b[32m[SYSTEM]\x1b[0m Aegis WAF Engine connected. Streaming real-time proxy events...");
+    term.writeln(
+      "\x1b[32m[SYSTEM]\x1b[0m Aegis WAF Engine connected. Streaming real-time proxy events...",
+    );
     term.writeln("");
 
     // Print existing logs history (reversing to show oldest first)
@@ -193,18 +195,30 @@
     </div>
   </div>
 
-  <Card className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col bg-[#0c0c0c] border-slate-800 shadow-2xl rounded-xl">
+  <Card
+    className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col bg-[#0c0c0c] border-slate-800 shadow-2xl rounded-xl"
+  >
     <!-- CMD Window Title Bar -->
-    <div class="h-9 bg-[#1e1e1e] border-b border-slate-800 flex items-center justify-between px-4 shrink-0 rounded-t-xl select-none">
+    <div
+      class="h-9 bg-[#1e1e1e] border-b border-slate-800 flex items-center justify-between px-4 shrink-0 rounded-t-xl select-none"
+    >
       <div class="flex items-center gap-2">
         <TerminalIcon size={14} class="text-slate-400" />
-        <span class="text-xs font-medium text-slate-300 font-mono">Command Prompt - aegis-waf --stream</span>
+        <span class="text-xs font-medium text-slate-300 font-mono"
+          >Command Prompt - aegis-waf --stream</span
+        >
       </div>
       <!-- Mock Window Controls -->
       <div class="flex items-center gap-2.5">
-        <div class="w-2.5 h-2.5 rounded-full bg-slate-700/60 hover:bg-slate-600 transition-colors"></div>
-        <div class="w-2.5 h-2.5 rounded-full bg-slate-700/60 hover:bg-slate-600 transition-colors"></div>
-        <div class="w-2.5 h-2.5 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors"></div>
+        <div
+          class="w-2.5 h-2.5 rounded-full bg-slate-700/60 hover:bg-slate-600 transition-colors"
+        ></div>
+        <div
+          class="w-2.5 h-2.5 rounded-full bg-slate-700/60 hover:bg-slate-600 transition-colors"
+        ></div>
+        <div
+          class="w-2.5 h-2.5 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors"
+        ></div>
       </div>
     </div>
     <div class="p-4 flex-1 min-h-0 overflow-hidden flex flex-col bg-[#0c0c0c]">

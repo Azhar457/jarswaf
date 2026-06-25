@@ -66,7 +66,9 @@
           ? "bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border-emerald-500/30"
           : "bg-red-600/10 hover:bg-red-600/20 text-red-400 border-red-500/30"
       }`}
-      title={$wafEnabled ? "WAF is active. Click to bypass inspection." : "WAF is bypassed. Click to enable inspection."}
+      title={$wafEnabled
+        ? "WAF is active. Click to bypass inspection."
+        : "WAF is bypassed. Click to enable inspection."}
     >
       {#if $wafEnabled}
         <Shield size={16} />
