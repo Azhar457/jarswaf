@@ -1,6 +1,6 @@
-use super::{Rule, RequestInfo, Phase, Action, Severity};
-use regex::Regex;
+use super::{Action, Phase, RequestInfo, Rule, Severity};
 use once_cell::sync::Lazy;
+use regex::Regex;
 
 static LFI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(\.\./|\.\.\\|\.\.%00|%00%00|/etc/passwd|/etc/shadow|/proc/self|/proc/version|/proc/cmdline|C:\\Windows\\|C:\\Users\\)").unwrap()
@@ -11,7 +11,8 @@ static LFI_002_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 static RFI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)((http|https|ftp)://.*\.(php|jsp|asp|aspx|sh|bash|exe|dll|bin)|.*=https?://)").unwrap()
+    Regex::new(r"(?i)((http|https|ftp)://.*\.(php|jsp|asp|aspx|sh|bash|exe|dll|bin)|.*=https?://)")
+        .unwrap()
 });
 
 static REDIR_001_REGEX: Lazy<Regex> = Lazy::new(|| {

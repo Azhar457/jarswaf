@@ -1,15 +1,15 @@
+pub mod body;
 pub mod headers;
 pub mod uri;
-pub mod body;
 
-use std::collections::HashMap;
 use dashmap::DashMap;
+use std::collections::HashMap;
 use std::net::IpAddr;
 use unicode_normalization::UnicodeNormalization;
 
-use tokio::time::Instant;
-use once_cell::sync::Lazy;
 use crate::config::Config;
+use once_cell::sync::Lazy;
+use tokio::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -73,14 +73,14 @@ pub fn record_block(ip: IpAddr) -> bool {
     let now = Instant::now();
     let mut entry = BLOCKED_COUNTERS.entry(ip).or_insert((0, now));
     let (count, first_seen) = entry.value_mut();
-    
+
     if now.duration_since(*first_seen).as_secs() > 300 {
         *count = 1;
         *first_seen = now;
     } else {
         *count += 1;
     }
-    
+
     if *count >= 5 {
         let ip_clone = ip;
         tokio::spawn(async move {
@@ -100,12 +100,9 @@ pub fn start_rate_limiter_cleanup() {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
             let now = Instant::now();
-            RATE_LIMITER.retain(|_, bucket| {
-                now.duration_since(bucket.last_access).as_secs() < 300
-            });
-            BLOCKED_COUNTERS.retain(|_, (_, first_seen)| {
-                now.duration_since(*first_seen).as_secs() < 300
-            });
+            RATE_LIMITER.retain(|_, bucket| now.duration_since(bucket.last_access).as_secs() < 300);
+            BLOCKED_COUNTERS
+                .retain(|_, (_, first_seen)| now.duration_since(*first_seen).as_secs() < 300);
         }
     });
 }
@@ -143,21 +140,30 @@ impl RuleEngine {
         // Phase 1: Headers
         for rule in headers::HEADER_RULES {
             if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
-                return Some((rule.id.to_string(), format!("{}: {}", rule.name, rule.description)));
+                return Some((
+                    rule.id.to_string(),
+                    format!("{}: {}", rule.name, rule.description),
+                ));
             }
         }
 
         // Phase 2: URI + Query
         for rule in uri::URI_RULES {
             if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
-                return Some((rule.id.to_string(), format!("{}: {}", rule.name, rule.description)));
+                return Some((
+                    rule.id.to_string(),
+                    format!("{}: {}", rule.name, rule.description),
+                ));
             }
         }
 
         // Phase 3: Body
         for rule in body::BODY_RULES {
             if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
-                return Some((rule.id.to_string(), format!("{}: {}", rule.name, rule.description)));
+                return Some((
+                    rule.id.to_string(),
+                    format!("{}: {}", rule.name, rule.description),
+                ));
             }
         }
 
@@ -167,7 +173,7 @@ impl RuleEngine {
 
 pub fn normalize_string(input: &str) -> String {
     let mut normalized = input.to_string();
-    
+
     // 1. URL Decode (Recursively up to 3 times for double encoding)
     for _ in 0..3 {
         if let Ok(decoded) = urlencoding::decode(&normalized) {
@@ -179,23 +185,26 @@ pub fn normalize_string(input: &str) -> String {
             break;
         }
     }
-    
+
     // 2. HTML Entity Decode (&lt; -> <, &gt; -> >, etc.)
     normalized = htmlescape::decode_html(&normalized).unwrap_or(normalized);
-    
+
     // 3. Unicode NFKC Normalization (prevents fullwidth and homoglyph bypasses)
     normalized = normalized.nfkc().collect::<String>();
-    
+
     // 4. Lowercase for uniform signature matching
     normalized = normalized.to_lowercase();
-    
+
     // Convert '+' to ' ' to handle form-urlencoded space encoding and prevent bypasses
     normalized = normalized.replace('+', " ");
-    
+
     // 5. Strip Null Bytes & Collapse Whitespace
     normalized = normalized.replace('\0', "");
-    normalized = normalized.split_whitespace().collect::<Vec<&str>>().join(" ");
-    
+    normalized = normalized
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ");
+
     normalized
 }
 
@@ -250,7 +259,9 @@ impl RuleEngine {
         });
 
         // Sync parameters dynamically if configuration has changed
-        if (bucket.rate - rate).abs() > f64::EPSILON || (bucket.capacity - capacity).abs() > f64::EPSILON {
+        if (bucket.rate - rate).abs() > f64::EPSILON
+            || (bucket.capacity - capacity).abs() > f64::EPSILON
+        {
             bucket.rate = rate;
             bucket.capacity = capacity;
             bucket.tokens = bucket.tokens.min(capacity);
@@ -304,7 +315,10 @@ mod tests {
     fn test_clean_request_passes() {
         let engine = RuleEngine::new(&test_config());
         let mut headers = HashMap::new();
-        headers.insert("user-agent".to_string(), "Mozilla/5.0 (Windows NT 10.0; Win64; x64)".to_string());
+        headers.insert(
+            "user-agent".to_string(),
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)".to_string(),
+        );
         headers.insert("host".to_string(), "example.com".to_string());
 
         let result = engine.check_request(
@@ -325,15 +339,7 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("user-agent".to_string(), "sqlmap/1.4.9".to_string());
 
-        let result = engine.check_request(
-            "/",
-            "",
-            &headers,
-            "",
-            None,
-            "GET",
-            &[],
-        );
+        let result = engine.check_request("/", "", &headers, "", None, "GET", &[]);
         assert!(result.is_some());
         let (rule_id, msg) = result.unwrap();
         assert_eq!(rule_id, "BOT-001");
@@ -344,7 +350,10 @@ mod tests {
     fn test_sqli_001_blocked() {
         let engine = RuleEngine::new(&test_config());
         let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "application/x-www-form-urlencoded".to_string());
+        headers.insert(
+            "content-type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        );
 
         let result = engine.check_request(
             "/login",
@@ -387,15 +396,7 @@ mod tests {
         let engine = RuleEngine::new(&test_config());
         let headers = HashMap::new();
 
-        let result = engine.check_request(
-            "/../../etc/passwd",
-            "",
-            &headers,
-            "",
-            None,
-            "GET",
-            &[],
-        );
+        let result = engine.check_request("/../../etc/passwd", "", &headers, "", None, "GET", &[]);
         assert!(result.is_some());
         let (rule_id, msg) = result.unwrap();
         assert_eq!(rule_id, "LFI-001");

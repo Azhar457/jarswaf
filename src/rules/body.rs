@@ -1,6 +1,6 @@
-use super::{Rule, RequestInfo, Phase, Action, Severity};
-use regex::Regex;
+use super::{Action, Phase, RequestInfo, Rule, Severity};
 use once_cell::sync::Lazy;
+use regex::Regex;
 
 // SQL Injection Regexes
 static SQLI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -16,7 +16,8 @@ static SQLI_003_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 static SQLI_004_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(/\*|\*/|--\s|#\s|;%00|')\s*OR\s*('|')\s*AND\s*('|')\s*=\s*('|')\s*LIKE\s*'"#).unwrap()
+    Regex::new(r#"(?i)(/\*|\*/|--\s|#\s|;%00|')\s*OR\s*('|')\s*AND\s*('|')\s*=\s*('|')\s*LIKE\s*'"#)
+        .unwrap()
 });
 
 // XSS Regexes
@@ -137,9 +138,15 @@ fn check_csrf_001(req: &RequestInfo) -> bool {
     if !matches!(req.method, "POST" | "PUT" | "PATCH" | "DELETE") {
         return false;
     }
-    let content_type = req.headers.get("content-type").map(|s| s.as_str()).unwrap_or("");
+    let content_type = req
+        .headers
+        .get("content-type")
+        .map(|s| s.as_str())
+        .unwrap_or("");
     // Hanya check untuk form submissions (klasik CSRF)
-    if !content_type.contains("application/x-www-form-urlencoded") && !content_type.contains("multipart/form-data") {
+    if !content_type.contains("application/x-www-form-urlencoded")
+        && !content_type.contains("multipart/form-data")
+    {
         return false;
     }
     let origin = req.headers.get("origin");
@@ -151,7 +158,11 @@ fn check_csrf_002(req: &RequestInfo) -> bool {
     if !matches!(req.method, "POST" | "PUT" | "PATCH" | "DELETE") {
         return false;
     }
-    let content_type = req.headers.get("content-type").map(|s| s.as_str()).unwrap_or("");
+    let content_type = req
+        .headers
+        .get("content-type")
+        .map(|s| s.as_str())
+        .unwrap_or("");
     let origin = req.headers.get("origin");
     content_type.contains("application/json") && origin.is_none()
 }
@@ -175,17 +186,19 @@ fn check_upload_003(req: &RequestInfo) -> bool {
 
 fn check_smuggle_001(req: &RequestInfo) -> bool {
     let cl = req.headers.contains_key("content-length");
-    let te = req.headers.get("transfer-encoding")
+    let te = req
+        .headers
+        .get("transfer-encoding")
         .map(|v| v.contains("chunked"))
         .unwrap_or(false);
     cl && te
 }
 
 fn check_smuggle_002(req: &RequestInfo) -> bool {
-    req.headers.contains_key(":authority") ||
-    req.headers.contains_key(":method") ||
-    req.headers.contains_key(":path") ||
-    req.headers.contains_key(":scheme")
+    req.headers.contains_key(":authority")
+        || req.headers.contains_key(":method")
+        || req.headers.contains_key(":path")
+        || req.headers.contains_key(":scheme")
 }
 
 pub static BODY_RULES: &[Rule] = &[

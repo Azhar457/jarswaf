@@ -1,4 +1,4 @@
-use crate::config::{VHost, Config};
+use crate::config::{Config, VHost};
 use axum::extract::Host;
 
 /// Helper to match host against a pattern (supports wildcard '*')
@@ -6,7 +6,7 @@ fn match_pattern(host: &str, pattern: &str) -> bool {
     if pattern == "_" {
         return true;
     }
-    
+
     let host = host.trim().to_lowercase();
     let pattern = pattern.trim().to_lowercase();
 
@@ -35,13 +35,8 @@ fn match_pattern(host: &str, pattern: &str) -> bool {
 
 /// Mencari vhost berdasarkan Host header.
 /// Return backend address & matched vhost config.
-pub fn match_vhost<'a>(
-    host_header: Option<&Host>,
-    config: &'a Config,
-) -> (&'a str, &'a VHost) {
-    let host_str = host_header
-        .map(|h| h.0.clone())
-        .unwrap_or_default();
+pub fn match_vhost<'a>(host_header: Option<&Host>, config: &'a Config) -> (&'a str, &'a VHost) {
+    let host_str = host_header.map(|h| h.0.clone()).unwrap_or_default();
 
     // Strip port if exists (e.g. localhost:80 -> localhost)
     let host_name = host_str.split(':').next().unwrap_or("").trim();
@@ -54,7 +49,7 @@ pub fn match_vhost<'a>(
             }
         }
     }
-    
+
     // fallback ke vhost pertama
     let first = config.vhosts.first().expect("No vhost configured");
     (&first.backend, first)

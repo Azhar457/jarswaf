@@ -1,7 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use serde::{Serialize, Deserialize};
 use tokio::sync::mpsc::Receiver;
-
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WafLogEntry {
@@ -26,17 +25,17 @@ use reqwest::header::{HeaderMap, HeaderValue};
 // Membuat HTTP Client dengan Header Autentikasi ClickHouse otomatis
 pub fn build_client() -> reqwest::Client {
     let mut headers = HeaderMap::new();
-    
+
     let user = std::env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "default".to_string());
     if let Ok(val) = HeaderValue::from_str(&user) {
         headers.insert("X-ClickHouse-User", val);
     }
-    
+
     let pass = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "aegis".to_string());
     if let Ok(val) = HeaderValue::from_str(&pass) {
         headers.insert("X-ClickHouse-Key", val);
     }
-    
+
     reqwest::Client::builder()
         .default_headers(headers)
         .build()
@@ -59,7 +58,7 @@ pub async fn init_db(clickhouse_url: &str) -> Result<(), Box<dyn std::error::Err
         ORDER BY (timestamp, client_ip)
         TTL toDateTime(timestamp) + INTERVAL 30 DAY DELETE
     ";
-    
+
     let url = format!("{}/", clickhouse_url.trim_end_matches('/'));
     let res = client.post(&url).body(ddl.to_string()).send().await?;
     if !res.status().is_success() {
@@ -71,19 +70,26 @@ pub async fn init_db(clickhouse_url: &str) -> Result<(), Box<dyn std::error::Err
 }
 
 // Mendapatkan statistik realtime dari ClickHouse
-pub async fn get_stats(clickhouse_url: &str, hours: u32) -> Result<Stats, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn get_stats(
+    clickhouse_url: &str,
+    hours: u32,
+) -> Result<Stats, Box<dyn std::error::Error + Send + Sync>> {
     let client = build_client();
     let query = format!(
         "SELECT count(), countIf(action = 'BLOCK'), countIf(action = 'RATE_LIMIT') FROM request_log WHERE timestamp > now() - INTERVAL {} HOUR FORMAT TSV",
         hours
     );
-    let url = format!("{}/?query={}", clickhouse_url.trim_end_matches('/'), urlencoding::encode(&query));
-    
+    let url = format!(
+        "{}/?query={}",
+        clickhouse_url.trim_end_matches('/'),
+        urlencoding::encode(&query)
+    );
+
     let res = client.get(&url).send().await?;
     if !res.status().is_success() {
         return Err("ClickHouse stats query failed".into());
     }
-    
+
     let text = res.text().await?;
     let parts: Vec<&str> = text.trim().split('\t').collect();
     if parts.len() == 3 {
@@ -93,16 +99,26 @@ pub async fn get_stats(clickhouse_url: &str, hours: u32) -> Result<Stats, Box<dy
             rate_limited: parts[2].parse().unwrap_or(0),
         })
     } else {
-        Ok(Stats { total_requests: 0, blocked: 0, rate_limited: 0 })
+        Ok(Stats {
+            total_requests: 0,
+            blocked: 0,
+            rate_limited: 0,
+        })
     }
 }
 
 // Mendapatkan jumlah disk usage dari ClickHouse Table
-pub async fn get_db_size(clickhouse_url: &str) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn get_db_size(
+    clickhouse_url: &str,
+) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
     let client = build_client();
     let query = "SELECT total_bytes FROM system.tables WHERE name = 'request_log' FORMAT TSV";
-    let url = format!("{}/?query={}", clickhouse_url.trim_end_matches('/'), urlencoding::encode(query));
-    
+    let url = format!(
+        "{}/?query={}",
+        clickhouse_url.trim_end_matches('/'),
+        urlencoding::encode(query)
+    );
+
     let res = client.get(&url).send().await?;
     if res.status().is_success() {
         let text = res.text().await?;
@@ -118,19 +134,10 @@ use std::io::Write;
 fn write_to_local_log(entry: &WafLogEntry, log_dir: &str) {
     let _ = std::fs::create_dir_all(log_dir);
     let log_path = std::path::Path::new(log_dir).join("aegis.log");
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-    {
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
         let line = format!(
             "[{}] {} | {} | \"{}\" [{}] - {}\n",
-            entry.timestamp,
-            entry.client_ip,
-            entry.action,
-            entry.path,
-            entry.rule_id,
-            entry.reason
+            entry.timestamp, entry.client_ip, entry.action, entry.path, entry.rule_id, entry.reason
         );
         let _ = file.write_all(line.as_bytes());
     }
@@ -147,17 +154,19 @@ pub async fn log_worker(
     let client = build_client();
     let batch_interval = Duration::from_secs(1);
     let max_batch_size = 5000;
-    
+
     let mut batch = Vec::new();
     let mut last_flush = tokio::time::Instant::now();
 
     loop {
-        let timeout = batch_interval.checked_sub(last_flush.elapsed()).unwrap_or(Duration::from_millis(10));
-        
+        let timeout = batch_interval
+            .checked_sub(last_flush.elapsed())
+            .unwrap_or(Duration::from_millis(10));
+
         tokio::select! {
             Some(entry) = rx.recv() => {
                 write_to_local_log(&entry, &log_dir);
-                
+
                 batch.push(entry);
                 if batch.len() >= max_batch_size {
                     flush_logs(&batch, &clickhouse_url, &controller_url, &client, &token).await;
@@ -183,7 +192,9 @@ async fn flush_logs(
     client: &reqwest::Client,
     token: &Option<String>,
 ) {
-    if batch.is_empty() { return; }
+    if batch.is_empty() {
+        return;
+    }
 
     if let Some(ctrl_url) = controller_url {
         // Mode Agent: Kirim JSON Array ke Controller
@@ -204,8 +215,11 @@ async fn flush_logs(
                 body.push('\n');
             }
         }
-        
-        let url = format!("{}/?query=INSERT INTO request_log FORMAT JSONEachRow", clickhouse_url.trim_end_matches('/'));
+
+        let url = format!(
+            "{}/?query=INSERT INTO request_log FORMAT JSONEachRow",
+            clickhouse_url.trim_end_matches('/')
+        );
         let res = client.post(&url).body(body).send().await;
         if let Err(e) = res {
             tracing::error!("Failed to insert logs to ClickHouse: {}", e);
