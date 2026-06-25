@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use toml;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
