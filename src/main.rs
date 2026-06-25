@@ -234,8 +234,9 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
     let controller_url = controller.clone();
     let ch_url_clone = clickhouse_url.clone();
     let log_dir = cfg.global.log_dir.clone();
+    let token_clone = token.clone();
     tokio::spawn(async move {
-        logging::log_worker(log_rx, ch_url_clone, controller_url, log_dir).await;
+        logging::log_worker(log_rx, ch_url_clone, controller_url, log_dir, token_clone).await;
     });
 
     // Spawn background config reloader
@@ -289,6 +290,7 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
         let ctrl_url_metrics = ctrl.clone();
         let hostname = get_hostname();
         let os = std::env::consts::OS.to_string();
+        let token_metrics = token.clone();
         tokio::spawn(async move {
             let client = crate::logging::build_client();
             let mut sys = System::new_all();
@@ -340,7 +342,11 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                     "{}/api/v1/agents/metrics",
                     ctrl_url_metrics.trim_end_matches('/')
                 );
-                match client.post(&url).json(&payload).send().await {
+                let mut req = client.post(&url).json(&payload);
+                if let Some(ref t) = token_metrics {
+                    req = req.header("Authorization", format!("Bearer {t}"));
+                }
+                match req.send().await {
                     Ok(resp) => {
                         if !resp.status().is_success() {
                             tracing::warn!(
@@ -361,11 +367,15 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
         // Spawn background task to receive real-time config updates from Controller via WebSocket
         let ctrl_url_ws = ctrl.clone();
         let config_arc_ws = config_arc.clone();
+        let token_ws = token.clone();
         tokio::spawn(async move {
             loop {
-                let ws_url = format!("{}/ws/agent", ctrl_url_ws.trim_end_matches('/'))
+                let mut ws_url = format!("{}/ws/agent", ctrl_url_ws.trim_end_matches('/'))
                     .replace("http://", "ws://")
                     .replace("https://", "wss://");
+                if let Some(ref t) = token_ws {
+                    ws_url = format!("{}?token={}", ws_url, urlencoding::encode(t));
+                }
 
                 info!("Connecting to Controller config WebSocket at {}...", ws_url);
                 match tokio_tungstenite::connect_async(&ws_url).await {
@@ -421,6 +431,7 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
     // Spawn background threat intelligence / reputation blocklist sync task
     let blocklist_clone = blocklist.clone();
     let controller_url_clone = controller.clone();
+    let token_blocklist = token.clone();
 
     tokio::spawn(async move {
         let client = crate::logging::build_client();
@@ -431,7 +442,11 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                     "{}/api/v1/reputation/blocklist",
                     ctrl_url.trim_end_matches('/')
                 );
-                match client.get(&url).send().await {
+                let mut req = client.get(&url);
+                if let Some(ref t) = token_blocklist {
+                    req = req.header("Authorization", format!("Bearer {t}"));
+                }
+                match req.send().await {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             if let Ok(ips) = resp.json::<Vec<String>>().await {
@@ -754,6 +769,36 @@ struct ControllerState {
 }
 
 async fn run_controller(port: u16, config_path: String) {
+    // Ensure admin token is generated if not exists
+    if let Ok(mut cfg) = config::load_config(&config_path) {
+        let has_token = match &cfg.global.admin_token {
+            Some(t) => !t.trim().is_empty(),
+            None => false,
+        };
+
+        if !has_token {
+            let generated = uuid::Uuid::new_v4().simple().to_string();
+            cfg.global.admin_token = Some(generated.clone());
+            if let Ok(toml_str) = toml::to_string(&cfg) {
+                if std::fs::write(&config_path, toml_str).is_ok() {
+                    println!("\n\n");
+                    println!("========================================================================");
+                    println!("                   AEGIS WAF - SECURITY INITIALIZATION                  ");
+                    println!("========================================================================");
+                    println!("  A secure random administrator token has been generated for you:");
+                    println!("  ");
+                    println!("  Admin Token:  \x1b[1;33m{}\x1b[0m", generated);
+                    println!("  ");
+                    println!("  \x1b[1;31mIMPORTANT:\x1b[0m Please copy and save this key in a safe place (e.g., Notepad).");
+                    println!("  It is used to access the dashboard and register agents.");
+                    println!("  This token will NOT be shown again.");
+                    println!("========================================================================");
+                    println!("\n\n");
+                }
+            }
+        }
+    }
+
     info!("Starting Aegis WAF Controller on port {}...", port);
 
     let clickhouse_url =
@@ -800,8 +845,7 @@ async fn run_controller(port: u16, config_path: String) {
         .allow_methods(Any);
 
     // Build Controller router
-    let app = Router::new()
-        .route("/install.sh", get(serve_install_script))
+    let api_routes = Router::new()
         .route("/api/v1/agents/register", post(register_agent_handler))
         .route("/api/v1/agents/metrics", post(receive_metrics_handler))
         .route("/api/v1/agents", get(get_agents_handler))
@@ -823,6 +867,10 @@ async fn run_controller(port: u16, config_path: String) {
             "/api/v1/vhosts",
             get(get_vhosts_handler).post(post_vhosts_handler),
         )
+        .route(
+            "/api/v1/custom-rules",
+            get(get_custom_rules_handler).post(post_custom_rules_handler),
+        )
         .route("/api/v1/stats", get(get_stats_handler))
         .route("/api/v1/reputation/blocklist", get(get_blocklist_handler))
         .route(
@@ -840,6 +888,11 @@ async fn run_controller(port: u16, config_path: String) {
         .route("/api/v1/ssl/renew", post(post_ssl_renew_handler))
         .route("/ws/dashboard", get(ws_dashboard_handler))
         .route("/ws/agent", get(ws_agent_handler))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), auth_middleware));
+
+    let app = Router::new()
+        .route("/install.sh", get(serve_install_script))
+        .merge(api_routes)
         .fallback_service(tower_http::services::ServeDir::new("dashboard/dist"))
         .layer(cors)
         .with_state(state);
@@ -874,6 +927,7 @@ struct AgentRegisterRequest {
 struct ConfigPayload {
     logging_enabled: bool,
     log_limit_mb: u64,
+    waf_enabled: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -1103,24 +1157,156 @@ async fn post_ratelimits_handler(
 }
 
 async fn get_config_handler(State(state): State<ControllerState>) -> impl IntoResponse {
+    let cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load config").into_response();
+        }
+    };
     let payload = ConfigPayload {
         logging_enabled: state.logging_enabled.load(Ordering::Relaxed),
         log_limit_mb: state.log_size_limit_mb.load(Ordering::Relaxed),
+        waf_enabled: cfg.global.waf_enabled,
     };
-    (StatusCode::OK, Json(payload))
+    (StatusCode::OK, Json(payload)).into_response()
 }
 
 async fn post_config_handler(
     State(state): State<ControllerState>,
     Json(payload): Json<ConfigPayload>,
 ) -> impl IntoResponse {
+    let mut cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load config").into_response();
+        }
+    };
+
+    cfg.global.waf_enabled = payload.waf_enabled;
+
+    // Serialize back to TOML and save
+    let toml_str = match toml::to_string(&cfg) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Failed to serialize updated config to TOML: {:?}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize config").into_response();
+        }
+    };
+
+    if let Err(e) = std::fs::write(&state.config_path, toml_str) {
+        tracing::error!("Failed to write updated config to disk: {:?}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to write config file").into_response();
+    }
+
+    // Update in-memory atomics
     state
         .logging_enabled
         .store(payload.logging_enabled, Ordering::Relaxed);
     state
         .log_size_limit_mb
         .store(payload.log_limit_mb, Ordering::Relaxed);
-    StatusCode::OK
+
+    // Broadcast updated config to all agents via config_tx
+    let _ = state.config_tx.send(cfg);
+
+    StatusCode::OK.into_response()
+}
+
+async fn get_custom_rules_handler(State(state): State<ControllerState>) -> impl IntoResponse {
+    let cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load config").into_response();
+        }
+    };
+    (StatusCode::OK, Json(cfg.custom_rules)).into_response()
+}
+
+async fn post_custom_rules_handler(
+    State(state): State<ControllerState>,
+    Json(custom_rules): Json<Vec<config::CustomRule>>,
+) -> impl IntoResponse {
+    let mut cfg = match config::load_config(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config from {}: {:?}", state.config_path, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load config").into_response();
+        }
+    };
+
+    cfg.custom_rules = custom_rules;
+
+    let toml_str = match toml::to_string(&cfg) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Failed to serialize updated config to TOML: {:?}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize config").into_response();
+        }
+    };
+
+    match std::fs::write(&state.config_path, toml_str) {
+        Ok(_) => {
+            info!("Custom rules configuration updated successfully in {}", state.config_path);
+            let _ = state.config_tx.send(cfg);
+            StatusCode::OK.into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to write updated config to disk: {:?}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to write config file").into_response()
+        }
+    }
+}
+
+async fn auth_middleware(
+    State(state): State<ControllerState>,
+    req: Request<Body>,
+    next: axum::middleware::Next,
+) -> Response {
+    let admin_token = match config::load_config(&state.config_path) {
+        Ok(cfg) => cfg.global.admin_token,
+        Err(_) => None,
+    };
+
+    if let Some(expected_token) = admin_token {
+        if !expected_token.is_empty() {
+            let mut auth_valid = false;
+            
+            if let Some(auth_header) = req.headers().get(axum::http::header::AUTHORIZATION) {
+                if let Ok(auth_str) = auth_header.to_str() {
+                    if auth_str.starts_with("Bearer ") {
+                        let token = auth_str.trim_start_matches("Bearer ");
+                        if token == expected_token {
+                            auth_valid = true;
+                        }
+                    }
+                }
+            }
+
+            if !auth_valid {
+                if let Some(query) = req.uri().query() {
+                    for pair in query.split('&') {
+                        let mut parts = pair.splitn(2, '=');
+                        if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
+                            if k == "token" && v == expected_token {
+                                auth_valid = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !auth_valid {
+                tracing::warn!("Unauthorized WAF API access attempt to {}", req.uri().path());
+                return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
+            }
+        }
+    }
+
+    next.run(req).await
 }
 
 async fn get_vhosts_handler(State(state): State<ControllerState>) -> impl IntoResponse {

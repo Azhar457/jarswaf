@@ -1,15 +1,16 @@
-use std::process::Command;
 use anyhow::Context;
+use std::process::Command;
 
 fn main() -> anyhow::Result<()> {
     println!("Building eBPF program...");
-    
+
     let status = Command::new("cargo")
         .args(&[
             "build",
             "--release",
             "--target=bpfel-unknown-none",
-            "-Z", "build-std=core",
+            "-Z",
+            "build-std=core",
         ])
         .current_dir("aegis-ebpf")
         .status()

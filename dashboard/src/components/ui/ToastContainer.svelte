@@ -4,7 +4,7 @@
   import { fly, fade } from "svelte/transition";
 </script>
 
-<div class="fixed top-24 right-8 z-[100] flex flex-col gap-3 pointer-events-none">
+<div class="fixed top-24 right-8 z-100 flex flex-col gap-3 pointer-events-none">
   {#each $toast as t (t.id)}
     <div
       in:fly={{ x: 50, duration: 300 }}

@@ -1,4 +1,15 @@
-import { writable } from "svelte/store";
+import { writable, get } from "svelte/store";
+
+export interface CustomRule {
+  id: string;
+  name: string;
+  condition_type: string;
+  operator: string;
+  condition_value: string;
+  action: string;
+  action_value: string;
+  enabled: boolean;
+}
 
 export interface WafLog {
   timestamp: string;
@@ -38,7 +49,7 @@ export interface VHost {
   rules: string[];
   blocked_countries: string[];
   geoblock_type: string;
-  custom_rules: any[];
+  custom_rules: string[]; // List of custom rule IDs
   ssl: string;
   max_body: string;
   rate_limit: string;
@@ -61,6 +72,17 @@ export const vhostsCount = writable<number>(0);
 export const agents = writable<AgentInfo[]>([]);
 export const vhostsList = writable<VHost[]>([]);
 export const rateLimits = writable<RateLimitPolicy[]>([]);
+export const customRulesList = writable<CustomRule[]>([]);
+export const wafEnabled = writable<boolean>(true);
+export const token = writable<string>(
+  typeof window !== "undefined" ? localStorage.getItem("aegis_token") || "" : "",
+);
+
+if (typeof window !== "undefined") {
+  token.subscribe((val) => {
+    localStorage.setItem("aegis_token", val);
+  });
+}
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -72,13 +94,31 @@ export function initGlobalStore(controllerUrl: string) {
   if (isInitialized) return;
   isInitialized = true;
 
+  const currentToken = get(token);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (currentToken) {
+    headers["Authorization"] = `Bearer ${currentToken}`;
+  }
+
+  const checkStatus = (res: Response) => {
+    if (res.status === 401) {
+      token.set("");
+      isInitialized = false;
+      cleanupGlobalStore();
+      throw new Error("Unauthorized");
+    }
+    return res;
+  };
+
   // Fetch initial REST data
-  fetch(`${controllerUrl}/api/v1/agents`)
+  fetch(`${controllerUrl}/api/v1/agents`, { headers })
+    .then(checkStatus)
     .then((res) => res.json())
     .then((data) => agents.set(data))
     .catch(console.error);
 
-  fetch(`${controllerUrl}/api/v1/vhosts`)
+  fetch(`${controllerUrl}/api/v1/vhosts`, { headers })
+    .then(checkStatus)
     .then((res) => res.json())
     .then((data) => {
       vhostsList.set(data);
@@ -86,13 +126,41 @@ export function initGlobalStore(controllerUrl: string) {
     })
     .catch(console.error);
 
-  fetch(`${controllerUrl}/api/v1/rate-limits`)
+  fetch(`${controllerUrl}/api/v1/rate-limits`, { headers })
+    .then(checkStatus)
     .then((res) => res.json())
     .then((data) => rateLimits.set(data))
     .catch(console.error);
 
+  fetch(`${controllerUrl}/api/v1/custom-rules`, { headers })
+    .then(checkStatus)
+    .then((res) => res.json())
+    .then((data) => customRulesList.set(data))
+    .catch(console.error);
+
+  fetch(`${controllerUrl}/api/v1/logs`, { headers })
+    .then(checkStatus)
+    .then((res) => res.json())
+    .then((data) => logs.set(data))
+    .catch(console.error);
+
+  fetch(`${controllerUrl}/api/v1/logs/db_size`, { headers })
+    .then(checkStatus)
+    .then((res) => res.json())
+    .then((data) => dbSize.set(data.formatted || "0.0 KB"))
+    .catch(console.error);
+
+  fetch(`${controllerUrl}/api/v1/config`, { headers })
+    .then(checkStatus)
+    .then((res) => res.json())
+    .then((data) => wafEnabled.set(data.waf_enabled))
+    .catch(console.error);
+
   const connectWs = () => {
-    const wsUrl = controllerUrl.replace(/^http/, "ws") + "/ws/dashboard";
+    const wsToken = get(token);
+    const tokenParam = wsToken ? `?token=${encodeURIComponent(wsToken)}` : "";
+    const wsUrl = controllerUrl.replace(/^http/, "ws") + "/ws/dashboard" + tokenParam;
+
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -102,7 +170,7 @@ export function initGlobalStore(controllerUrl: string) {
     ws.onclose = () => {
       connectionStatus.set("offline");
       ws = null;
-      if (!reconnectTimer) {
+      if (!reconnectTimer && isInitialized) {
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
           connectWs();
@@ -158,4 +226,37 @@ export function cleanupGlobalStore() {
   }
   if (flushInterval) clearInterval(flushInterval);
   isInitialized = false;
+}
+
+export async function toggleWafStatus(controllerUrl: string, enabled: boolean) {
+  const currentToken = get(token);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (currentToken) {
+    headers["Authorization"] = `Bearer ${currentToken}`;
+  }
+  
+  try {
+    const res = await fetch(`${controllerUrl}/api/v1/config`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      const payload = {
+        logging_enabled: data.logging_enabled,
+        log_limit_mb: data.log_limit_mb,
+        waf_enabled: enabled,
+      };
+      
+      const postRes = await fetch(`${controllerUrl}/api/v1/config`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      if (postRes.ok) {
+        wafEnabled.set(enabled);
+        return true;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to toggle WAF status:", e);
+  }
+  return false;
 }
