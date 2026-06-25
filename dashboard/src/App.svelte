@@ -9,6 +9,7 @@
   import ThreatIntel from "./pages/ThreatIntel.svelte";
   import SSLCertificates from "./pages/SSLCertificates.svelte";
   import AgentNodes from "./pages/AgentNodes.svelte";
+  import AccessControl from "./pages/AccessControl.svelte";
 
   import AlertBanner from "./lib/components/AlertBanner.svelte";
   import ToastContainer from "./components/ui/ToastContainer.svelte";
@@ -226,6 +227,8 @@
       <RateLimiting />
     {:else if activeTab === "vhosts"}
       <VHostConfig />
+    {:else if activeTab === "access_control"}
+      <AccessControl />
     {:else if activeTab === "ssl"}
       <SSLCertificates />
     {:else if activeTab === "nodes"}

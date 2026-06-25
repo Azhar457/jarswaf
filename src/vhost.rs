@@ -50,7 +50,14 @@ pub fn match_vhost<'a>(host_header: Option<&Host>, config: &'a Config) -> (&'a s
         }
     }
 
-    // fallback ke vhost pertama
+    // Cari vhost default (fallback / general proxy)
+    for vhost in &config.vhosts {
+        if vhost.is_default {
+            return (&vhost.backend, vhost);
+        }
+    }
+
+    // fallback ke vhost pertama jika tidak ada default yang diset
     let first = config.vhosts.first().expect("No vhost configured");
     (&first.backend, first)
 }

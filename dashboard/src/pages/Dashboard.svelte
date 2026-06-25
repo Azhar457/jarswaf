@@ -8,16 +8,19 @@
   import Card from "../components/ui/Card.svelte";
 
   // Map WAF logs to the format LogViewer expects
-  $: formattedLogs = $logs.slice(0, 50).map((log) => ({
-    level:
-      log.action.toLowerCase() === "block"
-        ? "ERROR"
-        : log.action.toLowerCase() === "ratelimit"
-          ? "WARN"
-          : "INFO",
-    message: `${log.client_ip} ${log.method} ${log.path} - ${log.reason || log.action}`,
-    timestamp: new Date(log.timestamp).toLocaleTimeString(),
-  })) as { level: "INFO" | "ERROR" | "WARN"; message: string; timestamp: string }[];
+  $: formattedLogs = $logs.slice(0, 50).map((log) => {
+    const displayPath = log.path.length > 25 ? log.path.slice(0, 22) + "..." : log.path;
+    return {
+      level:
+        log.action.toLowerCase() === "block"
+          ? "ERROR"
+          : log.action.toLowerCase() === "ratelimit"
+            ? "WARN"
+            : "INFO",
+      message: `${log.client_ip} ${log.method} ${displayPath} - ${log.reason || log.action}`,
+      timestamp: new Date(log.timestamp).toLocaleTimeString(),
+    };
+  }) as { level: "INFO" | "ERROR" | "WARN"; message: string; timestamp: string }[];
 </script>
 
 <div class="space-y-6">

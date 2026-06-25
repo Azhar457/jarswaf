@@ -120,7 +120,87 @@ pub async fn forward_request(
         .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
 
-    if !waf_enabled {
+    // 1. Blacklist Check
+    let is_globally_blacklisted = {
+        let config_lock = state.config.read().unwrap();
+        config_lock.blacklists.iter().any(|rule| {
+            rule.enabled && (
+                rule.ips.iter().any(|ip_pat| match_ip(&client_ip, ip_pat)) ||
+                rule.paths.iter().any(|path_pat| match_path(&path, path_pat))
+            )
+        })
+    };
+
+    let is_vhost_blacklisted = vhost_cfg.blacklists.iter().any(|rule| {
+        rule.enabled && (
+            rule.ips.iter().any(|ip_pat| match_ip(&client_ip, ip_pat)) ||
+            rule.paths.iter().any(|path_pat| match_path(&path, path_pat))
+        )
+    });
+
+    if is_globally_blacklisted || is_vhost_blacklisted {
+        let entry = crate::logging::WafLogEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            client_ip: client_ip.to_string(),
+            method: method.as_str().to_string(),
+            path: path_and_query.clone(),
+            action: "BLOCK".to_string(),
+            rule_id: "BLACKLIST-001".to_string(),
+            reason: "Blocked by Aegis Configured Blacklist Rule".to_string(),
+        };
+        let _ = state.log_tx.try_send(entry);
+        return (
+            StatusCode::FORBIDDEN,
+            "Blocked by Aegis WAF Blacklist",
+        )
+            .into_response();
+    }
+
+    // 2. Allowlist Check
+    let mut bypass_all = false;
+    let mut bypassed_rules = Vec::new();
+
+    let check_allowlist_rule = |rule: &crate::config::AllowlistRule| {
+        let ip_match = rule.ips.iter().any(|ip_pat| match_ip(&client_ip, ip_pat));
+        let path_match = rule.paths.iter().any(|path_pat| match_path(&path, path_pat));
+        
+        if !rule.ips.is_empty() && !rule.paths.is_empty() {
+            ip_match && path_match
+        } else if !rule.ips.is_empty() {
+            ip_match
+        } else if !rule.paths.is_empty() {
+            path_match
+        } else {
+            false
+        }
+    };
+
+    // Check global allowlists
+    {
+        let config_lock = state.config.read().unwrap();
+        for rule in &config_lock.allowlists {
+            if rule.enabled && check_allowlist_rule(rule) {
+                if rule.bypass_rules.is_empty() || rule.bypass_rules.contains(&"*".to_string()) {
+                    bypass_all = true;
+                } else {
+                    bypassed_rules.extend(rule.bypass_rules.clone());
+                }
+            }
+        }
+    }
+
+    // Check VHost allowlists
+    for rule in &vhost_cfg.allowlists {
+        if rule.enabled && check_allowlist_rule(rule) {
+            if rule.bypass_rules.is_empty() || rule.bypass_rules.contains(&"*".to_string()) {
+                bypass_all = true;
+            } else {
+                bypassed_rules.extend(rule.bypass_rules.clone());
+            }
+        }
+    }
+
+    if !waf_enabled || bypass_all {
         let (parts, body) = req.into_parts();
         let mut req = Request::from_parts(parts, Body::empty());
 
@@ -394,6 +474,24 @@ pub async fn forward_request(
 
     // Rule engine check
     let rule_engine = RuleEngine::new(&state.config.read().unwrap());
+    
+    let mut active_rules = Vec::new();
+    for r in &vhost_cfg.rules {
+        let is_bypassed = bypassed_rules.iter().any(|bypass_pat| {
+            if bypass_pat == r {
+                true
+            } else if bypass_pat.ends_with('*') {
+                let prefix = bypass_pat.trim_end_matches('*');
+                r.starts_with(prefix)
+            } else {
+                false
+            }
+        });
+        if !is_bypassed {
+            active_rules.push(r.clone());
+        }
+    }
+
     if let Some((rule_id, msg)) = rule_engine.check_request(
         &path,
         &query,
@@ -401,7 +499,7 @@ pub async fn forward_request(
         &body_str,
         Some(client_ip),
         method.as_str(),
-        &vhost_cfg.rules,
+        &active_rules,
     ) {
         // Log block via async channel
         let entry = crate::logging::WafLogEntry {
@@ -601,4 +699,65 @@ pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
     }
 
     "XX".to_string()
+}
+
+fn match_ip(client_ip: &std::net::IpAddr, pattern: &str) -> bool {
+    let pattern = pattern.trim();
+    if pattern == "*" {
+        return true;
+    }
+    if pattern.contains('/') {
+        let parts: Vec<&str> = pattern.split('/').collect();
+        if parts.len() == 2 {
+            if let (Ok(subnet_ip), Ok(prefix_len)) = (parts[0].parse::<std::net::IpAddr>(), parts[1].parse::<u8>()) {
+                match (client_ip, subnet_ip) {
+                    (std::net::IpAddr::V4(c_ip), std::net::IpAddr::V4(s_ip)) => {
+                        if prefix_len <= 32 {
+                            let mask = if prefix_len == 0 { 0u32 } else { !0u32 << (32 - prefix_len) };
+                            let c_u32 = u32::from(*c_ip);
+                            let s_u32 = u32::from(s_ip);
+                            return (c_u32 & mask) == (s_u32 & mask);
+                        }
+                    }
+                    (std::net::IpAddr::V6(c_ip), std::net::IpAddr::V6(s_ip)) => {
+                        if prefix_len <= 128 {
+                            let c_oct = c_ip.octets();
+                            let s_oct = s_ip.octets();
+                            let bytes_to_check = (prefix_len / 8) as usize;
+                            if c_oct[0..bytes_to_check] == s_oct[0..bytes_to_check] {
+                                let rem_bits = prefix_len % 8;
+                                if rem_bits == 0 {
+                                    return true;
+                                }
+                                let mask = 0xffu8 << (8 - rem_bits);
+                                return (c_oct[bytes_to_check] & mask) == (s_oct[bytes_to_check] & mask);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    if let Ok(ip) = pattern.parse::<std::net::IpAddr>() {
+        return &ip == client_ip;
+    }
+    false
+}
+
+fn match_path(path: &str, pattern: &str) -> bool {
+    let path = path.trim().to_lowercase();
+    let pattern = pattern.trim().to_lowercase();
+    if pattern == "*" {
+        return true;
+    }
+    if pattern.ends_with('*') {
+        let prefix = pattern.trim_end_matches('*');
+        path.starts_with(prefix)
+    } else if pattern.starts_with('*') {
+        let suffix = pattern.trim_start_matches('*');
+        path.ends_with(suffix)
+    } else {
+        path == pattern
+    }
 }
