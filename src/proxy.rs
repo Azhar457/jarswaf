@@ -15,7 +15,7 @@ pub async fn forward_request(
     host: Option<Host>,
     req: Request<Body>,
 ) -> Response<Body> {
-    let mut req = req;
+    let req = req;
     // Read config inside a block to ensure RwLockReadGuard does not cross await boundaries
     let (
         backend_addr,
@@ -28,7 +28,7 @@ pub async fn forward_request(
         waf_enabled,
     ) = {
         let config_lock = state.config.read().unwrap();
-        let (b, v) = vhost::match_vhost(host.as_ref(), &*config_lock);
+        let (b, v) = vhost::match_vhost(host.as_ref(), &config_lock);
 
         let resolved = v
             .custom_rules
@@ -393,7 +393,7 @@ pub async fn forward_request(
     }
 
     // Rule engine check
-    let rule_engine = RuleEngine::new(&*state.config.read().unwrap());
+    let rule_engine = RuleEngine::new(&state.config.read().unwrap());
     if let Some((rule_id, msg)) = rule_engine.check_request(
         &path,
         &query,

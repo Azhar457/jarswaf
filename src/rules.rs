@@ -114,6 +114,7 @@ impl RuleEngine {
 
     /// Jalankan semua rule terhadap request yang sudah diparse.
     /// Return Option<(rule_id, message)> jika diblokir.
+    #[allow(clippy::too_many_arguments)]
     pub fn check_request(
         &self,
         path: &str,
@@ -300,6 +301,8 @@ mod tests {
                 log_dir: "./logs".to_string(),
                 log_level: "security".to_string(),
                 trusted_proxies: Some(vec![]),
+                admin_token: None,
+                waf_enabled: true,
             },
             tls: TlsConfig {
                 mode: "local_ca".to_string(),
@@ -308,6 +311,7 @@ mod tests {
             vhosts: vec![],
             rate_limit_policies: vec![],
             certificates: vec![],
+            custom_rules: vec![],
         }
     }
 

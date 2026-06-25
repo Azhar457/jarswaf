@@ -255,7 +255,69 @@ show_logs() {
     fi
 }
 
-# Main Loop
+# Run Formatters (Rust fmt & Prettier format)
+run_formatters() {
+    print_banner
+    echo -e "${BLUE}[*] Running Rust Formatter (cargo fmt)...${NC}"
+    if command -v cargo &> /dev/null; then
+        cargo fmt
+        echo -e "${GREEN}[+] Rust code formatted successfully.${NC}"
+    else
+        echo -e "${YELLOW}[!] Warning: cargo not found, skipping Rust formatting.${NC}"
+    fi
+
+    echo -e "${BLUE}[*] Running Frontend Formatter (npm run format)...${NC}"
+    if [ -d "./dashboard" ]; then
+        cd dashboard
+        if command -v npm &> /dev/null; then
+            npm run format
+            echo -e "${GREEN}[+] Frontend code formatted successfully.${NC}"
+        else
+            echo -e "${YELLOW}[!] Warning: npm not found, skipping frontend formatting.${NC}"
+        fi
+        cd ..
+    else
+        echo -e "${YELLOW}[!] Warning: dashboard directory not found, skipping frontend formatting.${NC}"
+    fi
+    read -n 1 -s -r -p "Press any key to return to menu..."
+}
+
+# Parse command line arguments (Non-interactive mode)
+if [ "$1" != "" ]; then
+    case $1 in
+        --install|install)
+            install_aegis
+            exit 0
+            ;;
+        --uninstall|uninstall)
+            uninstall_aegis
+            exit 0
+            ;;
+        --upgrade|upgrade)
+            upgrade_aegis
+            exit 0
+            ;;
+        --status|status)
+            show_status
+            exit 0
+            ;;
+        --logs|logs)
+            show_logs
+            exit 0
+            ;;
+        --format|format)
+            run_formatters
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            echo "Usage: $0 [install|uninstall|upgrade|status|logs|format]"
+            exit 1
+            ;;
+    esac
+fi
+
+# Main Loop (Interactive mode)
 while true; do
     print_banner
     echo -e "  1) ${GREEN}Install / Start Aegis WAF${NC}"
@@ -263,16 +325,18 @@ while true; do
     echo -e "  3) ${BLUE}Upgrade Aegis WAF${NC}"
     echo -e "  4) ${CYAN}Show Service Status${NC}"
     echo -e "  5) ${YELLOW}View Real-time Logs${NC}"
-    echo -e "  6) Exit"
+    echo -e "  6) ${CYAN}Run Linters & Formatters (Rust & Svelte)${NC}"
+    echo -e "  7) Exit"
     echo ""
-    read -p "Select an option [1-6]: " opt
+    read -p "Select an option [1-7]: " opt
     case $opt in
         1) install_aegis ;;
         2) uninstall_aegis ;;
         3) upgrade_aegis ;;
         4) show_status ;;
         5) show_logs ;;
-        6) exit 0 ;;
+        6) run_formatters ;;
+        7) exit 0 ;;
         *) echo -e "${RED}Invalid option!${NC}"; sleep 1 ;;
     esac
 done

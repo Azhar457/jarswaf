@@ -1,5 +1,7 @@
 use std::net::Ipv4Addr;
-use tracing::warn; //info, and error TODO
+#[cfg(target_os = "linux")]
+use tracing::info;
+use tracing::warn;
 
 #[cfg(target_os = "linux")]
 use aya::{
@@ -11,6 +13,12 @@ use aya::{
 pub struct XdpManager {
     #[cfg(target_os = "linux")]
     bpf: Ebpf,
+}
+
+impl Default for XdpManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl XdpManager {

@@ -121,7 +121,7 @@ fn format_uptime(seconds: u64) -> String {
 fn get_docker_services() -> Vec<DiscoveredService> {
     let mut services = Vec::new();
     if let Ok(output) = std::process::Command::new("docker")
-        .args(&["ps", "--format", "{{json .}}"])
+        .args(["ps", "--format", "{{json .}}"])
         .output()
     {
         if output.status.success() {
@@ -161,7 +161,7 @@ fn get_docker_services() -> Vec<DiscoveredService> {
 
 fn get_network_interfaces() -> Vec<String> {
     let networks = Networks::new_with_refreshed_list();
-    networks.iter().map(|(name, _)| name.to_string()).collect()
+    networks.keys().map(|name| name.to_string()).collect()
 }
 
 fn get_hostname() -> String {
@@ -539,7 +539,7 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                 lock.vhosts
                     .first()
                     .and_then(|v| v.hosts.first())
-                    .map(|h| h.clone())
+                    .cloned()
                     .unwrap_or_else(|| "localhost".to_string())
             };
 
