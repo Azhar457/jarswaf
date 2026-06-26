@@ -711,6 +711,8 @@ mod tests {
                 mode: "local_ca".to_string(),
                 cert_dir: "./certs".to_string(),
             },
+            logging: Default::default(),
+            components: Default::default(),
             vhosts: vec![],
             rate_limit_policies: vec![],
             certificates: vec![],

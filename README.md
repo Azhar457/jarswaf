@@ -10,10 +10,11 @@ Aegis WAF is a modern, high-performance **Web Application Firewall** built with 
 - [Features](#-features)
 - [Requirements](#-system-requirements)
 - [Quick Start (Zero-to-Run)](#-quick-start-zero-to-run)
-  - [Option A: Automated Setup (Ubuntu/Debian)](#option-a-automated-setup-recommended)
-  - [Option B: Docker-Only Deployment](#option-b-docker-only-deployment)
-  - [Option C: Manual Setup (Any OS)](#option-c-manual-setup-any-os)
-  - [Option D: Standalone Agent Deployment (Lightweight VPS)](#option-d-standalone-agent-deployment-lightweight-vps)
+  - [Option A: One-Command Install (Fastest)](#option-a-one-command-install-fastest)
+  - [Option B: Automated Setup (Full Stack)](#option-b-automated-setup-full-stack)
+  - [Option C: Docker-Only Deployment](#option-c-docker-only-deployment)
+  - [Option D: Manual Setup (Any OS)](#option-d-manual-setup-any-os)
+  - [Option E: Standalone Agent Deployment (Lightweight VPS)](#option-e-standalone-agent-deployment-lightweight-vps)
 - [Development Mode](#-development-mode)
 - [Port & Service Discovery](#-port--service-discovery)
 - [Manager Script Reference](#-manager-script-reference)
@@ -113,34 +114,67 @@ flowchart LR
 
 ## 📋 System Requirements
 
-### Minimum Hardware
+### Minimum Hardware — Full Stack (Controller + ClickHouse + Dashboard)
+
 | Resource | Minimum | Recommended |
 |---|---|---|
-| CPU | 1 core | 2+ cores |
-| RAM | 1 GB | 2+ GB |
-| Disk | 5 GB | 20+ GB (for ClickHouse logs) |
+| CPU | 2 cores | 4+ cores |
+| RAM | 4 GB | 8+ GB |
+| Disk | 20 GB | 50+ GB (ClickHouse log retention) |
+| OS | Ubuntu 22.04+ / Debian 12+ | Ubuntu 24.04 LTS |
+
+> **Why 4 GB RAM minimum?** ClickHouse alone consumes ~800 MB–1.2 GB. Combined with the Controller, Dashboard build, and client app, total usage easily exceeds 2 GB.
+
+### Minimum Hardware — Standalone Agent Only (Lightweight VPS)
+
+| Resource | Minimum | Recommended |
+|---|---|---|
+| CPU | 1 core | 1+ core |
+| RAM | 512 MB | 1+ GB |
+| Disk | 5 GB | 10+ GB |
+| OS | Any Linux / Windows / macOS | Ubuntu 22.04+ |
+
+> **Agent binary uses only ~30 MB of RAM.** No ClickHouse, no Node.js, no Dashboard required. Ideal for protecting a single client's web app on a budget VPS (e.g. $5/month).
 
 ### Software Dependencies
 
-| Dependency | Version | Purpose |
-|---|---|---|
-| **Rust** | >= 1.75.0 | Backend compilation |
-| **Node.js** | >= 20.x | Dashboard build (Svelte/Vite) |
-| **npm** | >= 10.x | Package management |
-| **Docker** | >= 24.x | ClickHouse database & production deployment |
-| **Docker Compose** | v2+ | Multi-service orchestration |
-| **git** | >= 2.x | Repository cloning |
-| **build-essential** | (any) | GCC, Make, pkg-config, libssl-dev |
+| Dependency | Version | Full Stack | Agent Only | Purpose |
+|---|---|---|---|---|
+| **Rust** | >= 1.75.0 | ✅ Required | ✅ Required | Backend compilation |
+| **Node.js** | >= 20.x | ✅ Required | ❌ Not needed | Dashboard build (Svelte/Vite) |
+| **npm** | >= 10.x | ✅ Required | ❌ Not needed | Package management |
+| **Docker** | >= 24.x | ✅ Required | ⚪ Optional | Container deployment |
+| **Docker Compose** | v2+ | ✅ Required | ⚪ Optional | Multi-service orchestration |
+| **git** | >= 2.x | ✅ Required | ✅ Required | Repository cloning |
+| **build-essential** | (any) | ✅ Required | ✅ Required | GCC, Make, pkg-config, libssl-dev |
 
-> **Note**: On Ubuntu Server Minimal, none of these are pre-installed. The `manager.sh` script handles everything.
+> **Note**: On Ubuntu Server Minimal, none of these are pre-installed. The `manager.sh` script handles everything automatically.
 
 ---
 
 ## 🚀 Quick Start (Zero-to-Run)
 
-### Option A: Automated Setup (Recommended)
+### Option A: One-Command Install (Fastest)
 
-This is the **fastest way** to go from a fresh Ubuntu/Debian server to a running Aegis WAF.
+Install and start Aegis WAF Agent with a single command — no `git clone` needed:
+
+```bash
+sudo bash -c "$(curl -fsSLk https://raw.githubusercontent.com/Azhar457/aegis-waf/main/install.sh)"
+```
+
+This will interactively ask for your backend address and domain, then build and start the WAF agent. After installation, manage with:
+
+```bash
+aegis status      # Check status & RAM usage
+aegis logs        # Stream logs
+aegis config      # Edit config
+aegis restart     # Apply changes
+aegis uninstall   # Remove completely
+```
+
+### Option B: Automated Setup (Full Stack)
+
+This is the **fastest way** to go from a fresh Ubuntu/Debian server to a running **full-stack** Aegis WAF (Agent + Controller + ClickHouse + Dashboard).
 
 ```bash
 # 1. Clone the repository
@@ -173,7 +207,7 @@ The `deps` command will automatically detect your OS and install:
 - **RHEL/CentOS/Fedora**: `dnf install gcc openssl-devel ...` + same toolchain setup
 - **macOS**: `brew install openssl pkg-config ...` + same toolchain setup (Docker Desktop must be installed manually)
 
-### Option B: Docker-Only Deployment
+### Option C: Docker-Only Deployment
 
 If you already have Docker installed and just want to run Aegis WAF without building from source:
 
@@ -191,7 +225,7 @@ docker compose up -d --build
 
 This uses the multi-stage `Dockerfile` which compiles Rust and builds Svelte inside containers. No local Rust or Node.js installation needed.
 
-### Option C: Manual Setup (Any OS)
+### Option D: Manual Setup (Any OS)
 
 <details>
 <summary>Click to expand manual installation steps</summary>
@@ -282,7 +316,7 @@ export CLICKHOUSE_PASSWORD=aegis
 
 </details>
 
-### Option D: Standalone Agent Deployment (Lightweight VPS)
+### Option E: Standalone Agent Deployment (Lightweight VPS)
 
 For deploying the Aegis WAF Agent on a small VPS client (e.g., 1 Core, 2GB RAM) where running ClickHouse (~1GB RAM) and the Svelte Dashboard (~200MB RAM) is not feasible. This mode runs only the lightweight Rust proxy engine, which uses **~30MB of RAM**.
 
@@ -459,6 +493,8 @@ aegis-waf/
 ├── src/                    # Rust backend source
 │   ├── main.rs             # Entry point (Controller / Agent CLI)
 │   ├── proxy.rs            # Reverse proxy engine (Axum)
+│   ├── config.rs           # Configuration schema (TOML parsing)
+│   ├── logging.rs          # Multi-mode log worker (file/remote/clickhouse)
 │   └── rules.rs            # WAF rule engine (Regex + AST Semantic)
 ├── dashboard/              # Svelte frontend
 │   ├── src/
@@ -469,9 +505,13 @@ aegis-waf/
 ├── aegis-ebpf/             # eBPF XDP programs (Linux only)
 ├── certs/                  # Auto-generated TLS certificates
 ├── logs/                   # Runtime logs
-├── config.toml             # WAF configuration
-├── Dockerfile              # Multi-stage Docker build
-├── docker-compose.yml      # Production deployment
+├── config.toml             # WAF configuration (full stack)
+├── config.standalone.toml  # WAF configuration (agent-only / lightweight VPS)
+├── install.sh              # 🚀 One-command installer (curl | bash)
+├── Dockerfile              # Multi-stage Docker build (full stack)
+├── Dockerfile.agent        # Lightweight agent-only Docker build
+├── docker-compose.yml      # Full stack deployment
+├── docker-compose.agent.yml # Agent-only deployment
 ├── manager.sh              # 🛡️ All-in-one management script
 ├── start.sh                # Unix dev launcher
 ├── start.bat               # Windows dev launcher

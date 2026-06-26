@@ -685,7 +685,6 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
     let blocklist_clone = blocklist.clone();
     let controller_url_clone = controller.clone();
     let token_blocklist = token.clone();
-    let blocklist_mode = log_mode.clone();
     let blocklist_file_path = cfg.logging.blocklist_path.clone();
     let use_clickhouse = cfg.components.clickhouse && log_mode == "clickhouse";
 
