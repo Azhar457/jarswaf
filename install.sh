@@ -203,9 +203,18 @@ RUN apt-get update && \
 
 COPY Cargo.toml Cargo.lock ./
 COPY xtask/ ./xtask/
+
+# Cache dependencies by building a dummy project first
+RUN mkdir src && echo "fn main() {}" > src/main.rs && \
+    cargo build --release && \
+    rm -rf src
+
+# Copy real source code
 COPY src/ ./src/
 
-RUN cargo build --release && \
+# Touch main.rs to force recompilation of our app, then build
+RUN touch src/main.rs && \
+    cargo build --release && \
     cp target/release/aegis-waf /app/aegis-waf-bin && \
     rm -rf target /usr/local/cargo/registry /usr/local/cargo/git
 
@@ -377,7 +386,7 @@ case "${1:-help}" in
         ;;
     rebuild)
         docker compose down
-        docker compose build --no-cache
+        docker compose build
         docker compose up -d
         echo "Aegis WAF Agent rebuilt and started."
         ;;
