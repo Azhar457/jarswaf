@@ -1,0 +1,52 @@
+# ================================================================
+# Aegis WAF — Lightweight Agent-Only Dockerfile
+# ================================================================
+# Builds ONLY the Rust binary. No Node.js, no Svelte, no Dashboard.
+# Final image: ~30MB debian:bookworm-slim
+# Perfect for small VPS (1 Core, 2GB RAM)
+# ================================================================
+
+FROM rust:slim-bookworm AS builder
+WORKDIR /app
+
+# Minimize disk usage
+ENV CARGO_INCREMENTAL=0
+ENV CARGO_BUILD_JOBS=2
+ENV RUSTFLAGS="-C strip=symbols"
+
+# Install build deps
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy source
+COPY Cargo.toml Cargo.lock ./
+COPY xtask/ ./xtask/
+COPY src/ ./src/
+
+# Build release binary
+RUN cargo build --release && \
+    cp target/release/aegis-waf /app/aegis-waf-bin && \
+    rm -rf target /usr/local/cargo/registry /usr/local/cargo/git
+
+# ── Final Runtime Image ─────────────────────────────────────
+FROM debian:bookworm-slim
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates libssl3 curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /var/log/aegis-waf /app/certs
+
+# Copy binary
+COPY --from=builder /app/aegis-waf-bin /app/aegis-waf
+
+# Copy standalone config if not mounted
+COPY config.standalone.toml /app/config.toml
+
+EXPOSE 80 443
+
+ENV RUST_LOG=info
+
+# Run as Agent (no controller flag = standalone mode)
+CMD ["/app/aegis-waf", "agent", "--config", "/app/config.toml"]

@@ -13,6 +13,7 @@ Aegis WAF is a modern, high-performance **Web Application Firewall** built with 
   - [Option A: Automated Setup (Ubuntu/Debian)](#option-a-automated-setup-recommended)
   - [Option B: Docker-Only Deployment](#option-b-docker-only-deployment)
   - [Option C: Manual Setup (Any OS)](#option-c-manual-setup-any-os)
+  - [Option D: Standalone Agent Deployment (Lightweight VPS)](#option-d-standalone-agent-deployment-lightweight-vps)
 - [Development Mode](#-development-mode)
 - [Port & Service Discovery](#-port--service-discovery)
 - [Manager Script Reference](#-manager-script-reference)
@@ -281,6 +282,50 @@ export CLICKHOUSE_PASSWORD=aegis
 
 </details>
 
+### Option D: Standalone Agent Deployment (Lightweight VPS)
+
+For deploying the Aegis WAF Agent on a small VPS client (e.g., 1 Core, 2GB RAM) where running ClickHouse (~1GB RAM) and the Svelte Dashboard (~200MB RAM) is not feasible. This mode runs only the lightweight Rust proxy engine, which uses **~30MB of RAM**.
+
+You can run the Agent in three logging modes:
+- **`file` mode**: Writes security logs as JSON Lines to a local file with auto-rotation. Zero external database or controller dependencies.
+- **`remote` mode**: Writes logs locally and pushes them asynchronously in batches to a central Aegis Controller.
+- **`clickhouse` mode**: Standard mode, writes directly to ClickHouse (requires Docker).
+
+#### Deployment Steps:
+
+1. **Clone the repository on the client VPS**:
+   ```bash
+   git clone https://github.com/Azhar457/aegis-waf.git
+   cd aegis-waf
+   ```
+
+2. **Install dependencies (only Docker is needed for container deployment)**:
+   ```bash
+   chmod +x manager.sh
+   ./manager.sh deps
+   ```
+
+3. **Deploy the Agent via Docker Compose**:
+   ```bash
+   ./manager.sh agent-deploy
+   ```
+   *This starts only the lightweight `aegis-agent` container using [Dockerfile.agent](file:///d:/Desktop/KERJA/aegis-waf/Dockerfile.agent) and [docker-compose.agent.yml](file:///d:/Desktop/KERJA/aegis-waf/docker-compose.agent.yml), using [config.standalone.toml](file:///d:/Desktop/KERJA/aegis-waf/config.standalone.toml) as the config.*
+
+4. **Verify the installation**:
+   - Check container status: `docker ps` (should show `aegis_agent` running).
+   - Check logs: `tail -f logs/aegis.log` (outside container) or `/var/log/aegis-waf/aegis.log` (inside container).
+
+#### RAM Usage Comparison:
+
+| Component | Full Stack (Option A/B) | Standalone Agent Only |
+|---|---|---|
+| Aegis Agent (Rust) | ~30 MB | ~30 MB |
+| Aegis Controller (Rust) | ~50 MB | ❌ 0 MB |
+| ClickHouse DB | ~800-1200 MB | ❌ 0 MB |
+| Client App (Laravel/Node) | ~200 MB | ~200 MB |
+| Client DB (MySQL) | ~300 MB | ~300 MB |
+| **Available Free RAM** | **< 100 MB ⚠️** | **~1.4 GB ✅** |
+
 ---
 
 ## 💻 Development Mode
@@ -389,6 +434,8 @@ The `manager.sh` script is your single entry point for managing the entire Aegis
 | `./manager.sh build` | Build from source (Rust release + Svelte production) |
 | `./manager.sh dev` | Start development mode (Controller + Agent + Vite) |
 | `./manager.sh install` | Deploy via Docker (production) |
+| `./manager.sh agent-deploy` | Deploy Agent-only via Docker (no ClickHouse, no Dashboard) |
+| `./manager.sh agent-build` | Build Agent binary only (no dashboard build) |
 | `./manager.sh upgrade` | Pull latest images and rebuild |
 | `./manager.sh uninstall` | Remove Aegis WAF completely |
 | `./manager.sh status` | Show system status and health checks |

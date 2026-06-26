@@ -1,0 +1,30 @@
+# ================================================================
+# Aegis WAF — Agent-Only Deployment (No ClickHouse, No Dashboard)
+# ================================================================
+# For small VPS (1 Core, 2GB RAM)
+# RAM usage: ~30MB total
+#
+# Usage:
+#   docker compose -f docker-compose.agent.yml up -d --build
+# ================================================================
+
+services:
+  aegis-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: aegis_agent
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config.standalone.toml:/app/config.toml
+      - ./certs:/app/certs
+      - aegis_logs:/var/log/aegis-waf
+    environment:
+      - RUST_LOG=info
+    # No ClickHouse dependency — zero overhead
+
+volumes:
+  aegis_logs:

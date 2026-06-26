@@ -421,23 +421,49 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
     // Start background memory cleanup for rate limiter & reputation counters
     rules::start_rate_limiter_cleanup();
 
-    // Setup logging
+    // Determine logging mode from config
+    let log_mode = cfg.logging.mode.clone();
     let clickhouse_url =
         std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://localhost:8123".to_string());
-    logging::init_db(&clickhouse_url)
-        .await
-        .expect("Failed to init ClickHouse DB");
+
+    // Only initialize ClickHouse if mode requires it AND component is enabled
+    if log_mode == "clickhouse" && cfg.components.clickhouse {
+        match logging::init_db(&clickhouse_url).await {
+            Ok(()) => {}
+            Err(e) => {
+                tracing::warn!(
+                    "ClickHouse init failed: {}. Falling back to file-only logging.",
+                    e
+                );
+            }
+        }
+    } else {
+        info!(
+            "ClickHouse DISABLED (logging.mode = \"{}\", components.clickhouse = {})",
+            log_mode, cfg.components.clickhouse
+        );
+    }
 
     // Initialize MPSC Channel for logs
     let (log_tx, log_rx) = tokio::sync::mpsc::channel::<logging::WafLogEntry>(10000);
 
-    // Spawn Background Log Worker
-    let controller_url = controller.clone();
-    let ch_url_clone = clickhouse_url.clone();
-    let log_dir = cfg.global.log_dir.clone();
-    let token_clone = token.clone();
+    // Build LogWorkerConfig from config.toml settings
+    let worker_cfg = logging::LogWorkerConfig {
+        mode: log_mode.clone(),
+        log_path: cfg.logging.log_path.clone(),
+        max_log_size_mb: cfg.logging.max_log_size_mb,
+        max_log_files: cfg.logging.max_log_files,
+        clickhouse_url: clickhouse_url.clone(),
+        controller_url: controller.clone(),
+        remote_url: cfg.logging.remote_url.clone(),
+        push_interval_secs: cfg.logging.push_interval_secs,
+        push_batch_size: cfg.logging.push_batch_size,
+        token: token.clone(),
+    };
+
+    // Spawn Background Log Worker (mode-aware)
     tokio::spawn(async move {
-        logging::log_worker(log_rx, ch_url_clone, controller_url, log_dir, token_clone).await;
+        logging::log_worker(log_rx, worker_cfg).await;
     });
 
     // Spawn background config reloader
@@ -623,8 +649,28 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
         info!("Running in Standalone Agent mode. Using local configuration.");
     }
 
-    // Build application state
-    let blocklist = Arc::new(std::sync::RwLock::new(std::collections::HashSet::new()));
+    // Print active mode summary
+    info!("──────────────────────────────────────────");
+    info!("  Aegis Agent Configuration Summary");
+    info!("  Logging mode:      {}", log_mode);
+    info!("  Log file:          {}", cfg.logging.log_path);
+    info!("  ClickHouse:        {}", if cfg.components.clickhouse && log_mode == "clickhouse" { "ENABLED" } else { "DISABLED" });
+    info!("  Service Discovery: {}", if cfg.components.service_discovery { "ENABLED" } else { "DISABLED" });
+    info!("  GeoIP:             {}", if cfg.components.geoip { "ENABLED" } else { "DISABLED" });
+    info!("──────────────────────────────────────────");
+
+    // Build application state — load blocklist from file if not using ClickHouse
+    let initial_blocklist = if log_mode != "clickhouse" || !cfg.components.clickhouse {
+        let loaded = logging::load_blocklist_from_file(&cfg.logging.blocklist_path);
+        if !loaded.is_empty() {
+            info!("Loaded {} blocked IPs from {}", loaded.len(), cfg.logging.blocklist_path);
+        }
+        loaded
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    let blocklist = Arc::new(std::sync::RwLock::new(initial_blocklist));
     let http_client =
         hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .build_http();
@@ -639,6 +685,9 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
     let blocklist_clone = blocklist.clone();
     let controller_url_clone = controller.clone();
     let token_blocklist = token.clone();
+    let blocklist_mode = log_mode.clone();
+    let blocklist_file_path = cfg.logging.blocklist_path.clone();
+    let use_clickhouse = cfg.components.clickhouse && log_mode == "clickhouse";
 
     tokio::spawn(async move {
         let client = crate::logging::build_client();
@@ -665,6 +714,8 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                                         }
                                     }
                                 }
+                                // Save to local JSON file as backup
+                                logging::save_blocklist_to_file(&blocklist_file_path, &new_blocklist);
                                 if let Ok(mut lock) = blocklist_clone.write() {
                                     *lock = new_blocklist;
                                     tracing::debug!(
@@ -682,11 +733,10 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                         );
                     }
                 }
-            } else {
-                // Standalone Mode: Query ClickHouse
+            } else if use_clickhouse {
+                // Standalone Mode with ClickHouse: Query ClickHouse for repeat offenders
                 let clickhouse_url_local = std::env::var("CLICKHOUSE_URL")
                     .unwrap_or_else(|_| "http://localhost:8123".to_string());
-                let blocklist_standalone = blocklist_clone.clone();
                 let client_clone = client.clone();
 
                 let query = "SELECT client_ip FROM request_log WHERE action = 'BLOCK' AND timestamp > now() - INTERVAL 5 MINUTE GROUP BY client_ip HAVING count() >= 5 FORMAT TSV";
@@ -705,10 +755,17 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                                 }
                             }
                         }
-                        if let Ok(mut lock) = blocklist_standalone.write() {
+                        logging::save_blocklist_to_file(&blocklist_file_path, &ips);
+                        if let Ok(mut lock) = blocklist_clone.write() {
                             *lock = ips;
                         }
                     }
+                }
+            } else {
+                // Standalone File/Remote mode: Load from local JSON file
+                let loaded = logging::load_blocklist_from_file(&blocklist_file_path);
+                if let Ok(mut lock) = blocklist_clone.write() {
+                    *lock = loaded;
                 }
             }
 
