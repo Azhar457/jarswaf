@@ -178,19 +178,8 @@ generate_files() {
     # ── Download source from GitHub ──────────────────────────────
     log_step "3" "Downloading Aegis WAF source from GitHub..."
 
-    # Download essential source files
-    curl -fsSL "${GITHUB_REPO}/Cargo.toml" -o Cargo.toml
-    curl -fsSL "${GITHUB_REPO}/Cargo.lock" -o Cargo.lock 2>/dev/null || true
-
-    # Download src/ directory
-    for src_file in main.rs proxy.rs rules.rs config.rs logging.rs tls.rs; do
-        curl -fsSL "${GITHUB_REPO}/src/${src_file}" -o "src/${src_file}" 2>/dev/null || true
-    done
-
-    # Download xtask if it exists
-    mkdir -p xtask/src
-    curl -fsSL "${GITHUB_REPO}/xtask/Cargo.toml" -o "xtask/Cargo.toml" 2>/dev/null || true
-    curl -fsSL "${GITHUB_REPO}/xtask/src/main.rs" -o "xtask/src/main.rs" 2>/dev/null || true
+    # Download and extract the entire repository tarball directly
+    curl -fsSL "https://github.com/Azhar457/aegis-waf/archive/refs/heads/main.tar.gz" | tar -xz --strip-components=1
 
     log_success "Source files downloaded."
 
@@ -394,12 +383,10 @@ case "${1:-help}" in
         ;;
     update)
         echo "Pulling latest source from GitHub..."
-        GITHUB_REPO="https://raw.githubusercontent.com/Azhar457/aegis-waf/main"
-        for src_file in main.rs proxy.rs rules.rs config.rs logging.rs tls.rs; do
-            curl -fsSL "${GITHUB_REPO}/src/${src_file}" -o "src/${src_file}" 2>/dev/null || true
-        done
-        curl -fsSL "${GITHUB_REPO}/Cargo.toml" -o Cargo.toml
-        curl -fsSL "${GITHUB_REPO}/Cargo.lock" -o Cargo.lock 2>/dev/null || true
+        mkdir -p /tmp/aegis-update
+        curl -fsSL "https://github.com/Azhar457/aegis-waf/archive/refs/heads/main.tar.gz" | tar -xz -C /tmp/aegis-update --strip-components=1
+        cp -r /tmp/aegis-update/src /tmp/aegis-update/Cargo.toml /tmp/aegis-update/Cargo.lock ./ 2>/dev/null || true
+        rm -rf /tmp/aegis-update
         echo "Source updated. Run: aegis rebuild"
         ;;
     uninstall)
