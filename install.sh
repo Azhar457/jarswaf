@@ -224,7 +224,7 @@ EXPOSE 80 443
 
 ENV RUST_LOG=info
 
-CMD ["/app/aegis-waf", "agent", "--config", "/app/config.toml"]
+CMD ["/app/aegis-waf", "--config", "/app/config.toml", "agent"]
 DOCKERFILE_EOF
 
     log_success "Dockerfile generated."
