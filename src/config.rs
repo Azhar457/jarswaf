@@ -6,6 +6,10 @@ pub struct Config {
     pub global: GlobalConfig,
     pub tls: TlsConfig,
     #[serde(default)]
+    pub logging: LoggingModeConfig,
+    #[serde(default)]
+    pub components: ComponentsConfig,
+    #[serde(default)]
     pub rate_limit_policies: Vec<RateLimitPolicy>,
     pub vhosts: Vec<VHost>,
     #[serde(default)]
@@ -139,6 +143,103 @@ fn default_body_inspection() -> bool {
 pub struct LoggingConfig {
     pub enabled: bool,
     pub db_path: String,
+}
+
+/// Configures how the Agent writes/ships security logs.
+/// Modes:
+///   - "file"       → JSON Lines to local file only (zero external deps, ideal for small VPS)
+///   - "remote"     → JSON Lines to local file + async HTTP push to a remote Controller
+///   - "clickhouse" → Direct batch insert to ClickHouse (existing behavior)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LoggingModeConfig {
+    #[serde(default = "default_logging_mode")]
+    pub mode: String,
+    #[serde(default = "default_log_path")]
+    pub log_path: String,
+    /// Max log file size in MB before rotation (default 50)
+    #[serde(default = "default_max_log_size_mb")]
+    pub max_log_size_mb: u64,
+    /// Max number of rotated log files to keep (default 5)
+    #[serde(default = "default_max_log_files")]
+    pub max_log_files: u32,
+    /// Remote Controller URL for "remote" mode
+    #[serde(default)]
+    pub remote_url: Option<String>,
+    /// Push interval in seconds for "remote" mode (default 300 = 5 minutes)
+    #[serde(default = "default_push_interval")]
+    pub push_interval_secs: u64,
+    /// Max batch size for remote push (default 100)
+    #[serde(default = "default_push_batch_size")]
+    pub push_batch_size: usize,
+    /// Path to local JSON file for blocklist storage (default "blocklist.json")
+    #[serde(default = "default_blocklist_path")]
+    pub blocklist_path: String,
+}
+
+impl Default for LoggingModeConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_logging_mode(),
+            log_path: default_log_path(),
+            max_log_size_mb: default_max_log_size_mb(),
+            max_log_files: default_max_log_files(),
+            remote_url: None,
+            push_interval_secs: default_push_interval(),
+            push_batch_size: default_push_batch_size(),
+            blocklist_path: default_blocklist_path(),
+        }
+    }
+}
+
+fn default_logging_mode() -> String {
+    "clickhouse".to_string()
+}
+fn default_log_path() -> String {
+    "./logs/aegis.log".to_string()
+}
+fn default_max_log_size_mb() -> u64 {
+    50
+}
+fn default_max_log_files() -> u32 {
+    5
+}
+fn default_push_interval() -> u64 {
+    300
+}
+fn default_push_batch_size() -> usize {
+    100
+}
+fn default_blocklist_path() -> String {
+    "./blocklist.json".to_string()
+}
+
+/// Configures which system components are active.
+/// Allows running a lightweight Agent without ClickHouse or Dashboard.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ComponentsConfig {
+    /// Enable the Svelte Dashboard UI serving (only meaningful for Controller)
+    #[serde(default = "default_true")]
+    pub dashboard: bool,
+    /// Enable ClickHouse database connection (disable for file-only logging)
+    #[serde(default = "default_true")]
+    pub clickhouse: bool,
+    /// Enable service discovery (scanning Docker/system ports)
+    #[serde(default = "default_true")]
+    pub service_discovery: bool,
+    /// Enable GeoIP-based country blocking
+    #[serde(default = "default_true")]
+    pub geoip: bool,
+}
+
+impl Default for ComponentsConfig {
+    fn default() -> Self {
+        Self {
+            dashboard: true,
+            clickhouse: true,
+            service_discovery: true,
+            geoip: true,
+        }
+    }
 }
 
 pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {

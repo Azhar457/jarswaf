@@ -835,6 +835,101 @@ run_formatters() {
 }
 
 # ================================================================
+#  AGENT-ONLY DEPLOYMENT (Lightweight VPS)
+# ================================================================
+
+deploy_agent_only() {
+    print_banner
+    echo -e "${CYAN}${BOLD}  Deploying Aegis Agent Only (Lightweight Mode)${NC}"
+    echo -e "${DIM}  No ClickHouse, No Dashboard — just the WAF proxy (~30MB RAM)${NC}"
+    echo ""
+
+    # Check Docker
+    if ! check_docker; then
+        log_error "Docker is required. Run: ${BOLD}./manager.sh deps${NC}"
+        read -n 1 -s -r -p "Press any key to return to menu..."
+        return
+    fi
+
+    if ! check_compose; then
+        log_error "Docker Compose is required. Run: ${BOLD}./manager.sh deps${NC}"
+        read -n 1 -s -r -p "Press any key to return to menu..."
+        return
+    fi
+
+    cd "$SCRIPT_DIR"
+
+    # Check for agent compose file
+    if [ ! -f "docker-compose.agent.yml" ]; then
+        log_error "docker-compose.agent.yml not found!"
+        read -n 1 -s -r -p "Press any key to return to menu..."
+        return
+    fi
+
+    # Check for standalone config
+    if [ ! -f "config.standalone.toml" ]; then
+        log_error "config.standalone.toml not found!"
+        read -n 1 -s -r -p "Press any key to return to menu..."
+        return
+    fi
+
+    log_step "1" "Building Agent-only Docker image"
+    ${COMPOSE_CMD} -f docker-compose.agent.yml build
+
+    log_step "2" "Starting Agent container"
+    ${COMPOSE_CMD} -f docker-compose.agent.yml up -d
+
+    echo ""
+    echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}${BOLD}║  ✅  Aegis Agent deployed in LIGHTWEIGHT mode!                  ║${NC}"
+    echo -e "${GREEN}${BOLD}║  RAM usage: ~30MB | No ClickHouse | No Dashboard               ║${NC}"
+    echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  Config:     ${BOLD}config.standalone.toml${NC}"
+    echo -e "  Logs:       ${BOLD}/var/log/aegis-waf/aegis.log${NC} (inside container)"
+    echo -e "  HTTP Proxy: ${BOLD}http://0.0.0.0:80${NC}"
+    echo ""
+    echo -e "  Edit ${BOLD}config.standalone.toml${NC} to configure your VHosts and backends."
+    read -n 1 -s -r -p "Press any key to return to menu..."
+}
+
+build_agent_only() {
+    print_banner
+    echo -e "${CYAN}${BOLD}  Building Aegis Agent binary only (no dashboard)...${NC}"
+    echo ""
+
+    cd "$SCRIPT_DIR"
+
+    # Source cargo env
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+
+    if ! check_rust || ! check_cargo; then
+        log_error "Rust toolchain not found. Run: ${BOLD}./manager.sh deps${NC}"
+        read -n 1 -s -r -p "Press any key to return to menu..."
+        return 1
+    fi
+
+    log_step "1" "Building Rust binary (release mode, no dashboard)"
+    cargo build --release
+
+    echo ""
+    echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}${BOLD}║  ✅  AGENT BUILD COMPLETED!                                     ║${NC}"
+    echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  Binary: ${BOLD}${SCRIPT_DIR}/target/release/aegis-waf${NC}"
+    echo ""
+    echo -e "  Run standalone:"
+    echo -e "    ${BOLD}./target/release/aegis-waf agent --config config.standalone.toml${NC}"
+    echo ""
+    echo -e "  Run with remote controller:"
+    echo -e "    ${BOLD}./target/release/aegis-waf agent --config config.standalone.toml --controller http://CENTRAL_IP:8080${NC}"
+    read -n 1 -s -r -p "Press any key to return to menu..."
+}
+
+# ================================================================
 #  CLI ARGUMENT PARSING (Non-interactive)
 # ================================================================
 
@@ -854,6 +949,14 @@ if [ "$1" != "" ]; then
             ;;
         --install|install|deploy)
             install_aegis
+            exit 0
+            ;;
+        --agent-deploy|agent-deploy)
+            deploy_agent_only
+            exit 0
+            ;;
+        --agent-build|agent-build)
+            build_agent_only
             exit 0
             ;;
         --uninstall|uninstall|remove)
@@ -881,17 +984,23 @@ if [ "$1" != "" ]; then
             echo ""
             echo "Usage: $0 [COMMAND]"
             echo ""
-            echo "Commands:"
-            echo "  deps, setup     Install ALL system dependencies (Rust, Node.js, Docker)"
-            echo "  build           Build Aegis WAF from source (Rust + Svelte)"
-            echo "  dev             Start development mode (Controller + Agent + Vite)"
-            echo "  install, deploy Deploy via Docker (production)"
-            echo "  uninstall       Remove Aegis WAF completely"
-            echo "  upgrade         Pull latest and rebuild containers"
-            echo "  status, health  Show system status and health checks"
-            echo "  logs            Stream Docker container logs"
-            echo "  format, lint    Run linters and formatters (Rust + Svelte)"
-            echo "  help            Show this help message"
+            echo "Full Stack Commands:"
+            echo "  deps, setup       Install ALL system dependencies (Rust, Node.js, Docker)"
+            echo "  build             Build full stack from source (Rust + Svelte)"
+            echo "  dev               Start development mode (Controller + Agent + Vite)"
+            echo "  install, deploy   Deploy full stack via Docker (production)"
+            echo ""
+            echo "Lightweight Agent Commands (for small VPS):"
+            echo "  agent-deploy      Deploy Agent-only via Docker (no ClickHouse, no Dashboard)"
+            echo "  agent-build       Build Agent binary only (no dashboard build)"
+            echo ""
+            echo "Management Commands:"
+            echo "  uninstall         Remove Aegis WAF completely"
+            echo "  upgrade           Pull latest and rebuild containers"
+            echo "  status, health    Show system status and health checks"
+            echo "  logs              Stream Docker container logs"
+            echo "  format, lint      Run linters and formatters (Rust + Svelte)"
+            echo "  help              Show this help message"
             echo ""
             echo "Interactive mode: Run without arguments for menu-driven interface."
             exit 0
@@ -910,29 +1019,38 @@ fi
 
 while true; do
     print_banner
-    echo -e "  ${GREEN}1)${NC} 📦 Install ALL Dependencies (Zero-to-Ready Setup)"
-    echo -e "  ${GREEN}2)${NC} 🔨 Build from Source (Rust + Svelte)"
-    echo -e "  ${GREEN}3)${NC} 🚀 Development Mode (Controller + Agent + Vite)"
-    echo -e "  ${BLUE}4)${NC} 🐳 Deploy via Docker (Production)"
-    echo -e "  ${CYAN}5)${NC} ⬆️  Upgrade Docker Deployment"
-    echo -e "  ${RED}6)${NC} 🗑️  Uninstall Aegis WAF"
-    echo -e "  ${CYAN}7)${NC} 📊 System Status & Health Check"
-    echo -e "  ${YELLOW}8)${NC} 📋 View Real-time Logs"
-    echo -e "  ${MAGENTA}9)${NC} 🧹 Run Linters & Formatters"
-    echo -e "  ${DIM}0)${NC} Exit"
+    echo -e "  ${GREEN}1)${NC}  📦 Install ALL Dependencies (Zero-to-Ready Setup)"
+    echo -e "  ${GREEN}2)${NC}  🔨 Build from Source (Full Stack: Rust + Svelte)"
+    echo -e "  ${GREEN}3)${NC}  🚀 Development Mode (Controller + Agent + Vite)"
+    echo -e "  ${BLUE}4)${NC}  🐳 Deploy Full Stack via Docker (Production)"
+    echo -e "  ${CYAN}5)${NC}  ⬆️  Upgrade Docker Deployment"
+    echo -e ""
+    echo -e "  ${YELLOW}${BOLD}── Lightweight VPS ──${NC}"
+    echo -e "  ${YELLOW}6)${NC}  🪶 Deploy Agent Only (No ClickHouse, ~30MB RAM)"
+    echo -e "  ${YELLOW}7)${NC}  🔧 Build Agent Binary Only"
+    echo -e ""
+    echo -e "  ${CYAN}${BOLD}── Management ──${NC}"
+    echo -e "  ${RED}8)${NC}  🗑️  Uninstall Aegis WAF"
+    echo -e "  ${CYAN}9)${NC}  📊 System Status & Health Check"
+    echo -e "  ${DIM}10)${NC} 📋 View Real-time Logs"
+    echo -e "  ${MAGENTA}11)${NC} 🧹 Run Linters & Formatters"
+    echo -e "  ${DIM}0)${NC}  Exit"
     echo ""
-    read -p "  Select [0-9]: " opt
+    read -p "  Select [0-11]: " opt
     case $opt in
         1) setup_all_dependencies ;;
         2) build_from_source ;;
         3) run_dev_mode ;;
         4) install_aegis ;;
         5) upgrade_aegis ;;
-        6) uninstall_aegis ;;
-        7) show_status ;;
-        8) show_logs ;;
-        9) run_formatters ;;
+        6) deploy_agent_only ;;
+        7) build_agent_only ;;
+        8) uninstall_aegis ;;
+        9) show_status ;;
+        10) show_logs ;;
+        11) run_formatters ;;
         0) echo -e "${CYAN}Goodbye! 🛡️${NC}"; exit 0 ;;
         *) echo -e "${RED}Invalid option!${NC}"; sleep 1 ;;
     esac
 done
+
