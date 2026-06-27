@@ -203,11 +203,11 @@ generate_files() {
 # ================================================================
 # Aegis WAF — Precompiled Agent-Only Dockerfile
 # ================================================================
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libssl3 curl && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /var/log/aegis-waf /app/certs
 
