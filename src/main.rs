@@ -330,24 +330,20 @@ fn parse_proc_net_tcp(
 fn get_linux_socket_inodes() -> std::collections::HashMap<String, u32> {
     let mut map = std::collections::HashMap::new();
     if let Ok(entries) = std::fs::read_dir("/proc") {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if let Some(name_str) = path.file_name().and_then(|s| s.to_str()) {
-                    if let Ok(pid) = name_str.parse::<u32>() {
-                        let fd_path = format!("/proc/{}/fd", pid);
-                        if let Ok(fd_entries) = std::fs::read_dir(fd_path) {
-                            for fd_entry in fd_entries {
-                                if let Ok(fd_entry) = fd_entry {
-                                    if let Ok(link) = std::fs::read_link(fd_entry.path()) {
-                                        if let Some(link_str) = link.to_str() {
-                                            if link_str.starts_with("socket:[")
-                                                && link_str.ends_with(']')
-                                            {
-                                                let inode = &link_str[8..link_str.len() - 1];
-                                                map.insert(inode.to_string(), pid);
-                                            }
-                                        }
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(name_str) = path.file_name().and_then(|s| s.to_str()) {
+                if let Ok(pid) = name_str.parse::<u32>() {
+                    let fd_path = format!("/proc/{}/fd", pid);
+                    if let Ok(fd_entries) = std::fs::read_dir(fd_path) {
+                        for fd_entry in fd_entries.flatten() {
+                            if let Ok(link) = std::fs::read_link(fd_entry.path()) {
+                                if let Some(link_str) = link.to_str() {
+                                    if link_str.starts_with("socket:[")
+                                        && link_str.ends_with(']')
+                                    {
+                                        let inode = &link_str[8..link_str.len() - 1];
+                                        map.insert(inode.to_string(), pid);
                                     }
                                 }
                             }

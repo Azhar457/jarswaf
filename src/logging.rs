@@ -244,7 +244,7 @@ async fn log_worker_file(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConfig) {
         line_count += 1;
 
         // Check rotation every 1000 lines
-        if line_count % 1000 == 0 {
+        if line_count.is_multiple_of(1000) {
             rotate_log_if_needed(&cfg.log_path, cfg.max_log_size_mb, cfg.max_log_files);
         }
     }
@@ -280,7 +280,7 @@ async fn log_worker_remote(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConfig) 
                 // Always write to local file
                 write_to_local_log(&entry, &cfg.log_path);
                 line_count += 1;
-                if line_count % 1000 == 0 {
+                if line_count.is_multiple_of(1000) {
                     rotate_log_if_needed(&cfg.log_path, cfg.max_log_size_mb, cfg.max_log_files);
                 }
 
