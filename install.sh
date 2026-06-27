@@ -107,6 +107,10 @@ configure_interactively() {
     # Backend host
     read -p "  Your backend app address [127.0.0.1:8000]: " BACKEND_ADDR
     BACKEND_ADDR=${BACKEND_ADDR:-"127.0.0.1:8000"}
+    # If the user only entered a port (e.g. 9500), automatically prepend 127.0.0.1:
+    if [[ "$BACKEND_ADDR" =~ ^[0-9]+$ ]]; then
+        BACKEND_ADDR="127.0.0.1:${BACKEND_ADDR}"
+    fi
 
     # Domain
     read -p "  Your domain name(s), comma separated [localhost]: " DOMAIN_NAMES
@@ -315,6 +319,7 @@ log_path = "/var/log/aegis-waf/aegis.log"
 max_log_size_mb = 50
 max_log_files = 5
 blocklist_path = "/var/log/aegis-waf/blocklist.json"
+db_path = "/var/log/aegis-waf/aegis-waf.db"
 TOML_EOF
 
     # Add remote URL if controller specified

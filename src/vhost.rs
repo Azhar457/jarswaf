@@ -35,7 +35,10 @@ fn match_pattern(host: &str, pattern: &str) -> bool {
 
 /// Mencari vhost berdasarkan Host header.
 /// Return backend address & matched vhost config.
-pub fn match_vhost<'a>(host_header: Option<&Host>, config: &'a Config) -> (&'a str, &'a VHost) {
+pub fn match_vhost<'a>(
+    host_header: Option<&Host>,
+    config: &'a Config,
+) -> Option<(&'a str, &'a VHost)> {
     let host_str = host_header.map(|h| h.0.clone()).unwrap_or_default();
 
     // Strip port if exists (e.g. localhost:80 -> localhost)
@@ -45,7 +48,7 @@ pub fn match_vhost<'a>(host_header: Option<&Host>, config: &'a Config) -> (&'a s
     for vhost in &config.vhosts {
         for pattern in &vhost.hosts {
             if match_pattern(host_name, pattern) {
-                return (&vhost.backend, vhost);
+                return Some((&vhost.backend, vhost));
             }
         }
     }
@@ -53,11 +56,9 @@ pub fn match_vhost<'a>(host_header: Option<&Host>, config: &'a Config) -> (&'a s
     // Cari vhost default (fallback / general proxy)
     for vhost in &config.vhosts {
         if vhost.is_default {
-            return (&vhost.backend, vhost);
+            return Some((&vhost.backend, vhost));
         }
     }
 
-    // fallback ke vhost pertama jika tidak ada default yang diset
-    let first = config.vhosts.first().expect("No vhost configured");
-    (&first.backend, first)
+    None
 }

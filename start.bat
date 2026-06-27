@@ -4,21 +4,7 @@ echo   Aegis WAF Development Launcher (Windows)
 echo ===================================================
 echo.
 
-echo Step 1: Checking and starting ClickHouse Database...
-docker compose up -d clickhouse
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Failed to start ClickHouse Docker container. Please make sure Docker Desktop is running!
-    pause
-    exit /b %ERRORLEVEL%
-)
-
-echo.
-echo Step 2: Waiting 5 seconds for ClickHouse to initialize...
-timeout /t 5 >nul
-
-:: Set ClickHouse credentials for spawned processes to inherit
-set CLICKHOUSE_USER=default
-set CLICKHOUSE_PASSWORD=aegis
+:: No database setup needed for SQLite! WAF Controller initializes database automatically.
 
 echo.
 echo Step 3: Starting WAF Controller in a new window...

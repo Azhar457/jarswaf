@@ -21,13 +21,14 @@ waf_enabled = true
 # Modes:
 #   "file"       → Write JSON logs to local file only (0 MB overhead)
 #   "remote"     → Write to file + push batches to central Controller
-#   "clickhouse" → Direct insert to ClickHouse (requires Docker)
+#   "sqlite"     → Direct insert to local SQLite (requires db_path)
 [logging]
 mode = "file"
 log_path = "/var/log/aegis-waf/aegis.log"
 max_log_size_mb = 50            # Rotate when file exceeds this size
 max_log_files = 5               # Keep max N rotated files
 blocklist_path = "/var/log/aegis-waf/blocklist.json"
+db_path = "/var/log/aegis-waf/aegis-waf.db"
 
 # Uncomment for remote monitoring from your central server:
 # mode = "remote"

@@ -13,20 +13,7 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-echo "Step 1: Checking and starting ClickHouse Database..."
-docker compose up -d clickhouse
-if [ $? -ne 0 ]; then
-    echo "[ERROR] Failed to start ClickHouse Docker container. Please make sure Docker service is running!"
-    exit 1
-fi
-
-echo
-echo "Step 2: Waiting 5 seconds for ClickHouse to initialize..."
-sleep 5
-
-# Export ClickHouse credentials for background tasks
-export CLICKHOUSE_USER=default
-export CLICKHOUSE_PASSWORD=aegis
+# No database setup needed for SQLite! WAF Controller initializes database automatically.
 
 echo
 echo "Step 3: Starting WAF Controller..."
