@@ -4,13 +4,19 @@ use std::process::Command;
 fn main() -> anyhow::Result<()> {
     println!("Building eBPF program...");
 
+    let mut workspace_root = std::path::PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").context("CARGO_MANIFEST_DIR not set")?,
+    );
+    workspace_root.pop(); // Go up to workspace root
+    let ebpf_cargo_toml = workspace_root.join("aegis-ebpf").join("Cargo.toml");
+
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let status = Command::new(cargo)
         .args(&[
             "build",
             "--release",
             "--manifest-path",
-            "aegis-ebpf/Cargo.toml",
+            ebpf_cargo_toml.to_str().unwrap(),
             "--target=bpfel-unknown-none",
             "-Z",
             "build-std=core",
