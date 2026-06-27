@@ -164,7 +164,11 @@ fn rotate_log_if_needed(log_path: &str, max_size_mb: u64, max_files: u32) {
             let _ = std::fs::remove_file(&oldest);
             // Current -> .1
             let _ = std::fs::rename(log_path, format!("{}.1", log_path));
-            tracing::info!("Log file rotated: {} (exceeded {} MB)", log_path, max_size_mb);
+            tracing::info!(
+                "Log file rotated: {} (exceeded {} MB)",
+                log_path,
+                max_size_mb
+            );
         }
     }
 }
@@ -187,10 +191,7 @@ pub fn load_blocklist_from_file(path: &str) -> std::collections::HashSet<std::ne
 }
 
 /// Save blocked IPs to a local JSON file.
-pub fn save_blocklist_to_file(
-    path: &str,
-    blocklist: &std::collections::HashSet<std::net::IpAddr>,
-) {
+pub fn save_blocklist_to_file(path: &str, blocklist: &std::collections::HashSet<std::net::IpAddr>) {
     if let Some(parent) = std::path::Path::new(path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -226,10 +227,7 @@ pub async fn log_worker(rx: Receiver<WafLogEntry>, worker_cfg: LogWorkerConfig) 
         "remote" => log_worker_remote(rx, worker_cfg).await,
         "clickhouse" => log_worker_clickhouse(rx, worker_cfg).await,
         other => {
-            tracing::warn!(
-                "Unknown logging mode '{}', falling back to 'file'",
-                other
-            );
+            tracing::warn!("Unknown logging mode '{}', falling back to 'file'", other);
             log_worker_file(rx, worker_cfg).await;
         }
     }
@@ -239,10 +237,7 @@ pub async fn log_worker(rx: Receiver<WafLogEntry>, worker_cfg: LogWorkerConfig) 
 /// Zero network dependencies. Ideal for small VPS.
 async fn log_worker_file(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConfig) {
     let mut line_count: u64 = 0;
-    tracing::info!(
-        "Log worker started in FILE mode → {}",
-        cfg.log_path
-    );
+    tracing::info!("Log worker started in FILE mode → {}", cfg.log_path);
 
     while let Some(entry) = rx.recv().await {
         write_to_local_log(&entry, &cfg.log_path);
