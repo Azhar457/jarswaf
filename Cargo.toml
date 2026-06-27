@@ -8,6 +8,9 @@ description = "Pure Layer 7 WAF - Homelab Edition"
 members = [
     "xtask",
 ]
+exclude = [
+    "aegis-ebpf",
+]
 
 [dependencies]
 axum = { version = "0.7", features = ["macros", "ws"] }
