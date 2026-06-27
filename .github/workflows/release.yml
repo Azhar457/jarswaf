@@ -33,7 +33,7 @@ jobs:
           cargo install bpf-linker
 
       - name: Build eBPF Program
-        run: cargo +nightly xtask
+        run: cargo +nightly run --package xtask
 
       - name: Build Release Binary (with eBPF embedded)
         run: cargo build --release --features ebpf
