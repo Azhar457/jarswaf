@@ -34,8 +34,10 @@ jobs:
 
       - name: Upload Binary to Release
         uses: softprops/action-gh-release@v2
-        if: github.event_name == 'release'
         with:
           files: aegis-waf-linux-amd64
+          tag_name: latest
+          name: Latest Release
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
