@@ -28,7 +28,8 @@ impl XdpManager {
         {
             // We use include_bytes! to embed the eBPF program directly inside the user-space binary.
             // This makes the binary fully self-contained and avoids the need to ship target/ files inside Docker.
-            const EBPF_BYTES: &[u8] = include_bytes!("../target/bpfel-unknown-none/release/aegis-ebpf");
+            const EBPF_BYTES: &[u8] =
+                include_bytes!("../target/bpfel-unknown-none/release/aegis-ebpf");
             let bpf = match Ebpf::load(EBPF_BYTES) {
                 Ok(b) => Some(b),
                 Err(e) => {
