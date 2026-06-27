@@ -178,15 +178,20 @@ generate_files() {
     # ── Download source or precompiled binary from GitHub ─────────
     log_step "3" "Checking for precompiled Aegis WAF binary..."
     
-    # We will look for the precompiled binary in GitHub Releases
-    # Since you haven't released it yet, this will fallback to compiling until you upload the binary.
-    # To release, build the binary for target x86_64-unknown-linux-gnu or x86_64-unknown-linux-musl and upload as release asset.
     BINARY_URL="https://github.com/Azhar457/aegis-waf/releases/latest/download/aegis-waf-linux-amd64"
+    EBPF_URL="https://github.com/Azhar457/aegis-waf/releases/latest/download/aegis-ebpf"
     
     if curl -fsSL -I "$BINARY_URL" >/dev/null 2>&1; then
         log_success "Precompiled binary found! Downloading..."
         curl -fsSL "$BINARY_URL" -o aegis-waf
         chmod +x aegis-waf
+        
+        # Download eBPF object if available
+        if curl -fsSL -I "$EBPF_URL" >/dev/null 2>&1; then
+            log_success "Precompiled eBPF binary found! Downloading..."
+            curl -fsSL "$EBPF_URL" -o aegis-ebpf
+        fi
+        
         USE_PRECOMPILED=true
     else
         log_warn "Precompiled binary not found on GitHub. Falling back to compilation (this will take longer)..."
@@ -199,7 +204,12 @@ generate_files() {
     log_step "4" "Generating Dockerfile..."
 
     if [ "$USE_PRECOMPILED" = true ]; then
-        cat > Dockerfile << 'DOCKERFILE_EOF'
+        local EBPF_COPY=""
+        if [ -f "aegis-ebpf" ]; then
+            EBPF_COPY="COPY aegis-ebpf /app/aegis-ebpf"
+        fi
+
+        cat > Dockerfile << DOCKERFILE_EOF
 # ================================================================
 # Aegis WAF — Precompiled Agent-Only Dockerfile
 # ================================================================
@@ -213,6 +223,7 @@ RUN apt-get update && \
 
 COPY aegis-waf /app/aegis-waf
 RUN chmod +x /app/aegis-waf
+${EBPF_COPY}
 COPY config.toml /app/config.toml
 
 EXPOSE 80 443
