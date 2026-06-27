@@ -339,9 +339,7 @@ fn get_linux_socket_inodes() -> std::collections::HashMap<String, u32> {
                         for fd_entry in fd_entries.flatten() {
                             if let Ok(link) = std::fs::read_link(fd_entry.path()) {
                                 if let Some(link_str) = link.to_str() {
-                                    if link_str.starts_with("socket:[")
-                                        && link_str.ends_with(']')
-                                    {
+                                    if link_str.starts_with("socket:[") && link_str.ends_with(']') {
                                         let inode = &link_str[8..link_str.len() - 1];
                                         map.insert(inode.to_string(), pid);
                                     }
