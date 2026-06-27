@@ -694,9 +694,11 @@ pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
     }
 
     if let Some(reader) = GEOIP_READER.as_ref() {
-        if let Ok(record) = reader.lookup::<maxminddb::geoip2::Country>(*ip) {
-            if let Some(country) = record.country.and_then(|c| c.iso_code) {
-                return country.to_string();
+        if let Ok(lookup_res) = reader.lookup(*ip) {
+            if let Ok(Some(record)) = lookup_res.decode::<maxminddb::geoip2::Country>() {
+                if let Some(iso_code) = record.country.iso_code {
+                    return iso_code.to_string();
+                }
             }
         }
     }
