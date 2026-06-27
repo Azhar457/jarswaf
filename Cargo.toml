@@ -9,10 +9,6 @@ members = [
     "xtask",
 ]
 
-[features]
-default = []
-ebpf = []
-
 [dependencies]
 axum = { version = "0.7", features = ["macros", "ws"] }
 tokio = { version = "1", features = ["full"] }
