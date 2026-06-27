@@ -17,6 +17,33 @@ pub async fn forward_request(
 ) -> Response<Body> {
     let req = req;
     // Read config inside a block to ensure RwLockReadGuard does not cross await boundaries
+    let match_result = {
+        let config_lock = state.config.read().unwrap();
+        vhost::match_vhost(host.as_ref(), &config_lock).map(|(b, v)| {
+            let resolved = v
+                .custom_rules
+                .iter()
+                .filter_map(|id| {
+                    config_lock
+                        .custom_rules
+                        .iter()
+                        .find(|r| &r.id == id)
+                        .cloned()
+                })
+                .collect::<Vec<crate::config::CustomRule>>();
+            (
+                b.to_string(),
+                v.clone(),
+                config_lock.global.max_body_size,
+                config_lock.global.default_rate_limit,
+                config_lock.global.log_level.to_lowercase(),
+                config_lock.global.trusted_proxies.clone(),
+                resolved,
+                config_lock.global.waf_enabled,
+            )
+        })
+    };
+
     let (
         backend_addr,
         vhost_cfg,
@@ -26,32 +53,16 @@ pub async fn forward_request(
         trusted_proxies,
         resolved_custom_rules,
         waf_enabled,
-    ) = {
-        let config_lock = state.config.read().unwrap();
-        let (b, v) = vhost::match_vhost(host.as_ref(), &config_lock);
-
-        let resolved = v
-            .custom_rules
-            .iter()
-            .filter_map(|id| {
-                config_lock
-                    .custom_rules
-                    .iter()
-                    .find(|r| &r.id == id)
-                    .cloned()
-            })
-            .collect::<Vec<crate::config::CustomRule>>();
-
-        (
-            b.to_string(),
-            v.clone(),
-            config_lock.global.max_body_size,
-            config_lock.global.default_rate_limit,
-            config_lock.global.log_level.to_lowercase(),
-            config_lock.global.trusted_proxies.clone(),
-            resolved,
-            config_lock.global.waf_enabled,
-        )
+    ) = match match_result {
+        Some(values) => values,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "Blocked by Aegis WAF: Unrecognized Host header / Domain not configured"
+                    .to_string(),
+            )
+                .into_response();
+        }
     };
 
     // Extract real client IP (XFF only trusted from whitelisted/private proxies)

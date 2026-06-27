@@ -42,61 +42,68 @@ pub fn build_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-// Inisialisasi ClickHouse Table
-pub async fn init_db(clickhouse_url: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let client = build_client();
-    let ddl = "
-        CREATE TABLE IF NOT EXISTS request_log (
-            timestamp DateTime64(3, 'UTC'),
-            client_ip String,
-            method String,
-            path String,
-            action String,
-            rule_id String,
-            reason String
-        ) ENGINE = MergeTree()
-        ORDER BY (timestamp, client_ip)
-        TTL toDateTime(timestamp) + INTERVAL 30 DAY DELETE
-    ";
-
-    let url = format!("{}/", clickhouse_url.trim_end_matches('/'));
-    let res = client.post(&url).body(ddl.to_string()).send().await?;
-    if !res.status().is_success() {
-        let err = res.text().await?;
-        return Err(format!("ClickHouse init error: {}", err).into());
+// Inisialisasi SQLite Table
+pub fn init_sqlite_db(db_path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(parent) = std::path::Path::new(db_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
     }
-    tracing::info!("ClickHouse request_log table initialized successfully");
+
+    let conn = rusqlite::Connection::open(db_path)?;
+
+    // Enable WAL mode for concurrent read/write performance
+    let _ = conn.execute("PRAGMA journal_mode=WAL;", []);
+    let _ = conn.execute("PRAGMA synchronous=NORMAL;", []);
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS request_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            client_ip TEXT NOT NULL,
+            method TEXT NOT NULL,
+            path TEXT NOT NULL,
+            action TEXT NOT NULL,
+            rule_id TEXT NOT NULL,
+            reason TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    // Create index on timestamp for fast queries
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_request_log_timestamp ON request_log (timestamp)",
+        [],
+    )?;
+
+    tracing::info!("SQLite database initialized successfully at {}", db_path);
     Ok(())
 }
 
-// Mendapatkan statistik realtime dari ClickHouse
-pub async fn get_stats(
-    clickhouse_url: &str,
+// Mendapatkan statistik realtime dari SQLite
+pub fn sqlite_get_stats(
+    db_path: &str,
     hours: u32,
 ) -> Result<Stats, Box<dyn std::error::Error + Send + Sync>> {
-    let client = build_client();
-    let query = format!(
-        "SELECT count(), countIf(action = 'BLOCK'), countIf(action = 'RATE_LIMIT') FROM request_log WHERE timestamp > now() - INTERVAL {} HOUR FORMAT TSV",
-        hours
-    );
-    let url = format!(
-        "{}/?query={}",
-        clickhouse_url.trim_end_matches('/'),
-        urlencoding::encode(&query)
-    );
+    let conn = rusqlite::Connection::open(db_path)?;
 
-    let res = client.get(&url).send().await?;
-    if !res.status().is_success() {
-        return Err("ClickHouse stats query failed".into());
-    }
+    // Calculate the ISO timestamp for now() - hours
+    let since = chrono::Utc::now() - chrono::Duration::hours(hours as i64);
+    let since_str = since.to_rfc3339();
 
-    let text = res.text().await?;
-    let parts: Vec<&str> = text.trim().split('\t').collect();
-    if parts.len() == 3 {
+    let mut stmt = conn.prepare(
+        "SELECT 
+            count(), 
+            count(CASE WHEN action = 'BLOCK' THEN 1 END), 
+            count(CASE WHEN action = 'RATE_LIMIT' THEN 1 END) 
+         FROM request_log 
+         WHERE timestamp > ?1",
+    )?;
+
+    let mut rows = stmt.query([since_str])?;
+    if let Some(row) = rows.next()? {
         Ok(Stats {
-            total_requests: parts[0].parse().unwrap_or(0),
-            blocked: parts[1].parse().unwrap_or(0),
-            rate_limited: parts[2].parse().unwrap_or(0),
+            total_requests: row.get(0).unwrap_or(0),
+            blocked: row.get(1).unwrap_or(0),
+            rate_limited: row.get(2).unwrap_or(0),
         })
     } else {
         Ok(Stats {
@@ -107,25 +114,50 @@ pub async fn get_stats(
     }
 }
 
-// Mendapatkan jumlah disk usage dari ClickHouse Table
-pub async fn get_db_size(
-    clickhouse_url: &str,
-) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-    let client = build_client();
-    let query = "SELECT total_bytes FROM system.tables WHERE name = 'request_log' FORMAT TSV";
-    let url = format!(
-        "{}/?query={}",
-        clickhouse_url.trim_end_matches('/'),
-        urlencoding::encode(query)
-    );
+// Mendapatkan database size
+pub fn sqlite_get_db_size(db_path: &str) -> u64 {
+    std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0)
+}
 
-    let res = client.get(&url).send().await?;
-    if res.status().is_success() {
-        let text = res.text().await?;
-        Ok(text.trim().parse().unwrap_or(0))
-    } else {
-        Ok(0)
+// Mendapatkan log terbaru dari SQLite
+pub fn sqlite_get_logs(
+    db_path: &str,
+    limit: usize,
+) -> Result<Vec<WafLogEntry>, Box<dyn std::error::Error + Send + Sync>> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT timestamp, client_ip, method, path, action, rule_id, reason 
+         FROM request_log 
+         ORDER BY timestamp DESC 
+         LIMIT ?1",
+    )?;
+
+    let log_iter = stmt.query_map([limit], |row| {
+        let timestamp_str: String = row.get(0)?;
+        let client_ip_str: String = row.get(1)?;
+        let method: String = row.get(2)?;
+        let path: String = row.get(3)?;
+        let action: String = row.get(4)?;
+        let rule_id: String = row.get(5)?;
+        let reason: String = row.get(6)?;
+
+        Ok(WafLogEntry {
+            timestamp: timestamp_str,
+            client_ip: client_ip_str,
+            method,
+            path,
+            action,
+            rule_id,
+            reason,
+        })
+    })?;
+
+    let mut logs = Vec::new();
+    for entry in log_iter.flatten() {
+        logs.push(entry);
     }
+
+    Ok(logs)
 }
 
 use std::fs::OpenOptions;
@@ -203,16 +235,14 @@ pub fn save_blocklist_to_file(path: &str, blocklist: &std::collections::HashSet<
     }
 }
 
-// ─── Log Worker (Multi-Mode) ────────────────────────────────────────────────
-
 /// Configuration passed to the log worker to control its behavior.
 #[derive(Clone, Debug)]
 pub struct LogWorkerConfig {
-    pub mode: String,         // "file", "remote", "clickhouse"
-    pub log_path: String,     // Local log file path
-    pub max_log_size_mb: u64, // Max size before rotation
-    pub max_log_files: u32,   // Max rotated files
-    pub clickhouse_url: String,
+    pub mode: String,                   // "file", "remote", "clickhouse" / "sqlite"
+    pub log_path: String,               // Local log file path
+    pub max_log_size_mb: u64,           // Max size before rotation
+    pub max_log_files: u32,             // Max rotated files
+    pub db_path: String,                // SQLite database file path
     pub controller_url: Option<String>, // For agent mode (sends to controller)
     pub remote_url: Option<String>,     // For "remote" mode (push logs)
     pub push_interval_secs: u64,
@@ -225,7 +255,7 @@ pub async fn log_worker(rx: Receiver<WafLogEntry>, worker_cfg: LogWorkerConfig) 
     match worker_cfg.mode.as_str() {
         "file" => log_worker_file(rx, worker_cfg).await,
         "remote" => log_worker_remote(rx, worker_cfg).await,
-        "clickhouse" => log_worker_clickhouse(rx, worker_cfg).await,
+        "clickhouse" | "sqlite" => log_worker_sqlite(rx, worker_cfg).await,
         other => {
             tracing::warn!("Unknown logging mode '{}', falling back to 'file'", other);
             log_worker_file(rx, worker_cfg).await;
@@ -342,16 +372,19 @@ async fn push_logs_to_remote(
     }
 }
 
-/// CLICKHOUSE mode: Existing behavior with batch insert + optional controller forwarding.
-async fn log_worker_clickhouse(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConfig) {
+/// SQLITE mode: Batch insert logs to local SQLite + optional controller forwarding.
+async fn log_worker_sqlite(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConfig) {
     let client = build_client();
     let batch_interval = Duration::from_secs(1);
-    let max_batch_size = 5000;
+    let max_batch_size = 1000;
 
     let mut batch = Vec::new();
     let mut last_flush = tokio::time::Instant::now();
 
-    tracing::info!("Log worker started in CLICKHOUSE mode");
+    tracing::info!(
+        "Log worker started in SQLITE / ClickHouse compatibility mode → {}",
+        cfg.db_path
+    );
 
     loop {
         let timeout = batch_interval
@@ -365,14 +398,14 @@ async fn log_worker_clickhouse(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConf
 
                 batch.push(entry);
                 if batch.len() >= max_batch_size {
-                    flush_to_clickhouse(&batch, &cfg.clickhouse_url, &cfg.controller_url, &client, &cfg.token).await;
+                    flush_to_sqlite(&batch, &cfg.db_path, &cfg.controller_url, &client, &cfg.token).await;
                     batch.clear();
                     last_flush = tokio::time::Instant::now();
                 }
             }
             _ = tokio::time::sleep(timeout) => {
                 if !batch.is_empty() {
-                    flush_to_clickhouse(&batch, &cfg.clickhouse_url, &cfg.controller_url, &client, &cfg.token).await;
+                    flush_to_sqlite(&batch, &cfg.db_path, &cfg.controller_url, &client, &cfg.token).await;
                     batch.clear();
                 }
                 last_flush = tokio::time::Instant::now();
@@ -381,10 +414,10 @@ async fn log_worker_clickhouse(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConf
     }
 }
 
-/// Flush logs to ClickHouse or forward to Controller (existing behavior).
-async fn flush_to_clickhouse(
+/// Flush logs to SQLite or forward to Controller.
+async fn flush_to_sqlite(
     batch: &[WafLogEntry],
-    clickhouse_url: &str,
+    db_path: &str,
     controller_url: &Option<String>,
     client: &reqwest::Client,
     token: &Option<String>,
@@ -404,26 +437,44 @@ async fn flush_to_clickhouse(
             tracing::error!("Error posting logs to controller: {}", e);
         }
     } else {
-        // Mode Controller: Bulk Insert ke ClickHouse menggunakan JSONEachRow
-        let mut body = String::new();
-        for entry in batch {
-            if let Ok(json) = serde_json::to_string(entry) {
-                body.push_str(&json);
-                body.push('\n');
-            }
-        }
+        // Mode Controller: Bulk Insert ke SQLite menggunakan Transaction
+        let db_path = db_path.to_string();
+        let batch = batch.to_vec();
+        let batch_len = batch.len();
 
-        let url = format!(
-            "{}/?query=INSERT INTO request_log FORMAT JSONEachRow",
-            clickhouse_url.trim_end_matches('/')
-        );
-        let res = client.post(&url).body(body).send().await;
-        if let Err(e) = res {
-            tracing::error!("Failed to insert logs to ClickHouse: {}", e);
-        } else if let Ok(resp) = res {
-            if !resp.status().is_success() {
-                let err_text = resp.text().await.unwrap_or_default();
-                tracing::error!("ClickHouse insert error: {}", err_text);
+        let res = tokio::task::spawn_blocking(move || {
+            let mut conn = rusqlite::Connection::open(&db_path)?;
+            let tx = conn.transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT INTO request_log (timestamp, client_ip, method, path, action, rule_id, reason)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+                )?;
+                for entry in &batch {
+                    stmt.execute([
+                        &entry.timestamp,
+                        &entry.client_ip,
+                        &entry.method,
+                        &entry.path,
+                        &entry.action,
+                        &entry.rule_id,
+                        &entry.reason,
+                    ])?;
+                }
+            }
+            tx.commit()?;
+            Ok::<(), rusqlite::Error>(())
+        }).await;
+
+        match res {
+            Ok(Ok(())) => {
+                tracing::debug!("Successfully inserted {} logs into SQLite", batch_len);
+            }
+            Ok(Err(e)) => {
+                tracing::error!("Failed to insert logs to SQLite: {}", e);
+            }
+            Err(e) => {
+                tracing::error!("Blocking task panicked inserting logs to SQLite: {}", e);
             }
         }
     }

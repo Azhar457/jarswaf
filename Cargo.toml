@@ -44,6 +44,7 @@ tokio-tungstenite = "0.21.0"
 maxminddb = "0.27.0"
 htmlescape = "0.3"
 unicode-normalization = "0.1"
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27", features = ["user"] } # for privilege dropping

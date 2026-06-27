@@ -1,0 +1,91 @@
+use super::super::state::ControllerState;
+use crate::types::{format_uptime, AgentInfo, AgentMetrics};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use tracing::info;
+
+#[derive(serde::Deserialize)]
+pub struct AgentRegisterRequest {
+    pub hostname: String,
+    pub ip: String,
+    pub port: u16,
+    pub os: String,
+}
+
+pub async fn register_agent_handler(
+    State(state): State<ControllerState>,
+    Json(payload): Json<AgentRegisterRequest>,
+) -> impl IntoResponse {
+    info!(
+        "Registered agent: {} at {}:{} running {}",
+        payload.hostname, payload.ip, payload.port, payload.os
+    );
+
+    let info = AgentInfo {
+        hostname: payload.hostname.clone(),
+        ip: payload.ip.clone(),
+        os: payload.os.clone(),
+        cpu: 0.0,
+        ram: 0.0,
+        disk: 0.0,
+        uptime: "0m".to_string(),
+        status: "online".to_string(),
+        network_interfaces: vec![],
+        discovered_services: vec![],
+        last_seen: std::time::Instant::now(),
+    };
+
+    if let Ok(mut lock) = state.agent_registry.write() {
+        lock.insert(payload.hostname, info);
+    }
+
+    StatusCode::CREATED
+}
+
+pub async fn receive_metrics_handler(
+    State(state): State<ControllerState>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    Json(mut payload): Json<AgentMetrics>,
+) -> impl IntoResponse {
+    let client_ip = addr.ip().to_string();
+    payload.ip = client_ip.clone();
+
+    let uptime_str = format_uptime(payload.uptime);
+
+    let info = AgentInfo {
+        hostname: payload.hostname.clone(),
+        ip: client_ip,
+        os: payload.os.clone(),
+        cpu: payload.cpu,
+        ram: payload.ram,
+        disk: payload.disk,
+        uptime: uptime_str,
+        status: "online".to_string(),
+        network_interfaces: payload.network_interfaces.clone(),
+        discovered_services: payload.discovered_services.clone(),
+        last_seen: std::time::Instant::now(),
+    };
+
+    if let Ok(mut lock) = state.agent_registry.write() {
+        lock.insert(payload.hostname, info);
+    }
+
+    StatusCode::OK
+}
+
+pub async fn get_agents_handler(State(state): State<ControllerState>) -> impl IntoResponse {
+    let mut agents = Vec::new();
+    if let Ok(lock) = state.agent_registry.read() {
+        let now = std::time::Instant::now();
+        for (_, info) in lock.iter() {
+            let mut agent_clone = info.clone();
+            if now.duration_since(info.last_seen) > std::time::Duration::from_secs(15) {
+                agent_clone.status = "offline".to_string();
+                agent_clone.cpu = 0.0;
+                agent_clone.ram = 0.0;
+            }
+            agents.push(agent_clone);
+        }
+    }
+    agents.sort_by(|a, b| a.hostname.cmp(&b.hostname));
+    (StatusCode::OK, Json(agents))
+}

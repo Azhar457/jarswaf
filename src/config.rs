@@ -174,6 +174,9 @@ pub struct LoggingModeConfig {
     /// Path to local JSON file for blocklist storage (default "blocklist.json")
     #[serde(default = "default_blocklist_path")]
     pub blocklist_path: String,
+    /// Path to the SQLite database file
+    #[serde(default = "default_db_path")]
+    pub db_path: String,
 }
 
 impl Default for LoggingModeConfig {
@@ -187,12 +190,13 @@ impl Default for LoggingModeConfig {
             push_interval_secs: default_push_interval(),
             push_batch_size: default_push_batch_size(),
             blocklist_path: default_blocklist_path(),
+            db_path: default_db_path(),
         }
     }
 }
 
 fn default_logging_mode() -> String {
-    "clickhouse".to_string()
+    "sqlite".to_string()
 }
 fn default_log_path() -> String {
     "./logs/aegis.log".to_string()
@@ -211,6 +215,9 @@ fn default_push_batch_size() -> usize {
 }
 fn default_blocklist_path() -> String {
     "./blocklist.json".to_string()
+}
+fn default_db_path() -> String {
+    "/var/log/aegis-waf/aegis-waf.db".to_string()
 }
 
 /// Configures which system components are active.
