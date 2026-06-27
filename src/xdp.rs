@@ -1,9 +1,10 @@
 use std::net::Ipv4Addr;
-#[cfg(target_os = "linux")]
-use tracing::info;
 use tracing::warn;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "ebpf"))]
+use tracing::info;
+
+#[cfg(all(target_os = "linux", feature = "ebpf"))]
 use aya::{
     maps::HashMap,
     programs::{Xdp, XdpMode},
@@ -11,8 +12,8 @@ use aya::{
 };
 
 pub struct XdpManager {
-    #[cfg(target_os = "linux")]
-    bpf: Ebpf,
+    #[cfg(all(target_os = "linux", feature = "ebpf"))]
+    bpf: Option<Ebpf>,
 }
 
 impl Default for XdpManager {
@@ -23,33 +24,39 @@ impl Default for XdpManager {
 
 impl XdpManager {
     pub fn new() -> Self {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "ebpf"))]
         {
-            // Attempt to load the pre-compiled eBPF object
-            // For now, we will return an empty instance if it fails, since we want the WAF to continue working without eBPF
-            let bpf = match Ebpf::load_file("target/bpfel-unknown-none/release/aegis-ebpf") {
-                Ok(b) => b,
+            // We use include_bytes! to embed the eBPF program directly inside the user-space binary.
+            // This makes the binary fully self-contained and avoids the need to ship target/ files inside Docker.
+            const EBPF_BYTES: &[u8] = include_bytes!("../target/bpfel-unknown-none/release/aegis-ebpf");
+            let bpf = match Ebpf::load(EBPF_BYTES) {
+                Ok(b) => Some(b),
                 Err(e) => {
-                    warn!("Failed to load eBPF object (eBPF is likely not compiled or unsupported): {}", e);
-                    Ebpf::load(&[])
-                        .unwrap_or_else(|_| panic!("Failed to create empty Ebpf instance"))
+                    warn!("Failed to load embedded eBPF object: {}. eBPF packet filtering is disabled.", e);
+                    None
                 }
             };
             Self { bpf }
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(target_os = "linux", feature = "ebpf")))]
         {
-            warn!("eBPF XDP is not supported on this OS. eBPF features will be disabled.");
+            warn!("eBPF XDP is not compiled or not supported on this OS. eBPF features will be disabled.");
             Self {}
         }
     }
 
     pub fn attach(&mut self, _interface: &str) -> Result<(), String> {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "ebpf"))]
         {
-            let program: &mut Xdp = self
-                .bpf
+            let bpf = match self.bpf.as_mut() {
+                Some(b) => b,
+                None => {
+                    warn!("eBPF is disabled, skipping XDP program attach");
+                    return Ok(());
+                }
+            };
+            let program: &mut Xdp = bpf
                 .program_mut("aegis_ebpf")
                 .unwrap()
                 .try_into()
@@ -65,18 +72,22 @@ impl XdpManager {
             Ok(())
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(target_os = "linux", feature = "ebpf")))]
         {
-            warn!("Cannot attach XDP: Not supported on this OS");
-            Err("Not supported on this OS".to_string())
+            warn!("Cannot attach XDP: eBPF is disabled or not supported on this OS");
+            Ok(()) // Return Ok(()) so WAF initialization doesn't fail on non-eBPF systems
         }
     }
 
     pub fn block_ip(&mut self, _ip: Ipv4Addr) -> Result<(), String> {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "ebpf"))]
         {
+            let bpf = match self.bpf.as_mut() {
+                Some(b) => b,
+                None => return Ok(()),
+            };
             let mut blocklist: HashMap<_, u32, u8> =
-                HashMap::try_from(self.bpf.map_mut("BLOCKLIST").unwrap())
+                HashMap::try_from(bpf.map_mut("BLOCKLIST").unwrap())
                     .map_err(|e| format!("{}", e))?;
             let ip_u32 = u32::from(_ip); // Ensure network byte order matching eBPF expectations
             blocklist
@@ -86,7 +97,7 @@ impl XdpManager {
             Ok(())
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(target_os = "linux", feature = "ebpf")))]
         {
             Ok(())
         }

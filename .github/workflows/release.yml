@@ -16,18 +16,27 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust (Stable)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
 
-      - name: Install dependencies
+      - name: Install Rust (Nightly for eBPF)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install dependencies & bpf-linker
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libssl-dev build-essential
+          cargo install bpf-linker
 
-      - name: Build Release Binary
-        run: cargo build --release
+      - name: Build eBPF Program
+        run: cargo +nightly xtask
+
+      - name: Build Release Binary (with eBPF embedded)
+        run: cargo build --release --features ebpf
 
       - name: Rename Binary
         run: mv target/release/aegis-waf aegis-waf-linux-amd64

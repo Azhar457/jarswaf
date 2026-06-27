@@ -21,13 +21,27 @@ fn check_bot_001(req: &RequestInfo) -> bool {
     }
 }
 
+fn is_private_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ipv4) => ipv4.is_private(),
+        std::net::IpAddr::V6(ipv6) => {
+            let octets = ipv6.octets();
+            (octets[0] & 0xfe) == 0xfc || (octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80)
+        }
+    }
+}
+
 fn check_host_001(req: &RequestInfo) -> bool {
     if let Some(host) = req.headers.get("host") {
         let hostname = host.split(':').next().unwrap_or("");
-        hostname.parse::<std::net::IpAddr>().is_ok()
-            || hostname
+        if let Ok(ip) = hostname.parse::<std::net::IpAddr>() {
+            // Block only public IPs. Allow private and loopback IPs for local testing/development.
+            !ip.is_loopback() && !is_private_ip(&ip)
+        } else {
+            hostname
                 .chars()
                 .any(|c| !c.is_alphanumeric() && c != '.' && c != '-')
+        }
     } else {
         false
     }
