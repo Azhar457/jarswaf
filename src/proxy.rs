@@ -76,7 +76,7 @@ pub async fn forward_request(
                     .unwrap_or(false)
             })
         } else {
-            crate::is_local_ip(&peer_ip)
+            crate::types::is_local_ip(&peer_ip)
         };
 
         if is_trusted {
@@ -98,7 +98,7 @@ pub async fn forward_request(
                                     .unwrap_or(false)
                             })
                         } else {
-                            crate::is_local_ip(&parsed_ip)
+                            crate::types::is_local_ip(&parsed_ip)
                         };
                         if !is_part_trusted {
                             resolved = parsed_ip;
@@ -700,7 +700,7 @@ static GEOIP_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> =
     Lazy::new(|| maxminddb::Reader::open_readfile("GeoLite2-Country.mmdb").ok());
 
 pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
-    if crate::is_local_ip(ip) {
+    if crate::types::is_local_ip(ip) {
         return "LOCAL".to_string();
     }
 
