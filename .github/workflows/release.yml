@@ -1,0 +1,41 @@
+name: Release Precompiled Binary
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch: # Allows manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build and Release Binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev build-essential
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Rename Binary
+        run: mv target/release/aegis-waf aegis-waf-linux-amd64
+
+      - name: Upload Binary to Release
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'release'
+        with:
+          files: aegis-waf-linux-amd64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

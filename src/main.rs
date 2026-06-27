@@ -654,16 +654,41 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
     info!("  Aegis Agent Configuration Summary");
     info!("  Logging mode:      {}", log_mode);
     info!("  Log file:          {}", cfg.logging.log_path);
-    info!("  ClickHouse:        {}", if cfg.components.clickhouse && log_mode == "clickhouse" { "ENABLED" } else { "DISABLED" });
-    info!("  Service Discovery: {}", if cfg.components.service_discovery { "ENABLED" } else { "DISABLED" });
-    info!("  GeoIP:             {}", if cfg.components.geoip { "ENABLED" } else { "DISABLED" });
+    info!(
+        "  ClickHouse:        {}",
+        if cfg.components.clickhouse && log_mode == "clickhouse" {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        }
+    );
+    info!(
+        "  Service Discovery: {}",
+        if cfg.components.service_discovery {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        }
+    );
+    info!(
+        "  GeoIP:             {}",
+        if cfg.components.geoip {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        }
+    );
     info!("──────────────────────────────────────────");
 
     // Build application state — load blocklist from file if not using ClickHouse
     let initial_blocklist = if log_mode != "clickhouse" || !cfg.components.clickhouse {
         let loaded = logging::load_blocklist_from_file(&cfg.logging.blocklist_path);
         if !loaded.is_empty() {
-            info!("Loaded {} blocked IPs from {}", loaded.len(), cfg.logging.blocklist_path);
+            info!(
+                "Loaded {} blocked IPs from {}",
+                loaded.len(),
+                cfg.logging.blocklist_path
+            );
         }
         loaded
     } else {
@@ -714,7 +739,10 @@ async fn run_agent(config_path: &str, controller: Option<String>, token: Option<
                                     }
                                 }
                                 // Save to local JSON file as backup
-                                logging::save_blocklist_to_file(&blocklist_file_path, &new_blocklist);
+                                logging::save_blocklist_to_file(
+                                    &blocklist_file_path,
+                                    &new_blocklist,
+                                );
                                 if let Ok(mut lock) = blocklist_clone.write() {
                                     *lock = new_blocklist;
                                     tracing::debug!(

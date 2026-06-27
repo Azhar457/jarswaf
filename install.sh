@@ -175,20 +175,56 @@ generate_files() {
     mkdir -p "${INSTALL_DIR}"/{logs,certs,src}
     cd "${INSTALL_DIR}"
 
-    # ── Download source from GitHub ──────────────────────────────
-    log_step "3" "Downloading Aegis WAF source from GitHub..."
-
-    # Download and extract the entire repository tarball directly
-    curl -fsSL "https://github.com/Azhar457/aegis-waf/archive/refs/heads/main.tar.gz" | tar -xz --strip-components=1
-
-    log_success "Source files downloaded."
+    # ── Download source or precompiled binary from GitHub ─────────
+    log_step "3" "Checking for precompiled Aegis WAF binary..."
+    
+    # We will look for the precompiled binary in GitHub Releases
+    # Since you haven't released it yet, this will fallback to compiling until you upload the binary.
+    # To release, build the binary for target x86_64-unknown-linux-gnu or x86_64-unknown-linux-musl and upload as release asset.
+    BINARY_URL="https://github.com/Azhar457/aegis-waf/releases/latest/download/aegis-waf-linux-amd64"
+    
+    if curl -fsSL -I "$BINARY_URL" >/dev/null 2>&1; then
+        log_success "Precompiled binary found! Downloading..."
+        curl -fsSL "$BINARY_URL" -o aegis-waf
+        chmod +x aegis-waf
+        USE_PRECOMPILED=true
+    else
+        log_warn "Precompiled binary not found on GitHub. Falling back to compilation (this will take longer)..."
+        USE_PRECOMPILED=false
+        # Download and extract the entire repository tarball directly for compilation
+        curl -fsSL "https://github.com/Azhar457/aegis-waf/archive/refs/heads/main.tar.gz" | tar -xz --strip-components=1
+    fi
 
     # ── Generate Dockerfile ──────────────────────────────────────
     log_step "4" "Generating Dockerfile..."
 
-    cat > Dockerfile << 'DOCKERFILE_EOF'
+    if [ "$USE_PRECOMPILED" = true ]; then
+        cat > Dockerfile << 'DOCKERFILE_EOF'
 # ================================================================
-# Aegis WAF — Lightweight Agent-Only Dockerfile
+# Aegis WAF — Precompiled Agent-Only Dockerfile
+# ================================================================
+FROM debian:bookworm-slim
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates libssl3 curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /var/log/aegis-waf /app/certs
+
+COPY aegis-waf /app/aegis-waf
+RUN chmod +x /app/aegis-waf
+COPY config.toml /app/config.toml
+
+EXPOSE 80 443
+
+ENV RUST_LOG=info
+
+CMD ["/app/aegis-waf", "--config", "/app/config.toml", "agent"]
+DOCKERFILE_EOF
+    else
+        cat > Dockerfile << 'DOCKERFILE_EOF'
+# ================================================================
+# Aegis WAF — Lightweight Agent-Only Dockerfile (Compiler Fallback)
 # ================================================================
 FROM rust:slim-bookworm AS builder
 WORKDIR /app
@@ -235,6 +271,7 @@ ENV RUST_LOG=info
 
 CMD ["/app/aegis-waf", "--config", "/app/config.toml", "agent"]
 DOCKERFILE_EOF
+    fi
 
     log_success "Dockerfile generated."
 
