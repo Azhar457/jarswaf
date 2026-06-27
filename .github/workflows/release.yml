@@ -41,7 +41,7 @@ jobs:
       - name: Prepare Assets
         run: |
           mv target/release/aegis-waf aegis-waf-linux-amd64
-          cp target/bpfel-unknown-none/release/aegis-ebpf aegis-ebpf
+          cp aegis-ebpf/target/bpfel-unknown-none/release/aegis-ebpf aegis-ebpf
 
       - name: Upload Binaries to Release
         uses: softprops/action-gh-release@v2
