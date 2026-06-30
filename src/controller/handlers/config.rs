@@ -78,18 +78,22 @@ pub struct BackupEntry {
     pub size: u64,
 }
 
-pub async fn get_config_history_handler(
-    State(state): State<ControllerState>,
-) -> impl IntoResponse {
-    let parent = std::path::Path::new(&state.config_path).parent().unwrap_or_else(|| std::path::Path::new("."));
+pub async fn get_config_history_handler(State(state): State<ControllerState>) -> impl IntoResponse {
+    let parent = std::path::Path::new(&state.config_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     let backups_dir = parent.join("config_backups");
-    
+
     let mut backups = Vec::new();
     if let Ok(entries) = std::fs::read_dir(backups_dir) {
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
             if path.is_file() {
-                let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let filename = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 if filename.starts_with("config_") && filename.ends_with(".toml") {
                     let metadata = entry.metadata();
                     let size = metadata.map(|m| m.len()).unwrap_or(0);
@@ -97,7 +101,7 @@ pub async fn get_config_history_handler(
                         .trim_start_matches("config_")
                         .trim_end_matches(".toml")
                         .to_string();
-                    
+
                     backups.push(BackupEntry {
                         filename,
                         timestamp,
@@ -107,10 +111,10 @@ pub async fn get_config_history_handler(
             }
         }
     }
-    
+
     // Sort descending by timestamp (newest first)
     backups.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    
+
     (StatusCode::OK, Json(backups)).into_response()
 }
 
@@ -124,36 +128,50 @@ pub async fn post_config_rollback_handler(
     Json(payload): Json<RollbackPayload>,
 ) -> impl IntoResponse {
     let _lock = state.config_lock.lock().await;
-    
-    let parent = std::path::Path::new(&state.config_path).parent().unwrap_or_else(|| std::path::Path::new("."));
+
+    let parent = std::path::Path::new(&state.config_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     let backup_path = parent.join("config_backups").join(&payload.filename);
-    
+
     if !backup_path.exists() {
         return (StatusCode::NOT_FOUND, "Backup file not found").into_response();
     }
-    
+
     // Copy backup back to config path
     if let Err(e) = std::fs::copy(&backup_path, &state.config_path) {
         error!("Failed to restore config from {:?}: {:?}", backup_path, e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to restore config file").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to restore config file",
+        )
+            .into_response();
     }
-    
+
     // Reload configuration
     let cfg = match config::load_config(&state.config_path) {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to reload config after rollback: {:?}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load restored config").into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load restored config",
+            )
+                .into_response();
         }
     };
-    
-    // Update in-memory atomics
-    state.logging_enabled.store(cfg.logging.enabled, Ordering::Relaxed);
-    state.log_size_limit_mb.store(cfg.logging.max_size_mb, Ordering::Relaxed);
-    
+
+    // Update in-memory atomics (derive from config fields)
+    state
+        .logging_enabled
+        .store(cfg.logging.mode != "disabled", Ordering::Relaxed);
+    state
+        .log_size_limit_mb
+        .store(cfg.logging.max_log_size_mb, Ordering::Relaxed);
+
     // Broadcast updated config to all agents via config_tx
     let _ = state.config_tx.send(cfg);
-    
+
     StatusCode::OK.into_response()
 }
 

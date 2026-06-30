@@ -5,6 +5,7 @@
   import Card from "../components/ui/Card.svelte";
   import Badge from "../components/ui/Badge.svelte";
   import DataTable from "../components/ui/DataTable.svelte";
+  import Button from "../components/ui/Button.svelte";
   import ConfirmationModal from "../components/ui/ConfirmationModal.svelte";
   import AddCertificateModal from "../components/ui/AddCertificateModal.svelte";
 
@@ -138,75 +139,82 @@
   }
 </script>
 
-<div class="space-y-6">
-  <div class="flex items-start justify-between">
+<div class="space-y-6 max-h-full overflow-y-auto pr-1">
+  <div class="flex justify-between items-center gap-4">
     <div>
-      <h1 class="text-2xl font-bold text-slate-100 tracking-tight flex items-center gap-2">
-        <Lock class="text-blue-500" /> SSL Certificates (ACME Integration)
+      <h1 class="text-2xl font-bold text-slate-100 tracking-tight flex items-center gap-2 md:text-3xl">
+        <Lock class="text-blue-500" /> SSL Certificates (ACME)
       </h1>
-      <p class="text-slate-400 mt-1">
+      <p class="text-text-secondary text-sm mt-1">
         Manage TLS/SSL certificates and automatic Let's Encrypt renewals for your Virtual Hosts.
       </p>
     </div>
-    <button
+    <Button
+      variant="primary"
       on:click={() => (showAddModal = true)}
-      class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+      className="shrink-0"
     >
       Add SSL Certificate
-    </button>
+    </Button>
   </div>
 
-  <Card className="p-0 overflow-hidden border-slate-800">
+  <Card className="p-0 overflow-hidden">
     <DataTable columns={["Domain", "Issuer", "Expiry Date", "Status", "Actions"]}>
       {#if loading}
-        <tr
-          ><td colspan="5" class="px-6 py-8 text-center text-slate-500"
-            >Loading active certificates...</td
-          ></tr
-        >
+        <tr>
+          <td colspan="5" class="px-6 py-12 text-center text-text-muted">
+            <div class="flex items-center justify-center gap-2">
+              <RefreshCw class="animate-spin text-accent-blue" size={16} />
+              <span>Loading active certificates...</span>
+            </div>
+          </td>
+        </tr>
       {:else if certs.length === 0}
-        <tr
-          ><td colspan="5" class="px-6 py-8 text-center text-slate-500"
-            >No active ACME certificates found.</td
-          ></tr
-        >
+        <tr>
+          <td colspan="5" class="px-6 py-12 text-center text-text-muted italic select-none">
+            No active ACME certificates found.
+          </td>
+        </tr>
       {:else}
         {#each certs as cert}
-          <tr class="hover:bg-slate-700/30 transition-colors">
-            <td class="px-6 py-4 whitespace-nowrap text-slate-200 font-bold">{cert.domain}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-slate-400 text-sm">{cert.issuer}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-slate-400 text-sm font-mono">
+          <tr class="hover:bg-slate-900/20 border-b border-border-muted/40 last:border-0 transition-colors">
+            <td class="px-6 py-4 whitespace-nowrap text-text-primary font-bold">{cert.domain}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-text-secondary text-sm">{cert.issuer}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-text-secondary text-sm font-mono">
               {new Date(cert.valid_until).toLocaleDateString()}
-              <span class="text-slate-500 ml-1">
-                ({getDaysLeft(cert.valid_until)} days)
+              <span class="text-text-muted ml-1.5 text-xs font-semibold">
+                ({getDaysLeft(cert.valid_until)} days left)
               </span>
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
               {#if cert.status === "Active"}
-                <Badge variant="success" className="flex items-center gap-1"
-                  ><ShieldCheck size={12} /> {cert.status}</Badge
+                <Badge variant="success" className="flex items-center gap-1.5"
+                  ><ShieldCheck size={12} /> <span>{cert.status}</span></Badge
                 >
               {:else}
-                <Badge variant="warning" className="flex items-center gap-1"
-                  ><AlertTriangle size={12} /> {cert.status}</Badge
+                <Badge variant="warning" className="flex items-center gap-1.5"
+                  ><AlertTriangle size={12} /> <span>{cert.status}</span></Badge
                 >
               {/if}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-right">
-              <div class="flex justify-end gap-3">
-                <button
-                  on:click={() => forceRenew(cert.domain)}
+              <div class="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
                   disabled={renewingDomains[cert.domain]}
-                  class="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors disabled:opacity-50"
+                  on:click={() => forceRenew(cert.domain)}
+                  className="text-xs py-1 px-3 flex items-center gap-1.5"
                 >
-                  <RefreshCw size={14} class={renewingDomains[cert.domain] ? "animate-spin" : ""} /> Renew
-                </button>
-                <button
+                  <RefreshCw size={12} class={renewingDomains[cert.domain] ? "animate-spin" : ""} />
+                  <span>Renew</span>
+                </Button>
+                <Button
+                  variant="danger"
                   on:click={() => confirmRevoke(cert.domain)}
-                  class="text-xs font-bold text-red-500 hover:text-red-400 transition-colors"
+                  className="text-xs py-1 px-3"
                 >
                   Revoke
-                </button>
+                </Button>
               </div>
             </td>
           </tr>

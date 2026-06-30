@@ -3,35 +3,50 @@
 
   export let logs: { level: "INFO" | "ERROR" | "WARN"; message: string; timestamp: string }[] = [];
   export let className: string = "";
+  export let loading: boolean = false;
 </script>
 
 <Card className={`p-0 overflow-hidden ${className}`}>
-  <div class="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between">
+  <div class="bg-slate-900/60 border-b border-border-muted/80 px-4 py-3 flex items-center justify-between">
     <div class="flex items-center space-x-2">
-      <div class="w-3 h-3 rounded-full bg-red-500/20 flex items-center justify-center">
-        <div class="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+      <div class="w-3 h-3 rounded-full bg-error-bg flex items-center justify-center">
+        <div class="w-1.5 h-1.5 rounded-full bg-error"></div>
       </div>
-      <span class="text-xs font-medium text-slate-400">Terminal - Event Logs</span>
+      <span class="text-xs font-bold text-text-secondary uppercase tracking-wider">Live Security Events Terminal</span>
     </div>
   </div>
-  <div class="bg-slate-950 p-4 h-[300px] overflow-y-auto font-mono text-sm">
-    {#if logs.length === 0}
-      <div class="text-slate-500 italic text-center mt-10">No events recorded.</div>
-    {/if}
-    {#each logs as log}
-      <div class="mb-1 leading-relaxed">
-        <span class="text-slate-500 mr-2">[{log.timestamp}]</span>
-        <span
-          class={`font-semibold mr-2 ${
-            log.level === "ERROR"
-              ? "text-red-500"
-              : log.level === "WARN"
-                ? "text-amber-500"
-                : "text-emerald-500"
-          }`}>[{log.level}]</span
-        >
-        <span class="text-slate-300">{log.message}</span>
+  <div class="bg-slate-950/70 p-4 h-[350px] overflow-y-auto font-mono text-xs">
+    {#if loading}
+      {#each Array(8) as _}
+        <div class="mb-3 animate-pulse flex space-x-2">
+          <div class="h-4 bg-slate-800 rounded w-16"></div>
+          <div class="h-4 bg-slate-800 rounded w-10"></div>
+          <div class="h-4 bg-slate-800 rounded flex-1"></div>
+        </div>
+      {/each}
+    {:else if logs.length === 0}
+      <div class="flex flex-col items-center justify-center h-full text-text-muted italic gap-2 select-none">
+        <p>Listening for incoming requests...</p>
+        <div class="h-1.5 w-16 bg-slate-800 rounded-full overflow-hidden relative">
+          <div class="absolute inset-y-0 bg-accent-blue/60 w-1/3 rounded-full animate-pulse"></div>
+        </div>
       </div>
-    {/each}
+    {:else}
+      {#each logs as log}
+        <div class="mb-2 leading-relaxed border-b border-slate-900/40 pb-1.5 last:border-0 hover:bg-slate-900/20 px-1 rounded transition-colors duration-150">
+          <span class="text-text-muted font-medium mr-2">[{log.timestamp}]</span>
+          <span
+            class={`font-bold mr-2 ${
+              log.level === "ERROR"
+                ? "text-error"
+                : log.level === "WARN"
+                  ? "text-warning"
+                  : "text-success"
+            }`}>[{log.level}]</span
+          >
+          <span class="text-text-primary">{log.message}</span>
+        </div>
+      {/each}
+    {/if}
   </div>
 </Card>

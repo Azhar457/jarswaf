@@ -3,16 +3,16 @@
   export let className: string = "";
 </script>
 
-<div class={`overflow-x-auto ${className}`}>
-  <table class="w-full text-left text-sm text-slate-300">
-    <thead class="text-xs text-slate-400 uppercase bg-slate-800/50 border-b border-slate-700/800">
+<div class={`overflow-x-auto rounded-xl border border-border-muted bg-slate-950/20 ${className}`}>
+  <table class="w-full text-left text-sm text-text-secondary border-collapse">
+    <thead class="text-xs text-text-secondary uppercase bg-slate-900/40 border-b border-border-muted">
       <tr>
         {#each columns as col}
-          <th scope="col" class="px-6 py-4 font-medium tracking-wider">{col}</th>
+          <th scope="col" class="px-6 py-4.5 font-bold tracking-wider">{col}</th>
         {/each}
       </tr>
     </thead>
-    <tbody class="divide-y divide-slate-700/50">
+    <tbody class="divide-y divide-border-muted/50 text-text-primary">
       <slot />
     </tbody>
   </table>

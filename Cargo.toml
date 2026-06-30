@@ -45,13 +45,16 @@ maxminddb = "0.27.0"
 htmlescape = "0.3"
 unicode-normalization = "0.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
-pingora = "0.4.0"
+pingora = { version = "0.4.0", features = ["proxy"] }
+bytes = "1"
 pingora-core = "0.4.0"
 pingora-proxy = "0.4.0"
+pingora-http = "0.4.0"
 pingora-load-balancing = "0.4.0"
 arc-swap = "1.7.1"
 async-trait = "0.1.80"
 redis = { version = "0.25.3", features = ["tokio-comp"] }
+openssl = { version = "0.10", features = ["vendored"] }
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27", features = ["user"] } # for privilege dropping
 
@@ -59,14 +62,3 @@ nix = { version = "0.27", features = ["user"] } # for privilege dropping
 aya = { git = "https://github.com/aya-rs/aya", branch = "main" }
 aya-log = { git = "https://github.com/aya-rs/aya", branch = "main" }
 
-[profile.dev.package.jarswaf-ebpf]
-opt-level = "s"
-debug = false
-debug-assertions = false
-overflow-checks = false
-
-[profile.release.package.jarswaf-ebpf]
-opt-level = "s"
-debug = false
-debug-assertions = false
-overflow-checks = false

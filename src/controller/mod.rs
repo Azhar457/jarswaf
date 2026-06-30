@@ -32,9 +32,7 @@ pub async fn run_controller(port: u16, config_path: String) {
                 println!(
                     "========================================================================"
                 );
-                println!(
-                    "                   jarsWAF - SECURITY INITIALIZATION                  "
-                );
+                println!("                   jarsWAF - SECURITY INITIALIZATION                  ");
                 println!(
                     "========================================================================"
                 );
@@ -42,7 +40,9 @@ pub async fn run_controller(port: u16, config_path: String) {
                 println!("  ");
                 println!("  Admin Token:  \x1b[1;33m{}\x1b[0m", generated);
                 println!("  ");
-                println!("  IMPORTANT: Please copy and save this key in a safe place (e.g., Notepad).");
+                println!(
+                    "  IMPORTANT: Please copy and save this key in a safe place (e.g., Notepad)."
+                );
                 println!("  It is used to access the dashboard and register agents.");
                 println!("  This token will NOT be shown again.");
                 println!(

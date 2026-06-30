@@ -81,7 +81,11 @@ pub async fn post_ratelimits_handler(
     Json(policies): Json<Vec<config::RateLimitPolicy>>,
 ) -> impl IntoResponse {
     if let Err(msg) = validate_policies(&policies) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": msg}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response();
     }
 
     let _lock = state.config_lock.lock().await;

@@ -1,6 +1,11 @@
 use super::super::state::ControllerState;
 use crate::config;
-use axum::{extract::State, http::{StatusCode, HeaderMap}, response::IntoResponse, Json};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    Json,
+};
 use tracing::{error, info};
 
 pub async fn get_vhosts_handler(
@@ -53,7 +58,11 @@ pub async fn post_vhosts_handler(
     Json(vhosts): Json<Vec<config::VHost>>,
 ) -> impl IntoResponse {
     if let Err(msg) = validate_vhosts(&vhosts) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": msg}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response();
     }
 
     let _lock = state.config_lock.lock().await;

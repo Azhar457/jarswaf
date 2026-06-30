@@ -1,11 +1,10 @@
-use crate::{config, logging, pingora_proxy};
+use crate::{config, logging, proxy_engine};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
 #[cfg(unix)]
 use pingora::server::Server;
-#[cfg(unix)]
-use pingora::services::listening::Service;
+use pingora_proxy::http_proxy_service;
 
 // Shared application state for Agent
 #[derive(Clone)]
@@ -23,15 +22,15 @@ pub async fn run_server(cfg: &config::Config, state: AppState) {
     server.bootstrap();
 
     // Create our proxy instance
-    let proxy = pingora_proxy::JarsWafProxy {
+    let proxy = proxy_engine::JarsWafProxy {
         blocklist: state.blocklist.clone(),
         log_tx: state.log_tx.clone(),
     };
 
     // Store config in ArcSwap for lock-free reads in Pingora
-    pingora_proxy::GLOBAL_CONFIG.store(Arc::new(cfg.clone()));
+    proxy_engine::GLOBAL_CONFIG.store(Arc::new(cfg.clone()));
 
-    let mut proxy_service = pingora_proxy::http_proxy_service(&server.configuration, proxy);
+    let mut proxy_service = http_proxy_service(&server.configuration, proxy);
 
     // Bind HTTP
     let http_addr = format!("0.0.0.0:{}", cfg.global.port_http);
@@ -54,8 +53,8 @@ pub async fn run_server(cfg: &config::Config, state: AppState) {
                 }
             }
 
-            let cert_path = format!("{}/aegis-waf.crt", cfg.tls.cert_dir);
-            let key_path = format!("{}/aegis-waf.key", cfg.tls.cert_dir);
+            let cert_path = format!("{}/jarswaf.crt", cfg.tls.cert_dir);
+            let key_path = format!("{}/jarswaf.key", cfg.tls.cert_dir);
 
             if let Err(e) = ca.generate_and_save_pem(domains, &cert_path, &key_path) {
                 error!("Failed to generate server certificate: {:?}", e);

@@ -3,6 +3,8 @@ use std::fs;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
+    // NOTE: If you add fields with #[serde(default)],
+    // ensure they implement Default.
     pub global: GlobalConfig,
     pub tls: TlsConfig,
     #[serde(default)]
@@ -201,6 +203,46 @@ impl Default for LoggingModeConfig {
     }
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            global: GlobalConfig {
+                port_http: 80,
+                port_https: 443,
+                max_body_size: 10 * 1024 * 1024,
+                default_rate_limit: 600,
+                log_dir: "./logs".to_string(),
+                log_level: "security".to_string(),
+                trusted_proxies: None,
+                admin_token: None,
+                waf_enabled: true,
+            },
+            tls: TlsConfig {
+                mode: "disabled".to_string(),
+                cert_dir: "./certs".to_string(),
+            },
+            logging: LoggingModeConfig::default(),
+            components: ComponentsConfig::default(),
+            rate_limit_policies: Vec::new(),
+            vhosts: Vec::new(),
+            certificates: Vec::new(),
+            custom_rules: Vec::new(),
+            allowlists: Vec::new(),
+            blacklists: Vec::new(),
+            redis: RedisConfig::default(),
+        }
+    }
+}
+
+impl Default for RedisConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: "redis://127.0.0.1:6379".to_string(),
+        }
+    }
+}
+
 fn default_logging_mode() -> String {
     "sqlite".to_string()
 }
@@ -330,7 +372,9 @@ pub fn save_config(path: &str, cfg: &Config) -> Result<(), Box<dyn std::error::E
 
     // Create backup before renaming
     if std::path::Path::new(path).exists() {
-        let parent = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
+        let parent = std::path::Path::new(path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
         let backups_dir = parent.join("config_backups");
         let _ = fs::create_dir_all(&backups_dir);
 
@@ -340,10 +384,7 @@ pub fn save_config(path: &str, cfg: &Config) -> Result<(), Box<dyn std::error::E
 
         // Keep only the last 15 backups
         if let Ok(entries) = fs::read_dir(&backups_dir) {
-            let mut paths: Vec<_> = entries
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .collect();
+            let mut paths: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
             paths.sort();
             if paths.len() > 15 {
                 for old_path in paths.iter().take(paths.len() - 15) {

@@ -66,7 +66,7 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
                             Ok(new_cfg) => {
                                 if let Ok(mut lock) = config_arc_clone.write() {
                                     *lock = new_cfg.clone();
-                                    crate::pingora_proxy::GLOBAL_CONFIG.store(Arc::new(new_cfg));
+                                    crate::proxy_engine::GLOBAL_CONFIG.store(Arc::new(new_cfg));
                                     info!(
                                         "Configuration reloaded successfully from {}",
                                         config_path_clone

@@ -23,6 +23,8 @@
   import DataTable from "../components/ui/DataTable.svelte";
   import ConfirmationModal from "../components/ui/ConfirmationModal.svelte";
   import PresetDetailsModal from "../components/ui/PresetDetailsModal.svelte";
+  import Button from "../components/ui/Button.svelte";
+  import Input from "../components/ui/Input.svelte";
 
   const controllerUrl =
     typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
@@ -356,16 +358,7 @@
           enabled: true,
         },
       ];
-
-      // Auto-bind newly created rule to the selected vhost
-      if ($vhostsList.length > 0) {
-        const vhost = $vhostsList[selectedVhostIndex];
-        if (!vhost.custom_rules) vhost.custom_rules = [];
-        vhost.custom_rules = [...vhost.custom_rules, newId];
-        vhostsList.set($vhostsList);
-        await saveVhosts(true);
-      }
-      toast.success("New custom rule created and bound!");
+      toast.success("New custom rule created globally!");
     }
 
     await saveCustomRules();
@@ -373,128 +366,133 @@
   }
 
   function runSimulation() {
-    if (!testPayload) return;
+    if (!testPayload) {
+      toast.warning("Please enter a test payload.");
+      return;
+    }
+
     simulationResult = { status: "testing" };
+
     setTimeout(() => {
+      // Basic signature-based client-side simulator
       const payloadLower = testPayload.toLowerCase();
-      const host = $vhostsList[selectedVhostIndex];
-      const activeRules = host ? host.rules || [] : [];
+      let triggeredRule = "";
 
+      // SQLI
       if (
-        activeRules.includes("SQLI-*") &&
-        (payloadLower.includes("union select") || payloadLower.includes("or 1=1"))
+        payloadLower.includes("select") ||
+        payloadLower.includes("union") ||
+        payloadLower.includes("insert") ||
+        payloadLower.includes("' or") ||
+        payloadLower.includes("1=1")
       ) {
-        simulationResult = { status: "triggered", ruleName: "SQLI-*" };
-        return;
+        triggeredRule = "SQLI-001 (SQL Injection Pattern Detected)";
       }
-      if (
-        activeRules.includes("XSS-*") &&
-        (payloadLower.includes("<script") || payloadLower.includes("onload="))
+      // XSS
+      else if (
+        payloadLower.includes("<script") ||
+        payloadLower.includes("onerror") ||
+        payloadLower.includes("onload=") ||
+        payloadLower.includes("javascript:")
       ) {
-        simulationResult = { status: "triggered", ruleName: "XSS-*" };
-        return;
+        triggeredRule = "XSS-001 (Cross-Site Scripting Pattern Detected)";
       }
-      if (
-        activeRules.includes("LFI-*") &&
-        (payloadLower.includes("../") || payloadLower.includes("etc/passwd"))
+      // CMDI
+      else if (
+        payloadLower.includes("curl ") ||
+        payloadLower.includes("wget ") ||
+        payloadLower.includes("sh ") ||
+        payloadLower.includes("bash ") ||
+        payloadLower.includes("whoami")
       ) {
-        simulationResult = { status: "triggered", ruleName: "LFI-*" };
-        return;
+        triggeredRule = "CMDI-001 (OS Command Execution Pattern Detected)";
       }
-      if (
-        activeRules.includes("CMDI-*") &&
-        (payloadLower.includes("; rm ") || payloadLower.includes("&& "))
-      ) {
-        simulationResult = { status: "triggered", ruleName: "CMDI-*" };
-        return;
-      }
-
-      const activeCustomRules =
-        host && host.custom_rules
-          ? host.custom_rules
-              .map((id) => $customRulesList.find((r) => r.id === id))
-              .filter((r): r is any => r !== undefined && r.enabled)
-          : [];
-      for (const rule of activeCustomRules) {
-        let isMatch = false;
-        const matchVal = rule.condition_value.toLowerCase();
-        if (rule.operator === "equals") isMatch = payloadLower === matchVal;
-        else if (rule.operator === "starts_with") isMatch = payloadLower.startsWith(matchVal);
-        else isMatch = payloadLower.includes(matchVal);
-
-        if (isMatch) {
-          simulationResult = {
-            status: "triggered",
-            ruleName: `[${rule.name}]`,
-          };
-          return;
+      // Custom Rules
+      else {
+        for (const rule of $customRulesList) {
+          if (!rule.enabled || !isRuleBound(rule.id)) continue;
+          if (rule.condition_type === "body" && testPayload.includes(rule.condition_value)) {
+            triggeredRule = `${rule.id} (${rule.name})`;
+            break;
+          }
         }
       }
-      simulationResult = { status: "passed" };
-    }, 600);
+
+      if (triggeredRule) {
+        simulationResult = { status: "triggered", ruleName: triggeredRule };
+        toast.error(`WAF Triggered: Request blocked by ${triggeredRule}`);
+      } else {
+        simulationResult = { status: "passed" };
+        toast.success("Request passed successfully.");
+      }
+    }, 800);
   }
 </script>
 
-<div class="space-y-6">
+<div class="space-y-6 max-h-full overflow-y-auto pr-1">
   <!-- Header -->
-  <div>
-    <h1 class="text-2xl font-bold text-slate-100 tracking-tight">WAF Rules Engine</h1>
-    <p class="text-slate-400 mt-1">
-      Configure preset protection modules and user-defined custom logic rules.
-    </p>
-  </div>
+  <div class="flex justify-between items-center gap-4">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight text-white md:text-3xl">Security Engine</h1>
+      <p class="text-text-secondary text-sm mt-1">
+        Configure WAF Core Rule Sets (CRS) and custom detection rules per Virtual Host.
+      </p>
+    </div>
 
-  <!-- Domain Selector -->
-  <Card className="flex items-center gap-4 py-4">
-    <Globe class="text-blue-500" size={20} />
-    <span class="text-sm font-bold text-slate-400 uppercase tracking-wider"
-      >Select virtual host:</span
-    >
-    {#if $vhostsList.length > 0}
+    <!-- Active VHost Selector -->
+    <div class="flex items-center gap-3 shrink-0">
+      <span class="text-xs font-bold text-text-secondary uppercase tracking-wider hidden sm:inline">Active Host</span>
       <select
         bind:value={selectedVhostIndex}
-        class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500 text-blue-400 font-bold cursor-pointer min-w-[250px]"
+        class="bg-slate-950/50 border border-border-muted rounded-xl px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
       >
-        {#each $vhostsList as host, index}
-          <option value={index}>{host.hosts[0] || host.name}</option>
+        {#each $vhostsList as vhost, idx}
+          <option value={idx} class="bg-bg-secondary">{vhost.name} ({vhost.hosts[0] || "*"})</option>
         {/each}
       </select>
-    {:else}
-      <span class="text-sm font-mono text-red-500">No virtual hosts available</span>
-    {/if}
-  </Card>
+    </div>
+  </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- Main Left Panel (Spans 2 columns on Desktop) -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+    <!-- Left Column: Core Rule Set & Custom Rules List -->
     <div class="lg:col-span-2 space-y-6">
-      <!-- Preset Modules -->
-      <div>
-        <h2 class="text-lg font-semibold text-slate-200 mb-4">Preset Modules</h2>
+      <!-- WAF Modules Grid -->
+      <div class="space-y-4">
+        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+          <Shield size={18} class="text-accent-blue" />
+          <span>Core Rule Sets (CRS)</span>
+        </h2>
+        
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           {#each presetGroups as group}
-            {@const hostRules = $vhostsList[selectedVhostIndex]
-              ? $vhostsList[selectedVhostIndex].rules || []
-              : []}
-            {@const isEnabled = hostRules.includes(group.rule_pattern)}
-            <Card className="p-4 flex flex-col gap-3">
-              <div class="flex items-start justify-between">
-                <div class="flex items-center gap-3">
-                  <div class="p-2 bg-slate-900 rounded-lg text-slate-400">
-                    <svelte:component this={group.icon} size={18} />
-                  </div>
-                  <div>
-                    <h4 class="font-bold text-sm text-slate-200">{group.name}</h4>
-                    <div class="flex items-center gap-2 mt-0.5">
-                      <p class="text-xs text-slate-500">{group.rules.length} signatures</p>
-                      <button
-                        on:click={() => openPresetDetails(group)}
-                        class="text-xs text-blue-400 hover:text-blue-300 font-medium hover:underline transition-colors"
-                        >Details</button
-                      >
-                    </div>
-                  </div>
+            {@const isEnabled = $vhostsList[selectedVhostIndex]?.rules?.includes(group.rule_pattern) || false}
+            <Card
+              className="flex items-center p-5 border-border-muted transition-all duration-200"
+              interactive={true}
+            >
+              <div
+                class="p-3 bg-slate-950/60 border border-border-muted/80 rounded-2xl text-text-muted hover:text-accent-blue transition-colors shadow-inner mr-4 shrink-0"
+              >
+                <svelte:component this={group.icon} size={20} />
+              </div>
+              <div class="flex-1 min-w-0 pr-4">
+                <div class="flex items-center gap-2">
+                  <h3 class="font-bold text-white text-sm truncate">{group.name}</h3>
+                  <span class={`text-[9px] font-extrabold px-1.5 py-0.5 rounded tracking-wider ${group.severity === "CRITICAL" ? "bg-red-500/10 text-red-500 border border-red-500/20" : group.severity === "HIGH" ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "bg-blue-500/10 text-blue-500 border border-blue-500/20"}`}>
+                    {group.severity}
+                  </span>
                 </div>
-                <label class="relative inline-flex items-center cursor-pointer">
+                <button
+                  on:click={() => openPresetDetails(group)}
+                  class="text-xs text-accent-blue hover:text-accent-blue-hover font-semibold transition-colors mt-1 hover:underline cursor-pointer border-none bg-transparent"
+                >
+                  Manage granular rules
+                </button>
+              </div>
+
+              <!-- Switch -->
+              <div class="flex items-center">
+                <label class="inline-flex relative items-center cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={isEnabled}
@@ -502,7 +500,7 @@
                     class="sr-only peer"
                   />
                   <div
-                    class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
+                    class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-800 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-blue"
                   ></div>
                 </label>
               </div>
@@ -512,20 +510,25 @@
       </div>
 
       <!-- Custom Rules Table -->
-      <div>
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-slate-200">Custom Rules</h2>
-          <button
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <Terminal size={18} class="text-accent-blue" />
+            <span>VHost Custom Rules</span>
+          </h2>
+          <Button
             on:click={() => (showForm = !showForm)}
-            class="bg-slate-800 hover:bg-slate-700 text-blue-400 text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-slate-700 flex items-center gap-2"
+            variant="secondary"
+            className="text-xs py-1.5 px-3 flex items-center gap-1.5"
           >
             {#if showForm}
-              Cancel
+              <span>Cancel</span>
             {:else}
-              <Plus size={16} /> Build Rule
+              <Plus size={14} /> <span>Build Rule</span>
             {/if}
-          </button>
+          </Button>
         </div>
+        
         <Card className="p-0 overflow-hidden">
           <DataTable
             columns={["ID", "Rule Name", "Condition", "Action", "Enabled", "Active", "Options"]}
@@ -533,14 +536,13 @@
             {#if $customRulesList && $customRulesList.length > 0}
               {#each $customRulesList as rule}
                 <tr
-                  class="hover:bg-slate-700/30 transition-colors {rule.enabled ? '' : 'opacity-50'}"
+                  class="hover:bg-slate-900/20 border-b border-border-muted/40 last:border-0 transition-colors {rule.enabled ? '' : 'opacity-40'}"
                 >
-                  <td class="px-6 py-4 whitespace-nowrap text-blue-400 font-mono text-xs"
+                  <td class="px-6 py-4 whitespace-nowrap text-accent-blue font-mono text-xs font-bold"
                     >{rule.id}</td
                   >
-                  <td class="px-6 py-4 whitespace-nowrap text-slate-200 font-medium">{rule.name}</td
-                  >
-                  <td class="px-6 py-4 whitespace-nowrap text-slate-400 font-mono text-xs"
+                  <td class="px-6 py-4 whitespace-nowrap text-text-primary font-bold text-sm">{rule.name}</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-text-secondary font-mono text-xs"
                     >{displayCondition(rule)}</td
                   >
                   <td class="px-6 py-4 whitespace-nowrap">
@@ -553,7 +555,7 @@
                       type="checkbox"
                       checked={rule.enabled}
                       on:change={() => toggleRuleGlobalEnabled(rule.id)}
-                      class="rounded border-slate-600 bg-slate-800 text-emerald-500 cursor-pointer"
+                      class="rounded border-border-muted bg-slate-950 text-success focus:ring-success cursor-pointer"
                     />
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-center">
@@ -561,29 +563,35 @@
                       type="checkbox"
                       checked={isRuleBound(rule.id)}
                       on:change={() => toggleCustomRule(rule.id)}
-                      class="rounded border-slate-600 bg-slate-800 text-blue-500 cursor-pointer"
+                      class="rounded border-border-muted bg-slate-950 text-accent-blue focus:ring-accent-blue cursor-pointer"
                       disabled={$vhostsList.length === 0}
                     />
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-right">
-                    <div class="flex justify-end gap-3">
-                      <button
+                    <div class="flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
                         on:click={() => editRule(rule)}
-                        class="text-slate-400 hover:text-blue-400 transition-colors"
-                        ><Edit2 size={16} /></button
+                        className="p-1.5 text-text-muted hover:text-accent-blue rounded-xl"
+                        title="Edit"
                       >
-                      <button
+                        <Edit2 size={15} />
+                      </Button>
+                      <Button
+                        variant="ghost"
                         on:click={() => confirmDeleteRule(rule.id)}
-                        class="text-slate-400 hover:text-red-400 transition-colors"
-                        ><Trash2 size={16} /></button
+                        className="p-1.5 text-text-muted hover:text-error rounded-xl"
+                        title="Delete"
                       >
+                        <Trash2 size={15} />
+                      </Button>
                     </div>
                   </td>
                 </tr>
               {/each}
             {:else}
               <tr>
-                <td colspan="7" class="px-6 py-8 text-center text-slate-500 italic"
+                <td colspan="7" class="px-6 py-12 text-center text-text-muted italic select-none"
                   >No custom rules defined. Click "Build Rule" to add one.</td
                 >
               </tr>
@@ -596,13 +604,11 @@
     <!-- Right Panel: Rule Builder Form & Sandbox -->
     <div class="space-y-6">
       {#if showForm}
-        <Card
-          className="flex flex-col gap-4 border-blue-500/30 shadow-lg shadow-blue-500/10 transition-all"
-        >
-          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h3 class="font-bold text-slate-200 flex items-center gap-2">
-              <Terminal size={18} class="text-blue-400" />
-              {editingRuleId ? "Edit Rule" : "New Custom Rule"}
+        <Card className="flex flex-col gap-4 border-accent-blue/30 shadow-glow-blue/5">
+          <div class="flex items-center justify-between border-b border-border-muted/80 pb-3">
+            <h3 class="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+              <Terminal size={16} class="text-accent-blue" />
+              <span>{editingRuleId ? "Edit Custom Rule" : "New Custom Rule"}</span>
             </h3>
             {#if editingRuleId}
               <Badge variant="primary">{editingRuleId}</Badge>
@@ -610,184 +616,167 @@
           </div>
 
           <div class="space-y-4">
-            <div class="flex flex-col gap-1.5">
-              <label
-                for="custom_rule_name"
-                class="text-xs uppercase tracking-wider text-slate-500 font-bold">Rule Name</label
-              >
-              <input
-                id="custom_rule_name"
-                type="text"
-                placeholder="e.g. Block login scanner"
-                bind:value={ruleName}
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-blue-500 outline-none transition-colors"
-              />
-            </div>
+            <Input
+              id="custom_rule_name"
+              label="Rule Name"
+              bind:value={ruleName}
+              placeholder="e.g. Block login scanner"
+              required={true}
+            />
 
             <div class="grid grid-cols-2 gap-3">
-              <div class="flex flex-col gap-1.5">
-                <label
-                  for="custom_rule_field"
-                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
-                  >Target Field</label
-                >
+              <div class="space-y-1.5">
+                <label for="custom_rule_field" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                  Target Field
+                </label>
                 <select
                   id="custom_rule_field"
                   bind:value={conditionFieldType}
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-blue-500 outline-none"
+                  class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
                 >
-                  <option value="path">URL Path</option>
-                  <option value="query">Query Param</option>
-                  <option value="body">Request Body</option>
-                  <option value="header">HTTP Header</option>
+                  <option value="path" class="bg-bg-secondary">URL Path</option>
+                  <option value="query" class="bg-bg-secondary">Query Param</option>
+                  <option value="body" class="bg-bg-secondary">Request Body</option>
+                  <option value="header" class="bg-bg-secondary">HTTP Header</option>
                 </select>
               </div>
-              <div class="flex flex-col gap-1.5">
-                <label
-                  for="custom_rule_op"
-                  class="text-xs uppercase tracking-wider text-slate-500 font-bold">Operator</label
-                >
+
+              <div class="space-y-1.5">
+                <label for="custom_rule_op" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                  Operator
+                </label>
                 <select
                   id="custom_rule_op"
                   bind:value={operator}
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-blue-500 outline-none"
+                  class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
                 >
-                  <option value="contains">Contains</option>
-                  <option value="equals">Equals exactly</option>
-                  <option value="starts_with">Starts with</option>
+                  <option value="contains" class="bg-bg-secondary">Contains</option>
+                  <option value="equals" class="bg-bg-secondary">Equals exactly</option>
+                  <option value="starts_with" class="bg-bg-secondary">Starts with</option>
                 </select>
               </div>
             </div>
 
             {#if conditionFieldType === "header"}
-              <div class="flex flex-col gap-1.5">
-                <label
-                  for="custom_rule_header"
-                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
-                  >Header Name</label
-                >
-                <input
-                  id="custom_rule_header"
-                  type="text"
-                  placeholder="e.g. User-Agent"
-                  bind:value={customHeaderName}
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:border-blue-500 outline-none"
-                />
-              </div>
+              <Input
+                id="custom_rule_header"
+                label="Header Name"
+                bind:value={customHeaderName}
+                placeholder="e.g. User-Agent"
+                required={true}
+                className="font-mono text-xs"
+              />
             {/if}
 
-            <div class="flex flex-col gap-1.5">
-              <label
-                for="custom_rule_val"
-                class="text-xs uppercase tracking-wider text-slate-500 font-bold">Match Value</label
-              >
-              <input
-                id="custom_rule_val"
-                type="text"
-                placeholder="e.g. /wp-admin"
-                bind:value={conditionValue}
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:border-blue-500 outline-none"
-              />
-            </div>
+            <Input
+              id="custom_rule_val"
+              label="Match Value"
+              bind:value={conditionValue}
+              placeholder="e.g. /wp-admin"
+              required={true}
+              className="font-mono text-xs"
+            />
 
-            <div class="flex flex-col gap-1.5 border-t border-slate-800 pt-4 mt-2">
-              <label
-                for="custom_rule_action"
-                class="text-xs uppercase tracking-wider text-slate-500 font-bold">Action</label
-              >
+            <div class="space-y-1.5 border-t border-border-muted/80 pt-4 mt-2">
+              <label for="custom_rule_action" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                Action
+              </label>
               <select
                 id="custom_rule_action"
                 bind:value={action}
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-blue-500 outline-none font-bold"
+                class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all font-bold"
               >
-                <option value="block">Block (403)</option>
-                <option value="redirect">Redirect (302)</option>
+                <option value="block" class="bg-bg-secondary">Block (403)</option>
+                <option value="redirect" class="bg-bg-secondary">Redirect (302)</option>
               </select>
             </div>
 
             {#if action === "redirect"}
-              <div class="flex flex-col gap-1.5">
-                <label
-                  for="custom_rule_redirect"
-                  class="text-xs uppercase tracking-wider text-slate-500 font-bold"
-                  >Redirect URL</label
-                >
-                <input
-                  id="custom_rule_redirect"
-                  type="text"
-                  placeholder="http://..."
-                  bind:value={redirectUrl}
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:border-blue-500 outline-none"
-                />
-              </div>
+              <Input
+                id="custom_rule_redirect"
+                label="Redirect URL"
+                bind:value={redirectUrl}
+                placeholder="http://..."
+                required={true}
+                className="font-mono text-xs"
+              />
             {/if}
           </div>
 
           <div class="flex gap-3 pt-2">
-            <button
+            <Button
               on:click={cancelEdit}
-              class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors"
-              >Cancel</button
+              variant="secondary"
+              className="flex-1"
             >
-            <button
+              Cancel
+            </Button>
+            <Button
               on:click={handleSaveCustomRule}
-              class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg transition-colors shadow-lg shadow-blue-500/20"
-              >Save Rule</button
+              variant="primary"
+              className="flex-1"
             >
+              Save Rule
+            </Button>
           </div>
         </Card>
       {/if}
 
       <!-- Sandbox -->
       <Card className="flex flex-col gap-4">
-        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-          <h3 class="font-bold text-slate-200 flex items-center gap-2">
-            <Play size={18} class="text-emerald-400" /> Sandbox Simulator
+        <div class="flex items-center justify-between border-b border-border-muted pb-3">
+          <h3 class="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+            <Play size={16} class="text-success" />
+            <span>Sandbox Simulator</span>
           </h3>
         </div>
-        <p class="text-xs text-slate-500">
-          Test payloads against active modules and custom rules instantly.
+        <p class="text-xs text-text-secondary">
+          Test traffic payloads against active core modules and custom rules instantly.
         </p>
 
         <div class="relative">
           <textarea
             bind:value={testPayload}
-            class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm font-mono text-slate-300 focus:border-emerald-500 outline-none h-24 resize-none transition-colors"
-            placeholder="Paste malicious payload here..."
+            class="w-full bg-slate-950/50 border border-border-muted rounded-xl p-3 text-xs font-mono text-text-primary focus:outline-none focus:ring-2 focus:ring-success/50 focus:border-success h-28 resize-none transition-colors"
+            placeholder="Paste malicious request payload here..."
           ></textarea>
-          <button
+          <Button
             on:click={runSimulation}
-            class="absolute bottom-3 right-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 p-2 rounded-lg transition-colors border border-slate-700"
-            ><Play size={16} /></button
+            variant="secondary"
+            className="absolute bottom-3 right-3 p-2 rounded-lg border border-border-muted shadow-md text-success hover:bg-slate-900/65"
           >
+            <Play size={14} />
+          </Button>
         </div>
 
         {#if simulationResult.status === "testing"}
           <div
-            class="p-3 bg-slate-800 rounded-lg text-center text-slate-400 text-xs flex justify-center items-center gap-2 animate-pulse"
+            class="p-3 bg-slate-950/30 rounded-xl border border-border-muted text-center text-text-secondary text-xs flex justify-center items-center gap-2 animate-pulse"
           >
             <div
-              class="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"
+              class="w-4 h-4 border-2 border-success border-t-transparent rounded-full animate-spin"
             ></div>
-            Simulating...
+            <span>Running Simulation...</span>
           </div>
         {:else if simulationResult.status === "triggered"}
           <div
-            class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center justify-between"
+            class="p-3 bg-error-bg border border-error/20 rounded-xl flex items-center justify-between"
           >
-            <div class="flex items-center gap-2 text-red-400 font-bold text-xs">
-              <AlertTriangle size={16} /> BLOCKED
+            <div class="flex items-center gap-2 text-error font-bold text-xs">
+              <AlertTriangle size={15} />
+              <span>BLOCKED</span>
             </div>
             <span
-              class="text-slate-400 text-xs font-mono truncate max-w-[150px]"
+              class="text-text-secondary text-xs font-mono truncate max-w-[180px] font-bold"
               title={simulationResult.ruleName}>{simulationResult.ruleName}</span
             >
           </div>
         {:else if simulationResult.status === "passed"}
           <div
-            class="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg flex items-center gap-2 text-emerald-400 font-bold text-xs"
+            class="p-3 bg-success-bg border border-success/20 rounded-xl flex items-center gap-2 text-success font-bold text-xs"
           >
-            <CheckCircle size={16} /> ALLOWED (No triggers)
+            <CheckCircle size={15} />
+            <span>ALLOWED (No triggers)</span>
           </div>
         {/if}
       </Card>

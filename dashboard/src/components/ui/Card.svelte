@@ -1,7 +1,8 @@
 <script lang="ts">
   export let className: string = "";
+  export let interactive: boolean = false;
 </script>
 
-<div class={`bg-slate-800 border border-slate-700/800 rounded-xl p-4 shadow-lg ${className}`}>
+<div class={`${interactive ? 'glass-panel-interactive' : 'glass-panel'} rounded-2xl p-6 ${className}`}>
   <slot />
 </div>
