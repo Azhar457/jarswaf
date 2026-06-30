@@ -68,7 +68,7 @@ pub async fn run_server(cfg: &config::Config, state: AppState) {
                 let cert_path_str: &str = &cert_path;
                 let key_path_str: &str = &key_path;
                 if let Err(e) = proxy_service.add_tls(&https_addr, cert_path_str, key_path_str) {
-                    error!("Failed to bind TLS listener on {}: {:?}", https_addr, e);
+                    error!("Failed to bind TLS listener: {:?}", e);
                 }
             }
         }
