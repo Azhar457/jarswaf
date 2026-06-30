@@ -1,34 +1,38 @@
 use crate::config::{Config, VHost};
 
 /// Helper to match host against a pattern (supports wildcard '*')
+/// Uses `eq_ignore_ascii_case` to avoid allocations from `to_lowercase()`.
 fn match_pattern(host: &str, pattern: &str) -> bool {
     if pattern == "_" {
         return true;
     }
 
-    let host = host.trim().to_lowercase();
-    let pattern = pattern.trim().to_lowercase();
+    let host = host.trim();
+    let pattern = pattern.trim();
 
     if pattern.contains('*') {
         if pattern.starts_with('*') {
             // E.g., *.domainsaya.my.id -> matches sub.domainsaya.my.id
-            let suffix = pattern.trim_start_matches('*');
-            host.ends_with(suffix)
+            let suffix = &pattern[1..];
+            host.len() >= suffix.len()
+                && host[host.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
         } else if pattern.ends_with('*') {
             // E.g., admin.* -> matches admin.domainsaya.my.id
-            let prefix = pattern.trim_end_matches('*');
-            host.starts_with(prefix)
+            let prefix = &pattern[..pattern.len() - 1];
+            host.len() >= prefix.len() && host[..prefix.len()].eq_ignore_ascii_case(prefix)
         } else {
             // Middle wildcard, e.g., api.*.example.com
             let parts: Vec<&str> = pattern.split('*').collect();
             if parts.len() == 2 {
-                host.starts_with(parts[0]) && host.ends_with(parts[1])
+                host.len() >= parts[0].len() + parts[1].len()
+                    && host[..parts[0].len()].eq_ignore_ascii_case(parts[0])
+                    && host[host.len() - parts[1].len()..].eq_ignore_ascii_case(parts[1])
             } else {
-                host == pattern
+                host.eq_ignore_ascii_case(pattern)
             }
         }
     } else {
-        host == pattern
+        host.eq_ignore_ascii_case(pattern)
     }
 }
 
