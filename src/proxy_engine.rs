@@ -100,7 +100,9 @@ impl ProxyHttp for JarsWafProxy {
             let req_method = req_header.method.as_str().to_string();
             let path = req_header.uri.path().to_string();
             let query_str = req_header.uri.query().unwrap_or("").to_string();
-            let host = req_header.headers.get("host")
+            let host = req_header
+                .headers
+                .get("host")
                 .and_then(|h| h.to_str().ok())
                 .map(|s| s.to_string());
 
@@ -241,11 +243,9 @@ impl ProxyHttp for JarsWafProxy {
                 let pat = pat.trim();
                 if pat == "/*" || pat == "*" {
                     true
-                } else if pat.ends_with("/*") {
-                    let prefix = &pat[..pat.len() - 2];
+                } else if let Some(prefix) = pat.strip_suffix("/*") {
                     path.starts_with(prefix)
-                } else if pat.starts_with("*.") {
-                    let ext = &pat[2..];
+                } else if let Some(ext) = pat.strip_prefix("*.") {
                     path.ends_with(ext)
                 } else {
                     path == pat
@@ -342,7 +342,12 @@ impl ProxyHttp for JarsWafProxy {
             let stripped = backend.trim_start_matches("https://");
             let clean_host = stripped.split(':').next().unwrap_or(stripped);
             let p = if stripped.contains(':') {
-                stripped.split(':').last().unwrap().parse().unwrap_or(443)
+                stripped
+                    .split(':')
+                    .next_back()
+                    .unwrap()
+                    .parse()
+                    .unwrap_or(443)
             } else {
                 443
             };
@@ -351,7 +356,12 @@ impl ProxyHttp for JarsWafProxy {
             let stripped = backend.trim_start_matches("http://");
             let clean_host = stripped.split(':').next().unwrap_or(stripped);
             let p = if stripped.contains(':') {
-                stripped.split(':').last().unwrap().parse().unwrap_or(80)
+                stripped
+                    .split(':')
+                    .next_back()
+                    .unwrap()
+                    .parse()
+                    .unwrap_or(80)
             } else {
                 80
             };
@@ -359,7 +369,12 @@ impl ProxyHttp for JarsWafProxy {
         } else {
             let clean_host = backend.split(':').next().unwrap_or(&backend);
             let p = if backend.contains(':') {
-                backend.split(':').last().unwrap().parse().unwrap_or(80)
+                backend
+                    .split(':')
+                    .next_back()
+                    .unwrap()
+                    .parse()
+                    .unwrap_or(80)
             } else {
                 80
             };
@@ -385,7 +400,7 @@ impl ProxyHttp for JarsWafProxy {
         if let Some(ip) = ctx.client_ip {
             upstream_request
                 .insert_header("X-Forwarded-For", ip.to_string())
-                .unwrap_or_else(|_| ());
+                .unwrap_or_else(());
         }
         Ok(())
     }
@@ -481,7 +496,9 @@ impl ProxyHttp for JarsWafProxy {
                 let path = req_header.uri.path().to_string();
                 let query = req_header.uri.query().unwrap_or("").to_string();
                 let method = req_header.method.as_str().to_string();
-                let host = req_header.headers.get("host")
+                let host = req_header
+                    .headers
+                    .get("host")
                     .and_then(|h| h.to_str().ok())
                     .map(|s| s.to_string());
 

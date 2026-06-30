@@ -271,10 +271,8 @@ impl RuleEngine {
                 _ => false,
             };
 
-            if matched {
-                if rule.action == "block" {
-                    return Some((rule.id.clone(), format!("Custom rule block: {}", rule.name)));
-                }
+            if matched && rule.action == "block" {
+                return Some((rule.id.clone(), format!("Custom rule block: {}", rule.name)));
             }
         }
 
@@ -875,7 +873,7 @@ impl RuleEngine {
             }
 
             if let Some(client) = &*client_guard {
-                if let Ok(mut conn) = client.get_async_connection().await {
+                if let Ok(mut conn) = client.get_multiplexed_async_connection().await {
                     let now_bucket = chrono::Utc::now().timestamp() / 60;
                     let key = format!("ratelimit:{}:{}", ip, now_bucket);
 
