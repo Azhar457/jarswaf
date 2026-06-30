@@ -1,7 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { AlertTriangle, X } from "lucide-svelte";
+  import { AlertTriangle } from "lucide-svelte";
   import { fade, fly } from "svelte/transition";
+  import Button from "./Button.svelte";
 
   export let show = false;
   export let title = "Confirm Action";
@@ -25,38 +26,38 @@
 
 {#if show}
   <div
-    class="fixed inset-0 z-200 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm"
+    class="fixed inset-0 z-200 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
     in:fade={{ duration: 200 }}
     out:fade={{ duration: 150 }}
   >
     <div
-      class="bg-slate-900 border border-slate-700 w-full max-w-md rounded-xl shadow-2xl overflow-hidden"
+      class="bg-bg-secondary border border-border-muted w-full max-w-md rounded-2xl shadow-premium overflow-hidden"
       in:fly={{ y: 20, duration: 300 }}
     >
       <div class="p-6">
         <div class="flex items-start gap-4">
-          <div class="p-3 bg-red-500/10 text-red-400 rounded-full shrink-0">
+          <div class="p-3 bg-error-bg text-error rounded-full shrink-0 border border-error/10">
             <AlertTriangle size={24} />
           </div>
           <div class="flex-1">
-            <h3 class="text-lg font-bold text-slate-100 mb-2">{title}</h3>
-            <p class="text-slate-400 text-sm leading-relaxed">{message}</p>
+            <h3 class="text-lg font-bold text-white mb-2">{title}</h3>
+            <p class="text-text-secondary text-sm leading-relaxed">{message}</p>
           </div>
         </div>
       </div>
-      <div class="bg-slate-950/50 px-6 py-4 border-t border-slate-800 flex justify-end gap-3">
-        <button
+      <div class="bg-slate-900/20 px-6 py-4 border-t border-border-muted flex justify-end gap-3">
+        <Button
+          variant="ghost"
           on:click={onCancel}
-          class="px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 rounded-lg transition-colors"
         >
           {cancelText}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="danger"
           on:click={onConfirm}
-          class="px-4 py-2 text-sm font-bold bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors shadow-lg shadow-red-500/20"
         >
           {confirmText}
-        </button>
+        </Button>
       </div>
     </div>
   </div>

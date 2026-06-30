@@ -5,8 +5,6 @@ use axum::{
         ws::{WebSocket, WebSocketUpgrade},
         State,
     },
-    http::Request,
-    body::Body,
     response::IntoResponse,
 };
 use std::sync::atomic::Ordering;
@@ -14,25 +12,15 @@ use tracing::info;
 
 pub async fn ws_dashboard_handler(
     ws: WebSocketUpgrade,
-    req: Request<Body>,
     State(state): State<ControllerState>,
 ) -> impl IntoResponse {
-    let mut ws = ws;
-    if let Some(protocol) = req.headers().get("sec-websocket-protocol").and_then(|h| h.to_str().ok()) {
-        ws = ws.protocols(protocol.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>());
-    }
     ws.on_upgrade(|socket| handle_dashboard_socket(socket, state))
 }
 
 pub async fn ws_agent_handler(
     ws: WebSocketUpgrade,
-    req: Request<Body>,
     State(state): State<ControllerState>,
 ) -> impl IntoResponse {
-    let mut ws = ws;
-    if let Some(protocol) = req.headers().get("sec-websocket-protocol").and_then(|h| h.to_str().ok()) {
-        ws = ws.protocols(protocol.split(',').map(|p| p.trim().to_string()).collect::<Vec<_>>());
-    }
     ws.on_upgrade(|socket| handle_agent_socket(socket, state))
 }
 

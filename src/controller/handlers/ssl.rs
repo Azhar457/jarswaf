@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(serde::Serialize)]
 pub struct SslCertResponse {
@@ -78,7 +78,11 @@ pub async fn post_ssl_certificate_handler(
     Json(payload): Json<SslCreateRequest>,
 ) -> impl IntoResponse {
     if let Err(msg) = validate_ssl_request(&payload) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": msg}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response();
     }
 
     let _lock = state.config_lock.lock().await;
@@ -182,19 +186,25 @@ pub async fn post_ssl_renew_handler(
     let token = uuid::Uuid::new_v4().simple().to_string();
     let key_auth = format!("{}.key_auth_data_mock_challenge", token);
 
-    crate::pingora_proxy::ACME_CHALLENGES.insert(token.clone(), key_auth.clone());
+    crate::proxy_engine::ACME_CHALLENGES.insert(token.clone(), key_auth.clone());
 
     // Perform self-test of the HTTP-01 challenge locally
     let client = reqwest::Client::new();
     let self_challenge_url = format!("http://127.0.0.1/.well-known/acme-challenge/{}", token);
-    
+
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        tracing::info!("ACME server simulating challenge polling: {}", self_challenge_url);
+        tracing::info!(
+            "ACME server simulating challenge polling: {}",
+            self_challenge_url
+        );
         if let Ok(resp) = client.get(&self_challenge_url).send().await {
             if let Ok(body) = resp.text().await {
                 if body == key_auth {
-                    tracing::info!("ACME HTTP-01 Challenge verified successfully for domain: {}", payload.domain);
+                    tracing::info!(
+                        "ACME HTTP-01 Challenge verified successfully for domain: {}",
+                        payload.domain
+                    );
                 } else {
                     tracing::warn!("ACME HTTP-01 Challenge verification failed: invalid body");
                 }

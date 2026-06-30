@@ -16,11 +16,13 @@ pub async fn get_allowlists_handler(State(state): State<ControllerState>) -> imp
 
 fn validate_allowlists(rules: &[config::AllowlistRule]) -> Result<(), &'static str> {
     for rule in rules {
-        if rule.ip.trim().is_empty() {
-            return Err("IP address cannot be empty");
-        }
-        if rule.ip.parse::<std::net::IpAddr>().is_err() && !rule.ip.contains('/') {
-            return Err("Invalid IP address or CIDR format");
+        for ip in &rule.ips {
+            if ip.trim().is_empty() {
+                return Err("IP address cannot be empty");
+            }
+            if ip.parse::<std::net::IpAddr>().is_err() && !ip.contains('/') {
+                return Err("Invalid IP address or CIDR format");
+            }
         }
     }
     Ok(())
@@ -31,7 +33,11 @@ pub async fn post_allowlists_handler(
     Json(allowlists): Json<Vec<config::AllowlistRule>>,
 ) -> impl IntoResponse {
     if let Err(msg) = validate_allowlists(&allowlists) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": msg}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response();
     }
 
     let _lock = state.config_lock.lock().await;
@@ -79,11 +85,13 @@ pub async fn get_blacklists_handler(State(state): State<ControllerState>) -> imp
 
 fn validate_blacklists(rules: &[config::BlacklistRule]) -> Result<(), &'static str> {
     for rule in rules {
-        if rule.ip.trim().is_empty() {
-            return Err("IP address cannot be empty");
-        }
-        if rule.ip.parse::<std::net::IpAddr>().is_err() && !rule.ip.contains('/') {
-            return Err("Invalid IP address or CIDR format");
+        for ip in &rule.ips {
+            if ip.trim().is_empty() {
+                return Err("IP address cannot be empty");
+            }
+            if ip.parse::<std::net::IpAddr>().is_err() && !ip.contains('/') {
+                return Err("Invalid IP address or CIDR format");
+            }
         }
     }
     Ok(())
@@ -94,7 +102,11 @@ pub async fn post_blacklists_handler(
     Json(blacklists): Json<Vec<config::BlacklistRule>>,
 ) -> impl IntoResponse {
     if let Err(msg) = validate_blacklists(&blacklists) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": msg}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response();
     }
 
     let _lock = state.config_lock.lock().await;

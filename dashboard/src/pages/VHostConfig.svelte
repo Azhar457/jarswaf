@@ -4,6 +4,8 @@
   import DataTable from "../components/ui/DataTable.svelte";
   import Badge from "../components/ui/Badge.svelte";
   import ConfirmationModal from "../components/ui/ConfirmationModal.svelte";
+  import Button from "../components/ui/Button.svelte";
+  import Input from "../components/ui/Input.svelte";
   import { toast } from "../lib/toast";
 
   import { vhostsList, token, agents } from "../lib/stores";
@@ -184,186 +186,178 @@
   }
 </script>
 
-<div class="space-y-6">
+<div class="space-y-6 max-h-full overflow-y-auto pr-1">
   <!-- Header -->
-  <div class="flex justify-between items-center">
+  <div class="flex justify-between items-center gap-4">
     <div>
-      <h1 class="text-2xl font-bold text-slate-100 tracking-tight">Virtual Hosts</h1>
-      <p class="text-slate-400 mt-1">Manage upstream proxies and security policies per domain.</p>
+      <h1 class="text-2xl font-bold tracking-tight text-white md:text-3xl">Virtual Hosts</h1>
+      <p class="text-text-secondary text-sm mt-1">Manage upstream reverse proxies, SSL settings, and custom security policies per domain.</p>
     </div>
     {#if showForm}
-      <button
+      <Button
         on:click={() => (showForm = false)}
-        class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-lg flex items-center gap-2 border border-slate-700"
+        variant="secondary"
+        className="flex items-center gap-2 shrink-0"
       >
-        <ArrowLeft size={18} />
-        Back to List
-      </button>
+        <ArrowLeft size={16} />
+        <span>Back to List</span>
+      </Button>
     {:else}
-      <button
+      <Button
         on:click={openCreateForm}
-        class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-lg flex items-center gap-2"
+        variant="primary"
+        className="flex items-center gap-2 shrink-0"
       >
-        <Plus size={18} />
-        Add VHost
-      </button>
+        <Plus size={16} />
+        <span>Add VHost</span>
+      </Button>
     {/if}
   </div>
 
   {#if showForm}
     <!-- VHost Form Editor -->
-    <Card className="max-w-3xl border-slate-700 shadow-xl bg-slate-900/80">
-      <div class="mb-6 border-b border-slate-800 pb-4">
-        <h2 class="text-lg font-bold text-slate-200 flex items-center gap-2">
-          <Globe class="text-blue-500" size={20} />
-          {editingIndex !== null ? "Edit Virtual Host" : "Create New Virtual Host"}
+    <Card className="max-w-3xl border-border-muted">
+      <div class="mb-6 border-b border-border-muted/80 pb-4">
+        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+          <Globe class="text-accent-blue" size={20} />
+          <span>{editingIndex !== null ? "Edit Virtual Host" : "Create New Virtual Host"}</span>
         </h2>
-        <p class="text-sm text-slate-500 mt-1">
-          Configure your domain mapping and upstream server settings.
+        <p class="text-xs text-text-secondary mt-1">
+          Configure upstream server target, hostname constraints, SSL options, and rate thresholds.
         </p>
       </div>
 
       <div class="space-y-5">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 font-sans">
-          <div class="space-y-1.5">
-            <label for="vhost_name_input" class="text-sm font-medium text-slate-300"
-              >VHost Name</label
-            >
-            <input
-              id="vhost_name_input"
-              type="text"
-              bind:value={formName}
-              placeholder="e.g. Main Production API"
-              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
-            />
-          </div>
-
-          <div class="space-y-1.5">
-            <label for="vhost_domains_input" class="text-sm font-medium text-slate-300"
-              >Domains (Comma Separated)</label
-            >
-            <input
-              id="vhost_domains_input"
-              type="text"
-              bind:value={formHosts}
-              placeholder="e.g. api.example.com, example.com"
-              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
-            />
-          </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <Input
+            id="vhost_name"
+            label="VHost Name"
+            bind:value={formName}
+            placeholder="e.g. Main Production API"
+            required={true}
+          />
+          <Input
+            id="vhost_domains"
+            label="Domains (Comma Separated)"
+            bind:value={formHosts}
+            placeholder="e.g. api.example.com, example.com"
+            required={true}
+          />
         </div>
 
-        <div class="space-y-1.5 font-sans">
-          <label for="vhost_backend_input" class="text-sm font-medium text-slate-300"
-            >Backend Proxy Target</label
-          >
+        <div class="space-y-2">
+          <label for="vhost_backend" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider">
+            Backend Proxy Target <span class="text-red-500">*</span>
+          </label>
           <div class="flex flex-col md:flex-row gap-3">
             {#if discoveredServices.length > 0}
               <select
                 bind:value={formBackend}
-                class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono max-w-full md:max-w-xs"
+                class="bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all font-mono max-w-full md:max-w-xs"
               >
-                <option value="">-- Custom Address --</option>
+                <option value="" class="bg-bg-secondary">-- Custom Target Address --</option>
                 {#each discoveredServices as srv}
-                  <option value={srv.value}>{srv.label}</option>
+                  <option value={srv.value} class="bg-bg-secondary">{srv.label}</option>
                 {/each}
               </select>
             {/if}
             <input
-              id="vhost_backend_input"
+              id="vhost_backend"
               type="text"
               bind:value={formBackend}
-              placeholder="http://127.0.0.1:8000"
-              class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono placeholder:text-slate-600"
+              placeholder="e.g. http://127.0.0.1:8000"
+              class="flex-1 input-field font-mono"
             />
           </div>
         </div>
 
-        <div class="flex items-center gap-2 mt-2 font-sans">
+        <div class="flex items-center gap-2.5 py-1">
           <input
             type="checkbox"
             id="is_default"
             bind:checked={formIsDefault}
-            class="w-4 h-4 rounded border-slate-800 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer"
+            class="w-4 h-4 rounded border-border-muted bg-slate-950 text-accent-blue focus:ring-accent-blue cursor-pointer"
           />
           <label
             for="is_default"
-            class="text-sm font-medium text-slate-300 cursor-pointer select-none"
+            class="text-sm font-semibold text-text-secondary cursor-pointer select-none"
           >
-            Set as Default / Fallback VHost (General Proxy without domain mapping)
+            Set as Default / Fallback VHost (Responds to unmatched HTTP host headers)
           </label>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-5 font-sans">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div class="space-y-1.5">
-            <label for="vhost_ssl_select" class="text-sm font-medium text-slate-300"
-              >SSL Configuration</label
-            >
+            <label for="vhost_ssl" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider">
+              SSL Mode
+            </label>
             <select
-              id="vhost_ssl_select"
+              id="vhost_ssl"
               bind:value={formSsl}
-              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+              class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
             >
-              <option value="Auto (Let's Encrypt)">Auto (Let's Encrypt)</option>
-              <option value="Custom Certificate">Custom Certificate</option>
-              <option value="None (HTTP only)">None (HTTP only)</option>
+              <option value="None" class="bg-bg-secondary">None (HTTP only)</option>
+              <option value="Auto (Let's Encrypt)" class="bg-bg-secondary">Auto Let's Encrypt (ACME)</option>
+              <option value="Local Self-Signed" class="bg-bg-secondary">Local CA Self-Signed</option>
             </select>
           </div>
 
           <div class="space-y-1.5">
-            <label for="vhost_maxbody_select" class="text-sm font-medium text-slate-300"
-              >Max Body Size</label
-            >
+            <label for="vhost_max_body" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider">
+              Max Request Size
+            </label>
             <select
-              id="vhost_maxbody_select"
+              id="vhost_max_body"
               bind:value={formMaxBody}
-              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+              class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
             >
-              <option value="1MB">1MB</option>
-              <option value="10MB">10MB</option>
-              <option value="50MB">50MB</option>
-              <option value="100MB">100MB</option>
+              <option value="1MB" class="bg-bg-secondary">1 MB (Aggressive Limit)</option>
+              <option value="10MB" class="bg-bg-secondary">10 MB (Default Standard)</option>
+              <option value="50MB" class="bg-bg-secondary">50 MB (Media Uploads)</option>
+              <option value="100MB" class="bg-bg-secondary">100 MB (Permissive)</option>
             </select>
           </div>
 
           <div class="space-y-1.5">
-            <label for="vhost_ratelimit_select" class="text-sm font-medium text-slate-300"
-              >Default Rate Limit</label
-            >
+            <label for="vhost_ratelimit" class="block text-xs font-semibold text-text-secondary uppercase tracking-wider">
+              Rate Limit Threshold
+            </label>
             <select
-              id="vhost_ratelimit_select"
+              id="vhost_ratelimit"
               bind:value={formRateLimit}
-              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 transition-all"
+              class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
             >
-              <option value="Disabled">Disabled</option>
-              <option value="60/m">60 req/min</option>
-              <option value="100/m">100 req/min</option>
-              <option value="300/m">300 req/min</option>
-              <option value="1000/m">1000 req/min</option>
+              <option value="60/m" class="bg-bg-secondary">60 requests / min (1 req/sec)</option>
+              <option value="100/m" class="bg-bg-secondary">100 requests / min (Default)</option>
+              <option value="300/m" class="bg-bg-secondary">300 requests / min (Moderate)</option>
+              <option value="600/m" class="bg-bg-secondary">600 requests / min (Permissive)</option>
+              <option value="Unlimited" class="bg-bg-secondary">Bypass Rate Limit (Disabled)</option>
             </select>
           </div>
         </div>
 
         <!-- Allowlists -->
-        <div class="space-y-4 border-t border-slate-800 pt-6">
-          <div class="flex justify-between items-center">
+        <div class="space-y-4 border-t border-border-muted pt-6">
+          <div class="flex justify-between items-center gap-4">
             <div>
-              <h3 class="text-sm font-bold text-slate-200">VHost Allowlists (Exceptions)</h3>
-              <p class="text-xs text-slate-500 mt-0.5">
-                Bypass WAF rules for specific client IPs or request paths.
+              <h3 class="text-sm font-bold text-white">VHost Allowlists (Bypasses WAF)</h3>
+              <p class="text-xs text-text-secondary mt-0.5">
+                Explicitly trust clients (by IP or path) to bypass inspection entirely.
               </p>
             </div>
-            <button
+            <Button
               type="button"
               on:click={addAllowlistRule}
-              class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer font-sans"
+              variant="secondary"
+              className="text-xs py-1.5 px-3 flex items-center gap-1.5"
             >
-              <Plus size={14} /> Add Allowlist Rule
-            </button>
+              <Plus size={14} /> <span>Add Allowlist Rule</span>
+            </Button>
           </div>
 
           {#if formAllowlists.length === 0}
             <div
-              class="text-xs text-slate-500 italic bg-slate-955/45 border border-slate-800/60 rounded-xl p-4 text-center font-sans"
+              class="text-xs text-text-muted italic border border-border-muted/50 rounded-xl p-4 text-center select-none"
             >
               No VHost-specific allowlists defined.
             </div>
@@ -371,90 +365,65 @@
             <div class="space-y-4">
               {#each formAllowlists as rule, idx}
                 <div
-                  class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-3 relative group"
+                  class="bg-slate-950/30 border border-border-muted/80 rounded-xl p-4 space-y-3 relative group"
                 >
-                  <button
+                  <Button
                     type="button"
                     on:click={() => removeAllowlistRule(idx)}
-                    class="absolute top-3 right-3 text-slate-500 hover:text-red-400 p-1 rounded transition-colors cursor-pointer"
-                    title="Remove Rule"
+                    variant="ghost"
+                    className="absolute top-3 right-3 text-text-muted hover:text-error p-1 rounded-xl"
                   >
-                    <Trash2 size={16} />
-                  </button>
+                    <Trash2 size={15} />
+                  </Button>
 
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pr-8 font-sans">
-                    <div class="space-y-1">
-                      <label
-                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
-                      >
-                        Rule Name
-                        <input
-                          type="text"
-                          bind:value={rule.name}
-                          placeholder="e.g. Healthcheck / Webhook"
-                          class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-sans mt-1 block"
-                        />
-                      </label>
-                    </div>
-                    <div class="space-y-1">
-                      <label
-                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
-                      >
-                        Bypass Rules (Comma Separated)
-                        <input
-                          type="text"
-                          value={Array.isArray(rule.bypass_rules)
-                            ? rule.bypass_rules.join(", ")
-                            : rule.bypass_rules}
-                          on:input={(e) => handleListInput(e, (arr) => (rule.bypass_rules = arr))}
-                          placeholder="e.g. SQLI-AST, or * for all WAF rules"
-                          class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
-                        />
-                      </label>
-                    </div>
+                  <div class="space-y-1.5 pr-8">
+                    <Input
+                      id={`allow_name_${idx}`}
+                      label="Rule Name"
+                      bind:value={rule.name}
+                      placeholder="e.g. Trust Internal Gateway"
+                    />
                   </div>
 
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
-                    <div class="space-y-1">
-                      <label
-                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
-                      >
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                      <label for={`allow_ips_${idx}`} class="block text-[11px] font-bold text-text-secondary uppercase tracking-wider">
                         IP Addresses (Comma Separated)
-                        <input
-                          type="text"
-                          value={Array.isArray(rule.ips) ? rule.ips.join(", ") : rule.ips}
-                          on:input={(e) => handleListInput(e, (arr) => (rule.ips = arr))}
-                          placeholder="e.g. 192.168.1.100, 10.0.0.0/24"
-                          class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
-                        />
                       </label>
+                      <input
+                        id={`allow_ips_${idx}`}
+                        type="text"
+                        value={Array.isArray(rule.ips) ? rule.ips.join(", ") : rule.ips}
+                        on:input={(e) => handleListInput(e, (arr) => (rule.ips = arr))}
+                        placeholder="e.g. 192.168.1.50, 10.0.0.0/8"
+                        class="w-full input-field font-mono text-xs"
+                      />
                     </div>
-                    <div class="space-y-1">
-                      <label
-                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
-                      >
+                    <div class="space-y-1.5">
+                      <label for={`allow_paths_${idx}`} class="block text-[11px] font-bold text-text-secondary uppercase tracking-wider">
                         Paths (Comma Separated)
-                        <input
-                          type="text"
-                          value={Array.isArray(rule.paths) ? rule.paths.join(", ") : rule.paths}
-                          on:input={(e) => handleListInput(e, (arr) => (rule.paths = arr))}
-                          placeholder="e.g. /wp-json/*, /healthz"
-                          class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
-                        />
                       </label>
+                      <input
+                        id={`allow_paths_${idx}`}
+                        type="text"
+                        value={Array.isArray(rule.paths) ? rule.paths.join(", ") : rule.paths}
+                        on:input={(e) => handleListInput(e, (arr) => (rule.paths = arr))}
+                        placeholder="e.g. /assets/*, /webhook"
+                        class="w-full input-field font-mono text-xs"
+                      />
                     </div>
                   </div>
 
-                  <div class="flex items-center gap-2 pt-1 font-sans">
+                  <div class="flex items-center gap-2.5 pt-1">
                     <input
                       type="checkbox"
                       id={`allow_enabled_${idx}`}
                       bind:checked={rule.enabled}
-                      class="w-3.5 h-3.5 rounded border-slate-800 bg-slate-900 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      class="w-4 h-4 rounded border-border-muted bg-slate-900 text-accent-blue focus:ring-accent-blue cursor-pointer"
                     />
                     <label
                       for={`allow_enabled_${idx}`}
-                      class="text-xs font-semibold text-slate-400 cursor-pointer select-none"
+                      class="text-xs font-semibold text-text-secondary cursor-pointer select-none"
                     >
                       Rule Enabled
                     </label>
@@ -466,26 +435,27 @@
         </div>
 
         <!-- Blacklists -->
-        <div class="space-y-4 border-t border-slate-800 pt-6 pb-6">
-          <div class="flex justify-between items-center">
+        <div class="space-y-4 border-t border-border-muted pt-6 pb-6">
+          <div class="flex justify-between items-center gap-4">
             <div>
-              <h3 class="text-sm font-bold text-slate-200">VHost Blacklists (Blocking)</h3>
-              <p class="text-xs text-slate-500 mt-0.5">
+              <h3 class="text-sm font-bold text-white">VHost Blacklists (Blocking)</h3>
+              <p class="text-xs text-text-secondary mt-0.5">
                 Explicitly block access from specific client IPs or request paths.
               </p>
             </div>
-            <button
+            <Button
               type="button"
               on:click={addBlacklistRule}
-              class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer font-sans"
+              variant="secondary"
+              className="text-xs py-1.5 px-3 flex items-center gap-1.5"
             >
-              <Plus size={14} /> Add Blacklist Rule
-            </button>
+              <Plus size={14} /> <span>Add Blacklist Rule</span>
+            </Button>
           </div>
 
           {#if formBlacklists.length === 0}
             <div
-              class="text-xs text-slate-500 italic bg-slate-955/45 border border-slate-800/60 rounded-xl p-4 text-center font-sans"
+              class="text-xs text-text-muted italic border border-border-muted/50 rounded-xl p-4 text-center select-none"
             >
               No VHost-specific blacklists defined.
             </div>
@@ -493,72 +463,65 @@
             <div class="space-y-4">
               {#each formBlacklists as rule, idx}
                 <div
-                  class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-3 relative group"
+                  class="bg-slate-950/30 border border-border-muted/80 rounded-xl p-4 space-y-3 relative group"
                 >
-                  <button
+                  <Button
                     type="button"
                     on:click={() => removeBlacklistRule(idx)}
-                    class="absolute top-3 right-3 text-slate-500 hover:text-red-400 p-1 rounded transition-colors cursor-pointer"
-                    title="Remove Rule"
+                    variant="ghost"
+                    className="absolute top-3 right-3 text-text-muted hover:text-error p-1 rounded-xl"
                   >
-                    <Trash2 size={16} />
-                  </button>
+                    <Trash2 size={15} />
+                  </Button>
 
-                  <div class="space-y-1 pr-8 font-sans">
-                    <label
-                      class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
-                    >
-                      Rule Name
-                      <input
-                        type="text"
-                        bind:value={rule.name}
-                        placeholder="e.g. Block Abusive Crawler"
-                        class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-sans mt-1 block"
-                      />
-                    </label>
+                  <div class="space-y-1.5 pr-8">
+                    <Input
+                      id={`black_name_${idx}`}
+                      label="Rule Name"
+                      bind:value={rule.name}
+                      placeholder="e.g. Block Abusive Crawler"
+                    />
                   </div>
 
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
-                    <div class="space-y-1">
-                      <label
-                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
-                      >
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                      <label for={`black_ips_${idx}`} class="block text-[11px] font-bold text-text-secondary uppercase tracking-wider">
                         IP Addresses (Comma Separated)
-                        <input
-                          type="text"
-                          value={Array.isArray(rule.ips) ? rule.ips.join(", ") : rule.ips}
-                          on:input={(e) => handleListInput(e, (arr) => (rule.ips = arr))}
-                          placeholder="e.g. 192.168.1.100, 10.0.0.0/24"
-                          class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
-                        />
                       </label>
+                      <input
+                        id={`black_ips_${idx}`}
+                        type="text"
+                        value={Array.isArray(rule.ips) ? rule.ips.join(", ") : rule.ips}
+                        on:input={(e) => handleListInput(e, (arr) => (rule.ips = arr))}
+                        placeholder="e.g. 192.168.1.100, 10.0.0.0/24"
+                        class="w-full input-field font-mono text-xs"
+                      />
                     </div>
-                    <div class="space-y-1">
-                      <label
-                        class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block"
-                      >
+                    <div class="space-y-1.5">
+                      <label for={`black_paths_${idx}`} class="block text-[11px] font-bold text-text-secondary uppercase tracking-wider">
                         Paths (Comma Separated)
-                        <input
-                          type="text"
-                          value={Array.isArray(rule.paths) ? rule.paths.join(", ") : rule.paths}
-                          on:input={(e) => handleListInput(e, (arr) => (rule.paths = arr))}
-                          placeholder="e.g. /admin/config/*, /config.php"
-                          class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition-all font-mono mt-1 block"
-                        />
                       </label>
+                      <input
+                        id={`black_paths_${idx}`}
+                        type="text"
+                        value={Array.isArray(rule.paths) ? rule.paths.join(", ") : rule.paths}
+                        on:input={(e) => handleListInput(e, (arr) => (rule.paths = arr))}
+                        placeholder="e.g. /admin/config/*, /config.php"
+                        class="w-full input-field font-mono text-xs"
+                      />
                     </div>
                   </div>
 
-                  <div class="flex items-center gap-2 pt-1 font-sans">
+                  <div class="flex items-center gap-2.5 pt-1">
                     <input
                       type="checkbox"
                       id={`black_enabled_${idx}`}
                       bind:checked={rule.enabled}
-                      class="w-3.5 h-3.5 rounded border-slate-800 bg-slate-900 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      class="w-4 h-4 rounded border-border-muted bg-slate-905 text-accent-blue focus:ring-accent-blue cursor-pointer"
                     />
                     <label
                       for={`black_enabled_${idx}`}
-                      class="text-xs font-semibold text-slate-400 cursor-pointer select-none"
+                      class="text-xs font-semibold text-text-secondary cursor-pointer select-none"
                     >
                       Rule Enabled
                     </label>
@@ -569,25 +532,27 @@
           {/if}
         </div>
 
-        <div class="pt-6 border-t border-slate-800 flex justify-end gap-3 font-sans">
-          <button
+        <div class="pt-6 border-t border-border-muted flex justify-end gap-3">
+          <Button
             on:click={() => (showForm = false)}
-            class="px-5 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+            variant="ghost"
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             on:click={handleSaveForm}
-            class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg transition-colors shadow-lg shadow-blue-600/20 flex items-center gap-2"
+            variant="primary"
+            className="flex items-center gap-2"
           >
-            <Save size={16} /> Save Configuration
-          </button>
+            <Save size={16} />
+            <span>Save Configuration</span>
+          </Button>
         </div>
       </div>
     </Card>
   {:else}
     <!-- VHost List Table -->
-    <Card className="p-0 overflow-hidden border-slate-800">
+    <Card className="p-0 overflow-hidden">
       <DataTable
         columns={[
           "Domain",
@@ -599,31 +564,31 @@
         ]}
       >
         {#each $vhostsList as host, i}
-          <tr class="hover:bg-slate-700/30 transition-colors group">
+          <tr class="hover:bg-slate-900/20 border-b border-border-muted/40 last:border-0 transition-colors group">
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="flex items-center gap-3">
                 <div
-                  class="p-2 bg-slate-900 rounded-lg text-slate-400 group-hover:text-blue-400 transition-colors border border-slate-800"
+                  class="p-2.5 bg-slate-950/60 rounded-xl text-text-muted group-hover:text-accent-blue transition-colors border border-border-muted shadow-inner"
                 >
                   <Globe size={16} />
                 </div>
                 <div class="flex flex-col">
                   <div class="flex items-center gap-2">
-                    <span class="text-slate-200 font-bold">{host.name}</span>
+                    <span class="text-text-primary font-bold">{host.name}</span>
                     {#if host.is_default}
                       <span
-                        class="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-400 border border-blue-500/20 tracking-wider uppercase"
+                        class="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-accent-blue/20 text-accent-blue border border-accent-blue/15 tracking-wider uppercase"
                         >FALLBACK</span
                       >
                     {/if}
                   </div>
-                  <span class="text-slate-500 text-xs mt-0.5"
+                  <span class="text-text-muted text-xs mt-0.5 font-medium"
                     >{host.hosts.length > 0 ? host.hosts.join(", ") : "*"}</span
                   >
                 </div>
               </div>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-slate-400 font-mono text-xs">
+            <td class="px-6 py-4 whitespace-nowrap text-text-secondary font-mono text-xs">
               {host.backend}
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
@@ -637,7 +602,7 @@
                 {host.ssl || "None"}
               </Badge>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-slate-300 text-sm">
+            <td class="px-6 py-4 whitespace-nowrap text-text-secondary text-sm">
               {host.max_body || "10MB"}
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
@@ -658,28 +623,30 @@
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-right">
               <div
-                class="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity"
+                class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                <button
+                <Button
+                  variant="ghost"
                   on:click={() => openEditForm(i)}
-                  class="text-slate-400 hover:text-blue-400 transition-colors p-1"
+                  className="p-1.5 text-text-muted hover:text-accent-blue rounded-xl"
                   title="Edit"
                 >
-                  <Edit2 size={16} />
-                </button>
-                <button
+                  <Edit2 size={15} />
+                </Button>
+                <Button
+                  variant="ghost"
                   on:click={() => confirmDelete(i)}
-                  class="text-slate-400 hover:text-red-400 transition-colors p-1"
+                  className="p-1.5 text-text-muted hover:text-error rounded-xl"
                   title="Delete"
                 >
-                  <Trash2 size={16} />
-                </button>
+                  <Trash2 size={15} />
+                </Button>
               </div>
             </td>
           </tr>
         {:else}
           <tr>
-            <td colspan="6" class="px-6 py-8 text-center text-slate-500 italic"
+            <td colspan="6" class="px-6 py-12 text-center text-text-muted italic select-none"
               >No Virtual Hosts configured. Click "Add VHost" to create one.</td
             >
           </tr>

@@ -125,9 +125,13 @@ impl RuleEngine {
                     if let Some(ext) = path.extension() {
                         if ext == "toml" {
                             if let Ok(content) = std::fs::read_to_string(&path) {
-                                if let Ok(plugin_rules) = toml::from_str::<Vec<crate::config::CustomRule>>(&content) {
+                                if let Ok(plugin_rules) =
+                                    toml::from_str::<Vec<crate::config::CustomRule>>(&content)
+                                {
                                     custom_rules.extend(plugin_rules);
-                                } else if let Ok(single_rule) = toml::from_str::<crate::config::CustomRule>(&content) {
+                                } else if let Ok(single_rule) =
+                                    toml::from_str::<crate::config::CustomRule>(&content)
+                                {
                                     custom_rules.push(single_rule);
                                 }
                             }
@@ -172,7 +176,10 @@ impl RuleEngine {
             if query_entropy > 5.5 {
                 return Some((
                     "ANOMALY-DETECTION".to_string(),
-                    format!("High query entropy anomaly detected: {:.2} bits", query_entropy),
+                    format!(
+                        "High query entropy anomaly detected: {:.2} bits",
+                        query_entropy
+                    ),
                 ));
             }
 
@@ -180,7 +187,10 @@ impl RuleEngine {
             if body_entropy > 5.8 {
                 return Some((
                     "ANOMALY-DETECTION".to_string(),
-                    format!("High body entropy anomaly detected: {:.2} bits", body_entropy),
+                    format!(
+                        "High body entropy anomaly detected: {:.2} bits",
+                        body_entropy
+                    ),
                 ));
             }
         }
@@ -228,12 +238,16 @@ impl RuleEngine {
                     if rule.condition_type == "header" {
                         let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
                         if parts.len() == 2 {
-                            val_to_check.to_lowercase().contains(&parts[1].trim().to_lowercase())
+                            val_to_check
+                                .to_lowercase()
+                                .contains(&parts[1].trim().to_lowercase())
                         } else {
                             false
                         }
                     } else {
-                        val_to_check.to_lowercase().contains(&rule.condition_value.to_lowercase())
+                        val_to_check
+                            .to_lowercase()
+                            .contains(&rule.condition_value.to_lowercase())
                     }
                 }
                 "regex" => {
@@ -259,10 +273,7 @@ impl RuleEngine {
 
             if matched {
                 if rule.action == "block" {
-                    return Some((
-                        rule.id.clone(),
-                        format!("Custom rule block: {}", rule.name),
-                    ));
+                    return Some((rule.id.clone(), format!("Custom rule block: {}", rule.name)));
                 }
             }
         }
@@ -853,7 +864,10 @@ impl RuleEngine {
                             *write_guard = Some(client);
                         }
                         Err(e) => {
-                            eprintln!("Failed to open Redis client at {}: {:?}", redis_config.url, e);
+                            eprintln!(
+                                "Failed to open Redis client at {}: {:?}",
+                                redis_config.url, e
+                            );
                         }
                     }
                 }
@@ -861,14 +875,12 @@ impl RuleEngine {
             }
 
             if let Some(client) = &*client_guard {
-                if let Ok(mut conn) = client.get_tokio_connection().await {
+                if let Ok(mut conn) = client.get_async_connection().await {
                     let now_bucket = chrono::Utc::now().timestamp() / 60;
                     let key = format!("ratelimit:{}:{}", ip, now_bucket);
 
-                    let count_res: redis::RedisResult<u32> = redis::cmd("INCR")
-                        .arg(&key)
-                        .query_async(&mut conn)
-                        .await;
+                    let count_res: redis::RedisResult<u32> =
+                        redis::cmd("INCR").arg(&key).query_async(&mut conn).await;
 
                     if let Ok(count) = count_res {
                         if count == 1 {

@@ -459,42 +459,40 @@ This starts 3 processes:
 jarsWAF is designed as a **Controller + Agent** architecture. The Controller manages configuration, dashboard, and logs. Agents are reverse proxies deployed at target servers.
 
 > ℹ️ The Controller and Agent can run on **different machines and different operating systems**.
+> ⚠️ Since jarsWAF has upgraded its L7 proxy engine to **Pingora** (developed by Cloudflare), **Windows is no longer natively supported for WAF Agents**. Running on Windows requires **WSL2 (Windows Subsystem for Linux)**.
 
 #### Supported Combinations Matrix
 
-| #   | Controller OS  | Agent OS       | Status              | Notes                                                                        |
-| --- | -------------- | -------------- | ------------------- | ---------------------------------------------------------------------------- |
-| 1   | 🐧 **Linux**   | 🐧 **Linux**   | ✅ **Full Support** | Best combo. Agent uses eBPF XDP for kernel-level DDoS protection.            |
-| 2   | 🐧 **Linux**   | 🪟 **Windows** | ✅ Supported        | Agent runs L7 proxy fallback. Use `start.bat` on Windows Agent.              |
-| 3   | 🐧 **Linux**   | 🍎 **macOS**   | ✅ Supported        | Agent runs L7 proxy fallback.                                                |
-| 4   | 🪟 **Windows** | 🐧 **Linux**   | ✅ Supported        | Controller via Docker Desktop on Windows. Agent benefits from eBPF on Linux. |
-| 5   | 🪟 **Windows** | 🪟 **Windows** | ✅ Supported        | Both use L7 proxy mode. Docker Desktop required on Controller.               |
-| 6   | 🪟 **Windows** | 🍎 **macOS**   | ✅ Supported        | Both use L7 proxy mode.                                                      |
-| 7   | 🍎 **macOS**   | 🐧 **Linux**   | ✅ Supported        | Controller via Docker Desktop on macOS. Agent benefits from eBPF on Linux.   |
-| 8   | 🍎 **macOS**   | 🪟 **Windows** | ✅ Supported        | Both use L7 proxy mode.                                                      |
-| 9   | 🍎 **macOS**   | 🍎 **macOS**   | ✅ Supported        | Both use L7 proxy mode.                                                      |
-| 10  | 🐳 **Docker**  | 🐧 **Linux**   | ✅ **Recommended**  | Controller in Docker, Agent native on Linux with eBPF.                       |
-| 11  | 🐳 **Docker**  | 🪟 **Windows** | ✅ Supported        | Controller in Docker (any host), Agent on Windows L7 proxy.                  |
-| 12  | 🐳 **Docker**  | 🍎 **macOS**   | ✅ Supported        | Controller in Docker (any host), Agent on macOS L7 proxy.                    |
+| #   | Controller OS  | Agent OS       | Status                     | Notes                                                                        |
+| --- | -------------- | -------------- | -------------------------- | ---------------------------------------------------------------------------- |
+| 1   | 🐧 **Linux**   | 🐧 **Linux**   | ✅ **Full Support**        | Best combo. Agent uses eBPF XDP for kernel-level DDoS protection.            |
+| 2   | 🐧 **Linux**   | 🪟 **Windows** | ❌ **WSL2 Only**           | Native Windows Agent is not supported. Must run inside WSL2 (Ubuntu).        |
+| 3   | 🐧 **Linux**   | 🍎 **macOS**   | ✅ Supported               | Agent runs Pingora L7 proxy.                                                 |
+| 4   | 🪟 **Windows** | 🐧 **Linux**   | ✅ Supported               | Controller via Docker Desktop on Windows. Agent benefits from eBPF on Linux. |
+| 5   | 🪟 **Windows** | 🪟 **Windows** | ❌ **WSL2 Only**           | Requires WSL2 for the Agent node.                                            |
+| 6   | 🪟 **Windows** | 🍎 **macOS**   | ✅ Supported               | Agent runs Pingora L7 proxy.                                                 |
+| 7   | 🍎 **macOS**   | 🐧 **Linux**   | ✅ Supported               | Controller via Docker Desktop on macOS. Agent benefits from eBPF on Linux.   |
+| 8   | 🍎 **macOS**   | 🪟 **Windows** | ❌ **WSL2 Only**           | Requires WSL2 for the Agent node.                                            |
+| 9   | 🍎 **macOS**   | 🍎 **macOS**   | ✅ Supported               | Agent runs Pingora L7 proxy.                                                 |
+| 10  | 🐳 **Docker**  | 🐧 **Linux**   | ✅ **Recommended**         | Controller in Docker, Agent native on Linux with eBPF.                       |
+| 11  | 🐳 **Docker**  | 🪟 **Windows** | ❌ **WSL2 Only**           | Requires WSL2 for the Agent node.                                            |
+| 12  | 🐳 **Docker**  | 🍎 **macOS**   | ✅ Supported               | Controller in Docker (any host), Agent on macOS Pingora L7 proxy.            |
 
 #### How to Connect Agent to Remote Controller
 
 ```bash
-# On the Agent machine:
+# On the Agent machine (Linux/WSL2/macOS):
 ./target/release/jarswaf agent --controller http://<CONTROLLER_IP>:8080
-
-# Windows Agent:
-cargo run -- agent --controller http://<CONTROLLER_IP>:8080
 ```
 
-#### eBPF Availability by OS
+#### WAF Engine Availability by OS
 
-| OS                   | eBPF XDP                    | Fallback        |
-| -------------------- | --------------------------- | --------------- |
-| Linux (Kernel ≥ 5.8) | ✅ Kernel-level packet drop | —               |
-| Linux (Kernel < 5.8) | ❌                          | L7 Proxy (Axum) |
-| Windows              | ❌ N/A                      | L7 Proxy (Axum) |
-| macOS                | ❌ N/A                      | L7 Proxy (Axum) |
+| OS                   | eBPF XDP                    | L7 Proxy Engine   |
+| -------------------- | --------------------------- | ----------------- |
+| Linux (Kernel ≥ 5.8) | ✅ Kernel-level packet drop | Pingora L7 Proxy  |
+| Linux (Kernel < 5.8) | ❌                          | Pingora L7 Proxy  |
+| macOS                | ❌ N/A                      | Pingora L7 Proxy  |
+| Windows              | ❌ N/A                      | ❌ Requires WSL2  |
 
 ---
 

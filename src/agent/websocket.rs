@@ -15,8 +15,8 @@ pub async fn start_config_sync_websocket(
 
         info!("Connecting to Controller config WebSocket at {}...", ws_url);
 
-        let mut request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
-            .uri(&ws_url);
+        let mut request =
+            tokio_tungstenite::tungstenite::handshake::client::Request::builder().uri(&ws_url);
 
         if let Some(ref t) = token {
             request = request.header("Sec-WebSocket-Protocol", t);

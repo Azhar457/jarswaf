@@ -3,10 +3,9 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::prelude::*;
+use pingora_http::ResponseHeader;
 use std::collections::HashSet;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 // Global Lock-Free Config
 pub static GLOBAL_CONFIG: once_cell::sync::Lazy<ArcSwap<Config>> =
@@ -31,8 +30,9 @@ pub struct Backend {
 pub static LOAD_BALANCER: once_cell::sync::Lazy<dashmap::DashMap<String, Vec<Backend>>> =
     once_cell::sync::Lazy::new(dashmap::DashMap::new);
 
-pub static ROUND_ROBIN_COUNTERS: once_cell::sync::Lazy<dashmap::DashMap<String, Arc<std::sync::atomic::AtomicUsize>>> =
-    once_cell::sync::Lazy::new(dashmap::DashMap::new);
+pub static ROUND_ROBIN_COUNTERS: once_cell::sync::Lazy<
+    dashmap::DashMap<String, Arc<std::sync::atomic::AtomicUsize>>,
+> = once_cell::sync::Lazy::new(dashmap::DashMap::new);
 
 pub static ACME_CHALLENGES: once_cell::sync::Lazy<dashmap::DashMap<String, String>> =
     once_cell::sync::Lazy::new(dashmap::DashMap::new);
@@ -51,7 +51,9 @@ pub fn start_health_checker() {
                         .to_string();
 
                     let is_up = tokio::net::TcpStream::connect(&clean_addr).await.is_ok();
-                    backend.healthy.store(is_up, std::sync::atomic::Ordering::Relaxed);
+                    backend
+                        .healthy
+                        .store(is_up, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         }
@@ -80,8 +82,6 @@ impl ProxyHttp for JarsWafProxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        let req_header = session.req_header();
-
         let client_ip = match session.client_addr() {
             Some(cs) => {
                 if let Some(ip) = cs.as_inet() {
@@ -94,17 +94,44 @@ impl ProxyHttp for JarsWafProxy {
         };
         ctx.client_ip = Some(client_ip);
 
-        let host = req_header.headers.get("host").and_then(|h| h.to_str().ok());
-        let path = req_header.uri.path().to_string();
+        // Extract req_header fields early to avoid hold-borrow of session
+        let (req_method, path, query_str, host, headers_map) = {
+            let req_header = session.req_header();
+            let req_method = req_header.method.as_str().to_string();
+            let path = req_header.uri.path().to_string();
+            let query_str = req_header.uri.query().unwrap_or("").to_string();
+            let host = req_header.headers.get("host")
+                .and_then(|h| h.to_str().ok())
+                .map(|s| s.to_string());
+
+            let mut headers_map = std::collections::HashMap::new();
+            for (name, value) in req_header.headers.iter() {
+                if let Ok(val_str) = value.to_str() {
+                    headers_map.insert(name.to_string(), val_str.to_string());
+                }
+            }
+            (req_method, path, query_str, host, headers_map)
+        };
 
         // ACME HTTP-01 Challenge Interception
         if path.starts_with("/.well-known/acme-challenge/") {
-            let token = path.trim_start_matches("/.well-known/acme-challenge/").to_string();
+            let token = path
+                .trim_start_matches("/.well-known/acme-challenge/")
+                .to_string();
             if let Some(content) = ACME_CHALLENGES.get(&token) {
                 if let Ok(mut resp) = ResponseHeader::build(200, Some(content.len())) {
                     let _ = resp.insert_header("Content-Type", "text/plain");
-                    if session.write_response_header(Box::new(resp), false).await.is_ok() {
-                        let _ = session.write_response_body(Some(bytes::Bytes::copy_from_slice(content.as_bytes())), true).await;
+                    if session
+                        .write_response_header(Box::new(resp), false)
+                        .await
+                        .is_ok()
+                    {
+                        let _ = session
+                            .write_response_body(
+                                Some(Bytes::copy_from_slice(content.as_bytes())),
+                                true,
+                            )
+                            .await;
                         return Ok(true); // Intercepted successfully
                     }
                 }
@@ -114,8 +141,8 @@ impl ProxyHttp for JarsWafProxy {
         let config = GLOBAL_CONFIG.load();
 
         // Match VHost
-        let (backend_addr, vhost_cfg) = match crate::vhost::match_vhost(host, &config) {
-            Some((b, v)) => (b.clone(), v.clone()),
+        let (backend_addr, vhost_cfg) = match crate::vhost::match_vhost(host.as_deref(), &config) {
+            Some((b, v)) => (b.to_string(), v.clone()),
             None => {
                 let _ = session.respond_error(400).await;
                 return Ok(true);
@@ -152,29 +179,31 @@ impl ProxyHttp for JarsWafProxy {
         }
 
         // Lazily start health checker
-        static HEALTH_CHECKER_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        static HEALTH_CHECKER_STARTED: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
         if !HEALTH_CHECKER_STARTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             start_health_checker();
         }
 
         // 1. Check Blocklist (Reputation)
-        {
+        let is_blocklisted = {
             let blocklist_lock = self.blocklist.read().unwrap();
-            if blocklist_lock.contains(&client_ip) {
-                let entry = crate::logging::WafLogEntry {
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                    client_ip: client_ip.to_string(),
-                    method: req_header.method.as_str().to_string(),
-                    path: path.clone(),
-                    action: "BLOCK".to_string(),
-                    rule_id: "COLLAB-001".to_string(),
-                    reason: "Blocked by jarsWAF Collaborative Threat Intelligence (Reputation)"
-                        .to_string(),
-                };
-                let _ = self.log_tx.try_send(entry);
-                let _ = session.respond_error(403).await;
-                return Ok(true); // Handled
-            }
+            blocklist_lock.contains(&client_ip)
+        };
+        if is_blocklisted {
+            let entry = crate::logging::WafLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                client_ip: client_ip.to_string(),
+                method: req_method.clone(),
+                path: path.clone(),
+                action: "BLOCK".to_string(),
+                rule_id: "COLLAB-001".to_string(),
+                reason: "Blocked by jarsWAF Collaborative Threat Intelligence (Reputation)"
+                    .to_string(),
+            };
+            let _ = self.log_tx.try_send(entry);
+            let _ = session.respond_error(403).await;
+            return Ok(true); // Handled
         }
 
         // 2. Geoblocking
@@ -189,7 +218,7 @@ impl ProxyHttp for JarsWafProxy {
             let entry = crate::logging::WafLogEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 client_ip: client_ip.to_string(),
-                method: req_header.method.as_str().to_string(),
+                method: req_method.clone(),
                 path: path.clone(),
                 action: "BLOCK".to_string(),
                 rule_id: "GEO-001".to_string(),
@@ -201,14 +230,6 @@ impl ProxyHttp for JarsWafProxy {
             let _ = self.log_tx.try_send(entry);
             let _ = session.respond_error(403).await;
             return Ok(true); // Handled
-        }
-
-        // 3. RuleEngine check (Headers, URI, Query)
-        let mut headers_map = std::collections::HashMap::new();
-        for (name, value) in req_header.headers.iter() {
-            if let Ok(val_str) = value.to_str() {
-                headers_map.insert(name.to_string(), val_str.to_string());
-            }
         }
 
         let rule_engine = crate::rules::RuleEngine::new(&config);
@@ -239,12 +260,14 @@ impl ProxyHttp for JarsWafProxy {
 
         if let Some(limit) = active_limit {
             if limit > 0 {
-                let allowed = rule_engine.check_rate_limit(client_ip, limit, &config.redis).await;
+                let allowed = rule_engine
+                    .check_rate_limit(client_ip, limit, &config.redis)
+                    .await;
                 if !allowed {
                     let entry = crate::logging::WafLogEntry {
                         timestamp: chrono::Utc::now().to_rfc3339(),
                         client_ip: client_ip.to_string(),
-                        method: req_header.method.as_str().to_string(),
+                        method: req_method.clone(),
                         path: path.clone(),
                         action: "RATE_LIMIT".to_string(),
                         rule_id: "RATELIMIT-001".to_string(),
@@ -258,18 +281,18 @@ impl ProxyHttp for JarsWafProxy {
         }
         if let Some((rule_id, reason)) = rule_engine.check_request(
             &path,
-            req_header.uri.query().unwrap_or(""),
+            &query_str,
             &headers_map,
             "", // no body at this phase
             ctx.client_ip,
-            req_header.method.as_str(),
+            &req_method,
             &vhost_cfg.rules,
         ) {
             ctx.is_blocked = true;
             let entry = crate::logging::WafLogEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 client_ip: client_ip.to_string(),
-                method: req_header.method.as_str().to_string(),
+                method: req_method.clone(),
                 path: path.clone(),
                 action: "BLOCK".to_string(),
                 rule_id,
@@ -299,7 +322,10 @@ impl ProxyHttp for JarsWafProxy {
 
             if !healthy_list.is_empty() {
                 let idx = if let Some(counter) = ROUND_ROBIN_COUNTERS.get(vhost_name) {
-                    counter.value().fetch_add(1, std::sync::atomic::Ordering::Relaxed) % healthy_list.len()
+                    counter
+                        .value()
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        % healthy_list.len()
                 } else {
                     0
                 };
@@ -347,12 +373,15 @@ impl ProxyHttp for JarsWafProxy {
         Ok(Box::new(peer))
     }
 
-    fn upstream_request_filter(
+    async fn upstream_request_filter(
         &self,
         _session: &mut Session,
         upstream_request: &mut pingora::http::RequestHeader,
         ctx: &mut Self::CTX,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
         if let Some(ip) = ctx.client_ip {
             upstream_request
                 .insert_header("X-Forwarded-For", ip.to_string())
@@ -416,7 +445,9 @@ impl ProxyHttp for JarsWafProxy {
         if let Some(chunk) = body {
             if ctx.body_buffer.len() + chunk.len() > ctx.body_limit {
                 ctx.is_blocked = true;
-                let client_ip_str = ctx.client_ip.map_or("Unknown".to_string(), |ip| ip.to_string());
+                let client_ip_str = ctx
+                    .client_ip
+                    .map_or("Unknown".to_string(), |ip| ip.to_string());
                 let entry = crate::logging::WafLogEntry {
                     timestamp: chrono::Utc::now().to_rfc3339(),
                     client_ip: client_ip_str,
@@ -424,53 +455,68 @@ impl ProxyHttp for JarsWafProxy {
                     path: session.req_header().uri.path().to_string(),
                     action: "BLOCK".to_string(),
                     rule_id: "WAF-BODY-LIMIT".to_string(),
-                    reason: format!("Request body size limit exceeded (Max: {} bytes)", ctx.body_limit),
+                    reason: format!(
+                        "Request body size limit exceeded (Max: {} bytes)",
+                        ctx.body_limit
+                    ),
                 };
                 let _ = self.log_tx.try_send(entry);
                 return Err(pingora::Error::create(
                     pingora::ErrorType::HTTPStatus(413),
                     pingora::ErrorSource::Downstream,
-                    "Payload Too Large",
+                    Some("Payload Too Large".into()),
                     None,
                 ));
             }
-            
+
             ctx.body_buffer.extend_from_slice(chunk);
         }
 
         if end_of_stream && !ctx.body_buffer.is_empty() {
             let body_str = String::from_utf8_lossy(&ctx.body_buffer);
-            
-            let req_header = session.req_header();
-            let mut headers_map = std::collections::HashMap::new();
-            for (name, value) in req_header.headers.iter() {
-                if let Ok(val_str) = value.to_str() {
-                    headers_map.insert(name.to_string(), val_str.to_string());
+
+            // Extract req_header fields early to avoid hold-borrow of session
+            let (path, query, method, host, headers_map) = {
+                let req_header = session.req_header();
+                let path = req_header.uri.path().to_string();
+                let query = req_header.uri.query().unwrap_or("").to_string();
+                let method = req_header.method.as_str().to_string();
+                let host = req_header.headers.get("host")
+                    .and_then(|h| h.to_str().ok())
+                    .map(|s| s.to_string());
+
+                let mut headers_map = std::collections::HashMap::new();
+                for (name, value) in req_header.headers.iter() {
+                    if let Ok(val_str) = value.to_str() {
+                        headers_map.insert(name.to_string(), val_str.to_string());
+                    }
                 }
-            }
+                (path, query, method, host, headers_map)
+            };
 
             let config = GLOBAL_CONFIG.load();
-            let host = req_header.headers.get("host").and_then(|h| h.to_str().ok());
-            
-            if let Some((_, vhost_cfg)) = crate::vhost::match_vhost(host, &config) {
+
+            if let Some((_, vhost_cfg)) = crate::vhost::match_vhost(host.as_deref(), &config) {
                 let rule_engine = crate::rules::RuleEngine::new(&config);
-                
+
                 if let Some((rule_id, reason)) = rule_engine.check_request(
-                    req_header.uri.path(),
-                    req_header.uri.query().unwrap_or(""),
+                    &path,
+                    &query,
                     &headers_map,
                     &body_str,
                     ctx.client_ip,
-                    req_header.method.as_str(),
+                    &method,
                     &vhost_cfg.rules,
                 ) {
                     ctx.is_blocked = true;
-                    let client_ip_str = ctx.client_ip.map_or("Unknown".to_string(), |ip| ip.to_string());
+                    let client_ip_str = ctx
+                        .client_ip
+                        .map_or("Unknown".to_string(), |ip| ip.to_string());
                     let entry = crate::logging::WafLogEntry {
                         timestamp: chrono::Utc::now().to_rfc3339(),
                         client_ip: client_ip_str,
-                        method: req_header.method.as_str().to_string(),
-                        path: req_header.uri.path().to_string(),
+                        method: method.clone(),
+                        path: path.clone(),
                         action: "BLOCK".to_string(),
                         rule_id,
                         reason,
@@ -479,7 +525,7 @@ impl ProxyHttp for JarsWafProxy {
                     return Err(pingora::Error::create(
                         pingora::ErrorType::HTTPStatus(403),
                         pingora::ErrorSource::Downstream,
-                        "Forbidden",
+                        Some("Forbidden".into()),
                         None,
                     ));
                 }
@@ -494,17 +540,14 @@ impl ProxyHttp for JarsWafProxy {
         session: &mut Session,
         e: &pingora::Error,
         _ctx: &mut Self::CTX,
-    ) -> pingora::proxy::FailToProxy {
+    ) -> u16 {
         let code = match e.etype() {
             &pingora::ErrorType::HTTPStatus(status) => status,
             _ => 502,
         };
-        
+
         let _ = session.respond_error(code).await;
-        
-        pingora::proxy::FailToProxy {
-            error_code: code,
-            can_reuse_downstream: false,
-        }
+
+        code
     }
 }

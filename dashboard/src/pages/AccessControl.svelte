@@ -4,20 +4,19 @@
     Plus,
     Trash2,
     Edit2,
-    Shield,
-    Activity,
     Save,
     ToggleLeft,
     ToggleRight,
-    Check,
-    X,
     ShieldAlert,
     ShieldCheck,
+    RefreshCw,
   } from "lucide-svelte";
   import Card from "../components/ui/Card.svelte";
   import DataTable from "../components/ui/DataTable.svelte";
   import Badge from "../components/ui/Badge.svelte";
   import ConfirmationModal from "../components/ui/ConfirmationModal.svelte";
+  import Button from "../components/ui/Button.svelte";
+  import Input from "../components/ui/Input.svelte";
   import { toast } from "../lib/toast";
   import { token } from "../lib/stores";
 
@@ -98,11 +97,11 @@
         toast.success("Allowlist configuration saved.");
         return true;
       }
-      throw new Error();
     } catch (e) {
-      toast.error("Failed to save allowlists.");
-      return false;
+      console.error(e);
     }
+    toast.error("Failed to save Allowlist rules.");
+    return false;
   }
 
   async function saveBlacklists() {
@@ -120,16 +119,16 @@
         toast.success("Blacklist configuration saved.");
         return true;
       }
-      throw new Error();
     } catch (e) {
-      toast.error("Failed to save blacklists.");
-      return false;
+      console.error(e);
     }
+    toast.error("Failed to save Blacklist rules.");
+    return false;
   }
 
-  function openCreateForm(type: "allowlist" | "blacklist") {
-    ruleType = type;
+  function handleCreateRule(type: "allowlist" | "blacklist") {
     editingIndex = null;
+    ruleType = type;
     formName = "";
     formIps = "";
     formPaths = "";
@@ -139,13 +138,13 @@
   }
 
   function openEditForm(type: "allowlist" | "blacklist", index: number) {
-    ruleType = type;
     editingIndex = index;
+    ruleType = type;
     const rule = type === "allowlist" ? allowlists[index] : blacklists[index];
     formName = rule.name;
     formIps = rule.ips ? rule.ips.join(", ") : "";
     formPaths = rule.paths ? rule.paths.join(", ") : "";
-    formBypassRules = type === "allowlist" && rule.bypass_rules ? rule.bypass_rules.join(", ") : "";
+    formBypassRules = rule.bypass_rules ? rule.bypass_rules.join(", ") : "";
     formEnabled = rule.enabled;
     showForm = true;
   }
@@ -155,61 +154,68 @@
       toast.warning("Rule Name is required.");
       return;
     }
+    if (!formIps && !formPaths) {
+      toast.warning("Either IP Addresses or Path Patterns must be provided.");
+      return;
+    }
 
     const ipArray = formIps
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
-
     const pathArray = formPaths
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
+    const bypassArray = formBypassRules
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
 
-    if (ipArray.length === 0 && pathArray.length === 0) {
-      toast.warning("At least one IP or Path pattern is required.");
-      return;
-    }
+    const rule = {
+      name: formName,
+      ips: ipArray,
+      paths: pathArray,
+      enabled: formEnabled,
+      ...(ruleType === "allowlist" ? { bypass_rules: bypassArray } : {}),
+    };
 
     if (ruleType === "allowlist") {
-      const bypassArray = formBypassRules
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-
-      const ruleObj = {
-        name: formName,
-        ips: ipArray,
-        paths: pathArray,
-        bypass_rules: bypassArray,
-        enabled: formEnabled,
-      };
-
       if (editingIndex !== null) {
-        allowlists[editingIndex] = ruleObj;
+        allowlists[editingIndex] = rule;
       } else {
-        allowlists.push(ruleObj);
+        allowlists = [...allowlists, rule];
       }
-      allowlists = [...allowlists];
       await saveAllowlists();
     } else {
-      const ruleObj = {
-        name: formName,
-        ips: ipArray,
-        paths: pathArray,
-        enabled: formEnabled,
-      };
-
       if (editingIndex !== null) {
-        blacklists[editingIndex] = ruleObj;
+        blacklists[editingIndex] = rule;
       } else {
-        blacklists.push(ruleObj);
+        blacklists = [...blacklists, rule];
       }
-      blacklists = [...blacklists];
       await saveBlacklists();
     }
 
     showForm = false;
+  }
+
+  function confirmDelete(type: "allowlist" | "blacklist", index: number) {
+    deleteType = type;
+    deleteIndex = index;
+    showDeleteModal = true;
+  }
+
+  async function executeDelete() {
+    if (deleteIndex === null) return;
+    if (deleteType === "allowlist") {
+      allowlists = allowlists.filter((_, i) => i !== deleteIndex);
+      await saveAllowlists();
+    } else {
+      blacklists = blacklists.filter((_, i) => i !== deleteIndex);
+      await saveBlacklists();
+    }
+    showDeleteModal = false;
+    deleteIndex = null;
   }
 
   async function toggleRule(type: "allowlist" | "blacklist", index: number) {
@@ -224,211 +230,180 @@
     }
   }
 
-  function confirmDelete(type: "allowlist" | "blacklist", index: number) {
-    deleteType = type;
-    deleteIndex = index;
-    showDeleteModal = true;
-  }
-
-  async function executeDelete() {
-    if (deleteIndex === null) return;
-    if (deleteType === "allowlist") {
-      allowlists.splice(deleteIndex, 1);
-      allowlists = [...allowlists];
-      await saveAllowlists();
-    } else {
-      blacklists.splice(deleteIndex, 1);
-      blacklists = [...blacklists];
-      await saveBlacklists();
+  function handleListInput(e: Event, callback: (arr: string[]) => void) {
+    const target = e.target as HTMLInputElement;
+    if (target) {
+      callback(
+        target.value
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0),
+      );
     }
-    showDeleteModal = false;
-    deleteIndex = null;
   }
 </script>
 
-<div class="space-y-6">
+<div class="space-y-6 max-h-full overflow-y-auto pr-1">
   <!-- Header -->
-  <div class="flex justify-between items-center">
+  <div class="flex justify-between items-center gap-4">
     <div>
-      <h1 class="text-2xl font-bold text-slate-100 tracking-tight">Access Control</h1>
-      <p class="text-slate-400 mt-1">
-        Configure global client IP and path exceptions (Allowlists & Blacklists).
+      <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2 md:text-3xl">
+        <ShieldCheck class="text-accent-blue" /> Access Control (ACL)
+      </h1>
+      <p class="text-text-secondary text-sm mt-1">
+        Configure global allowlist rules (bypass WAF) and blacklist policies (explicit blocking).
       </p>
     </div>
-    {#if showForm}
-      <button
-        on:click={() => (showForm = false)}
-        class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-lg flex items-center gap-2 border border-slate-700 font-sans cursor-pointer"
+    {#if !showForm}
+      <Button
+        on:click={() => handleCreateRule(activeSubTab)}
+        variant="primary"
+        className="flex items-center gap-2 shrink-0"
       >
-        Back to List
-      </button>
+        <Plus size={16} />
+        <span>Add {activeSubTab === "allowlist" ? "Allowlist" : "Blacklist"}</span>
+      </Button>
     {:else}
-      <button
-        on:click={() => openCreateForm(activeSubTab)}
-        class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-lg flex items-center gap-2 font-sans cursor-pointer"
+      <Button
+        on:click={() => (showForm = false)}
+        variant="secondary"
+        className="flex items-center gap-2 shrink-0"
       >
-        <Plus size={18} />
-        Add {activeSubTab === "allowlist" ? "Allowlist Rule" : "Blacklist Rule"}
-      </button>
+        <span>Back to List</span>
+      </Button>
     {/if}
   </div>
 
   <!-- Sub Tabs -->
   {#if !showForm}
-    <div class="flex border-b border-slate-800 gap-6">
+    <div class="flex border-b border-border-muted/80 shrink-0">
       <button
         on:click={() => (activeSubTab = "allowlist")}
-        class={`pb-3 text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
-          activeSubTab === "allowlist"
-            ? "border-blue-500 text-blue-400"
-            : "border-transparent text-slate-400 hover:text-slate-200"
-        }`}
+        class={`px-5 py-3 text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer bg-transparent ${activeSubTab === "allowlist" ? "border-accent-blue text-accent-blue" : "border-transparent text-text-muted hover:text-text-secondary"}`}
       >
         <ShieldCheck size={16} />
-        Global Allowlist
+        <span>Allowlists (Exceptions)</span>
       </button>
       <button
         on:click={() => (activeSubTab = "blacklist")}
-        class={`pb-3 text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
-          activeSubTab === "blacklist"
-            ? "border-blue-500 text-blue-400"
-            : "border-transparent text-slate-400 hover:text-slate-200"
-        }`}
+        class={`px-5 py-3 text-sm font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer bg-transparent ${activeSubTab === "blacklist" ? "border-accent-blue text-accent-blue" : "border-transparent text-text-muted hover:text-text-secondary"}`}
       >
         <ShieldAlert size={16} />
-        Global Blacklist
+        <span>Blacklists (Blocking)</span>
       </button>
     </div>
   {/if}
 
   {#if showForm}
     <!-- Rule Form Editor -->
-    <Card className="max-w-3xl border-slate-700 shadow-xl bg-slate-900/80">
-      <div class="mb-6 border-b border-slate-800 pb-4">
-        <h2 class="text-lg font-bold text-slate-200 flex items-center gap-2">
+    <Card className="max-w-3xl border-border-muted">
+      <div class="mb-6 border-b border-border-muted pb-4">
+        <h2 class="text-lg font-bold text-white flex items-center gap-2">
           {#if ruleType === "allowlist"}
-            <ShieldCheck class="text-emerald-500" size={20} />
+            <ShieldCheck class="text-success" size={20} />
           {:else}
-            <ShieldAlert class="text-red-500" size={20} />
+            <ShieldAlert class="text-error" size={20} />
           {/if}
-          {editingIndex !== null ? "Edit Rule" : "Create New Rule"} ({ruleType === "allowlist"
-            ? "Allowlist"
-            : "Blacklist"})
+          <span>{editingIndex !== null ? "Edit Access Rule" : "Create New Access Rule"}</span>
         </h2>
-        <p class="text-sm text-slate-500 mt-1">
-          Define matching patterns for client IPs and paths to apply exceptions.
+        <p class="text-xs text-text-secondary mt-1">
+          Define client IP subnets or path prefix matches to override WAF inspection logic.
         </p>
       </div>
 
       <div class="space-y-5">
         <div class="grid grid-cols-1 gap-5">
-          <div class="space-y-1.5">
-            <label for="global_rule_name" class="text-sm font-medium text-slate-300"
-              >Rule Name</label
-            >
-            <input
-              id="global_rule_name"
-              type="text"
-              bind:value={formName}
-              placeholder="e.g. Office LAN / Nova CMS Bypass"
-              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
-            />
-          </div>
+          <Input
+            id="global_rule_name"
+            label="Rule Name"
+            bind:value={formName}
+            placeholder="e.g. Office LAN / Nova CMS Bypass"
+            required={true}
+          />
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div class="space-y-1.5">
-              <label for="global_rule_ips" class="text-sm font-medium text-slate-300"
-                >IP Addresses (Comma Separated)</label
-              >
-              <input
+              <Input
                 id="global_rule_ips"
-                type="text"
+                label="IP Addresses (Comma Separated)"
                 bind:value={formIps}
                 placeholder="e.g. 192.168.1.0/24, 10.0.0.5"
-                class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
               />
-              <p class="text-xs text-slate-500">
+              <p class="text-[11px] text-text-muted">
                 Supports single IP or CIDR subnets. Leave blank if path-only.
               </p>
             </div>
 
             <div class="space-y-1.5">
-              <label for="global_rule_paths" class="text-sm font-medium text-slate-300"
-                >Path Patterns (Comma Separated)</label
-              >
-              <input
+              <Input
                 id="global_rule_paths"
-                type="text"
+                label="Path Patterns (Comma Separated)"
                 bind:value={formPaths}
                 placeholder="e.g. /api/webhook/*, /nova/*"
-                class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
               />
-              <p class="text-xs text-slate-500">
+              <p class="text-[11px] text-text-muted">
                 Supports wildcards (e.g. `*` prefix or suffix). Leave blank if IP-only.
               </p>
             </div>
           </div>
 
           {#if ruleType === "allowlist"}
-            <div class="space-y-1.5 border-t border-slate-800 pt-4">
-              <label for="global_rule_bypass" class="text-sm font-medium text-slate-300"
-                >Bypass Rules (Comma Separated)</label
-              >
-              <input
+            <div class="space-y-1.5 border-t border-border-muted/80 pt-4">
+              <Input
                 id="global_rule_bypass"
-                type="text"
+                label="Bypass Rules (Comma Separated)"
                 bind:value={formBypassRules}
-                placeholder="e.g. SQLI-AST, XSS-*, or * to bypass all rules"
-                class="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
+                placeholder="e.g. SQLI-*, XSS-*, or * to bypass all rules"
               />
-              <p class="text-xs text-slate-500">
-                Specify which rule IDs to bypass. Use `*` or leave empty to bypass the entire WAF
-                engine.
+              <p class="text-[11px] text-text-muted">
+                Specify which rule IDs to bypass. Use `*` or leave empty to bypass the entire WAF engine.
               </p>
             </div>
           {/if}
 
-          <div class="flex items-center gap-2 mt-2">
+          <div class="flex items-center gap-2.5 mt-2">
             <input
               type="checkbox"
               id="rule_enabled"
               bind:checked={formEnabled}
-              class="w-4 h-4 rounded border-slate-800 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer"
+              class="w-4 h-4 rounded border-border-muted bg-slate-950 text-accent-blue focus:ring-accent-blue cursor-pointer"
             />
             <label
               for="rule_enabled"
-              class="text-sm font-medium text-slate-300 cursor-pointer select-none"
+              class="text-sm font-semibold text-text-secondary cursor-pointer select-none"
             >
               Rule Enabled
             </label>
           </div>
         </div>
 
-        <div class="pt-6 border-t border-slate-800 flex justify-end gap-3 font-sans">
-          <button
+        <div class="pt-6 border-t border-border-muted flex justify-end gap-3">
+          <Button
             on:click={() => (showForm = false)}
-            class="px-5 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            variant="ghost"
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             on:click={handleSaveRule}
-            class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg transition-colors shadow-lg shadow-blue-600/20 flex items-center gap-2 cursor-pointer"
+            variant="primary"
+            className="flex items-center gap-2"
           >
-            <Save size={16} /> Save Rule
-          </button>
+            <Save size={16} />
+            <span>Save Rule</span>
+          </Button>
         </div>
       </div>
     </Card>
   {:else if loading}
-    <div class="py-12 flex flex-col items-center justify-center text-slate-500">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-3"></div>
-      <p class="text-sm font-medium font-sans">Loading access control rules...</p>
+    <div class="py-12 flex flex-col items-center justify-center text-text-muted gap-2.5">
+      <RefreshCw class="animate-spin text-accent-blue" size={24} />
+      <p class="text-sm font-semibold">Loading access control rules...</p>
     </div>
   {:else}
     <!-- Rules Table -->
     {#if activeSubTab === "allowlist"}
-      <Card className="p-0 overflow-hidden border-slate-800">
+      <Card className="p-0 overflow-hidden">
         <DataTable
           columns={[
             "Rule Name",
@@ -440,21 +415,21 @@
           ]}
         >
           {#each allowlists as rule, i}
-            <tr class="hover:bg-slate-700/30 transition-colors group">
+            <tr class="hover:bg-slate-900/20 border-b border-border-muted/40 last:border-0 transition-colors group {rule.enabled ? '' : 'opacity-45'}">
               <td class="px-6 py-4 whitespace-nowrap">
                 <div class="flex items-center gap-3">
                   <div
-                    class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500 border border-emerald-500/20"
+                    class="p-2 bg-success-bg rounded-xl text-success border border-success/15 shadow-inner"
                   >
                     <ShieldCheck size={16} />
                   </div>
-                  <span class="text-slate-200 font-bold">{rule.name}</span>
+                  <span class="text-text-primary font-bold text-sm">{rule.name}</span>
                 </div>
               </td>
-              <td class="px-6 py-4 text-slate-400 font-mono text-xs max-w-xs truncate">
+              <td class="px-6 py-4 text-text-secondary font-mono text-xs max-w-xs truncate">
                 {rule.ips && rule.ips.length > 0 ? rule.ips.join(", ") : "Any IP"}
               </td>
-              <td class="px-6 py-4 text-slate-400 font-mono text-xs max-w-xs truncate">
+              <td class="px-6 py-4 text-text-secondary font-mono text-xs max-w-xs truncate">
                 {rule.paths && rule.paths.length > 0 ? rule.paths.join(", ") : "Any Path"}
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
@@ -471,19 +446,19 @@
               <td class="px-6 py-4 whitespace-nowrap">
                 <button
                   on:click={() => toggleRule("allowlist", i)}
-                  class="focus:outline-none"
+                  class="focus:outline-none border-none bg-transparent"
                   title={rule.enabled ? "Disable Rule" : "Enable Rule"}
                 >
                   {#if rule.enabled}
                     <span
-                      class="text-emerald-500 hover:text-emerald-400 flex items-center gap-1.5 cursor-pointer"
+                      class="text-success hover:text-success/90 flex items-center gap-1.5 cursor-pointer"
                     >
                       <ToggleRight size={24} />
                       <span class="text-xs font-semibold uppercase tracking-wider">Active</span>
                     </span>
                   {:else}
                     <span
-                      class="text-slate-500 hover:text-slate-400 flex items-center gap-1.5 cursor-pointer"
+                      class="text-text-muted hover:text-text-secondary flex items-center gap-1.5 cursor-pointer"
                     >
                       <ToggleLeft size={24} />
                       <span class="text-xs font-semibold uppercase tracking-wider">Disabled</span>
@@ -491,30 +466,32 @@
                   {/if}
                 </button>
               </td>
-              <td class="px-6 py-4 whitespace-nowrap text-right font-sans">
+              <td class="px-6 py-4 whitespace-nowrap text-right">
                 <div
-                  class="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity"
+                  class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                  <button
+                  <Button
+                    variant="ghost"
                     on:click={() => openEditForm("allowlist", i)}
-                    class="text-slate-400 hover:text-blue-400 transition-colors p-1 cursor-pointer"
+                    className="p-1.5 text-text-muted hover:text-accent-blue rounded-xl"
                     title="Edit"
                   >
-                    <Edit2 size={16} />
-                  </button>
-                  <button
+                    <Edit2 size={15} />
+                  </Button>
+                  <Button
+                    variant="ghost"
                     on:click={() => confirmDelete("allowlist", i)}
-                    class="text-slate-400 hover:text-red-400 transition-colors p-1 cursor-pointer"
+                    className="p-1.5 text-text-muted hover:text-error rounded-xl"
                     title="Delete"
                   >
-                    <Trash2 size={16} />
-                  </button>
+                    <Trash2 size={15} />
+                  </Button>
                 </div>
               </td>
             </tr>
           {:else}
             <tr>
-              <td colspan="6" class="px-6 py-8 text-center text-slate-500 italic font-sans">
+              <td colspan="6" class="px-6 py-12 text-center text-text-muted italic select-none">
                 No global allowlists defined. Click "Add Allowlist Rule" to create one.
               </td>
             </tr>
@@ -522,40 +499,40 @@
         </DataTable>
       </Card>
     {:else}
-      <Card className="p-0 overflow-hidden border-slate-800">
+      <Card className="p-0 overflow-hidden">
         <DataTable columns={["Rule Name", "Matched IPs", "Matched Paths", "Status", "Actions"]}>
           {#each blacklists as rule, i}
-            <tr class="hover:bg-slate-700/30 transition-colors group">
+            <tr class="hover:bg-slate-900/20 border-b border-border-muted/40 last:border-0 transition-colors group {rule.enabled ? '' : 'opacity-45'}">
               <td class="px-6 py-4 whitespace-nowrap">
                 <div class="flex items-center gap-3">
-                  <div class="p-2 bg-red-500/10 rounded-lg text-red-500 border border-red-500/20">
+                  <div class="p-2 bg-error-bg rounded-xl text-error border border-error/15 shadow-inner">
                     <ShieldAlert size={16} />
                   </div>
-                  <span class="text-slate-200 font-bold">{rule.name}</span>
+                  <span class="text-text-primary font-bold text-sm">{rule.name}</span>
                 </div>
               </td>
-              <td class="px-6 py-4 text-slate-400 font-mono text-xs max-w-xs truncate">
+              <td class="px-6 py-4 text-text-secondary font-mono text-xs max-w-xs truncate">
                 {rule.ips && rule.ips.length > 0 ? rule.ips.join(", ") : "Any IP"}
               </td>
-              <td class="px-6 py-4 text-slate-400 font-mono text-xs max-w-xs truncate">
+              <td class="px-6 py-4 text-text-secondary font-mono text-xs max-w-xs truncate">
                 {rule.paths && rule.paths.length > 0 ? rule.paths.join(", ") : "Any Path"}
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
                 <button
                   on:click={() => toggleRule("blacklist", i)}
-                  class="focus:outline-none"
+                  class="focus:outline-none border-none bg-transparent"
                   title={rule.enabled ? "Disable Rule" : "Enable Rule"}
                 >
                   {#if rule.enabled}
                     <span
-                      class="text-red-500 hover:text-red-400 flex items-center gap-1.5 cursor-pointer"
+                      class="text-error hover:text-error/90 flex items-center gap-1.5 cursor-pointer"
                     >
                       <ToggleRight size={24} />
                       <span class="text-xs font-semibold uppercase tracking-wider">Blocking</span>
                     </span>
                   {:else}
                     <span
-                      class="text-slate-500 hover:text-slate-400 flex items-center gap-1.5 cursor-pointer"
+                      class="text-text-muted hover:text-text-secondary flex items-center gap-1.5 cursor-pointer"
                     >
                       <ToggleLeft size={24} />
                       <span class="text-xs font-semibold uppercase tracking-wider">Disabled</span>
@@ -563,30 +540,32 @@
                   {/if}
                 </button>
               </td>
-              <td class="px-6 py-4 whitespace-nowrap text-right font-sans">
+              <td class="px-6 py-4 whitespace-nowrap text-right">
                 <div
-                  class="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-opacity"
+                  class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                  <button
+                  <Button
+                    variant="ghost"
                     on:click={() => openEditForm("blacklist", i)}
-                    class="text-slate-400 hover:text-blue-400 transition-colors p-1 cursor-pointer"
+                    className="p-1.5 text-text-muted hover:text-accent-blue rounded-xl"
                     title="Edit"
                   >
-                    <Edit2 size={16} />
-                  </button>
-                  <button
+                    <Edit2 size={15} />
+                  </Button>
+                  <Button
+                    variant="ghost"
                     on:click={() => confirmDelete("blacklist", i)}
-                    class="text-slate-400 hover:text-red-400 transition-colors p-1 cursor-pointer"
+                    className="p-1.5 text-text-muted hover:text-error rounded-xl"
                     title="Delete"
                   >
-                    <Trash2 size={16} />
-                  </button>
+                    <Trash2 size={15} />
+                  </Button>
                 </div>
               </td>
             </tr>
           {:else}
             <tr>
-              <td colspan="5" class="px-6 py-8 text-center text-slate-500 italic font-sans">
+              <td colspan="5" class="px-6 py-12 text-center text-text-muted italic select-none">
                 No global blacklists defined. Click "Add Blacklist Rule" to create one.
               </td>
             </tr>

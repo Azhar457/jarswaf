@@ -3,6 +3,7 @@
   import { Download, Trash2, Terminal as TerminalIcon } from "lucide-svelte";
   import { logs, latestLog } from "../lib/stores";
   import Card from "../components/ui/Card.svelte";
+  import Button from "../components/ui/Button.svelte";
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import "@xterm/xterm/css/xterm.css";
@@ -70,7 +71,7 @@
   async function handleClear() {
     if (
       confirm(
-        "Are you sure you want to clear all logs? This will truncate the ClickHouse database.",
+        "Are you sure you want to clear all logs? This will truncate the SQLite database.",
       )
     ) {
       try {
@@ -93,19 +94,19 @@
     // Initialize Xterm.js Terminal with CMD palette
     term = new Terminal({
       theme: {
-        background: "#0c0c0c",
-        foreground: "#cccccc",
-        cursor: "#ffffff",
+        background: "#030712",
+        foreground: "#f3f4f6",
+        cursor: "#3b82f6",
         black: "#000000",
-        red: "#ff3b30",
-        green: "#4cd964",
-        yellow: "#ffcc00",
-        blue: "#007aff",
-        magenta: "#ff2d55",
-        cyan: "#5ac8fa",
+        red: "#ef4444",
+        green: "#10b981",
+        yellow: "#f59e0b",
+        blue: "#3b82f6",
+        magenta: "#ec4899",
+        cyan: "#06b6d4",
         white: "#ffffff",
       },
-      fontFamily: "JetBrains Mono, Consolas, monospace",
+      fontFamily: "JetBrains Mono, Fira Code, monospace",
       fontSize: 12.5,
       lineHeight: 1.4,
       cursorBlink: true,
@@ -123,10 +124,10 @@
     }, 50);
 
     // Write Windows CMD welcome banner
-    term.writeln("Microsoft Windows [Version 10.0.22631.3737]");
-    term.writeln("(c) Microsoft Corporation. All rights reserved.");
+    term.writeln("jarsWAF [Version 1.0.0]");
+    term.writeln("(c) jarsWAF Security Corporation. All rights reserved.");
     term.writeln("");
-    term.writeln("C:\\jarsWAFWAF> jarswaf --stream --verbose");
+    term.writeln("C:\\jarswaf> jarswaf --stream --verbose");
     term.writeln(
       "\x1b[32m[SYSTEM]\x1b[0m jarsWAF Engine connected. Streaming real-time proxy events...",
     );
@@ -170,58 +171,60 @@
 </script>
 
 <div class="space-y-6 h-full flex flex-col min-h-0">
-  <div class="flex justify-between items-center shrink-0">
+  <div class="flex justify-between items-center shrink-0 gap-4">
     <div>
-      <h1 class="text-2xl font-bold text-slate-100 tracking-tight flex items-center gap-2">
-        <TerminalIcon class="text-blue-500" /> Live Security Terminal
+      <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2 md:text-3xl">
+        <TerminalIcon class="text-accent-blue" /> Live Security Terminal
       </h1>
-      <p class="text-slate-400 mt-1">Real-time stream of all firewall events and requests.</p>
+      <p class="text-text-secondary text-sm mt-1">Real-time stream of all incoming request payloads, inspection actions, and firewall events.</p>
     </div>
-    <div class="flex gap-3">
-      <button
+    <div class="flex gap-2">
+      <Button
         on:click={handleExport}
-        class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-slate-700 flex items-center gap-2 cursor-pointer"
+        variant="secondary"
+        className="flex items-center gap-2"
       >
-        <Download size={16} />
-        Export
-      </button>
-      <button
+        <Download size={14} />
+        <span>Export</span>
+      </Button>
+      <Button
         on:click={handleClear}
-        class="bg-slate-800 hover:bg-slate-700 text-red-400 hover:text-red-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-slate-700 flex items-center gap-2 cursor-pointer"
+        variant="danger"
+        className="flex items-center gap-2"
       >
-        <Trash2 size={16} />
-        Clear
-      </button>
+        <Trash2 size={14} />
+        <span>Clear</span>
+      </Button>
     </div>
   </div>
 
   <Card
-    className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col bg-[#0c0c0c] border-slate-800 shadow-2xl rounded-xl"
+    className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col bg-slate-950 border-border-muted shadow-premium rounded-2xl"
   >
     <!-- CMD Window Title Bar -->
     <div
-      class="h-9 bg-[#1e1e1e] border-b border-slate-800 flex items-center justify-between px-4 shrink-0 rounded-t-xl select-none"
+      class="h-10 bg-slate-900 border-b border-border-muted/80 flex items-center justify-between px-4 shrink-0 rounded-t-2xl select-none"
     >
       <div class="flex items-center gap-2">
-        <TerminalIcon size={14} class="text-slate-400" />
-        <span class="text-xs font-medium text-slate-300 font-mono"
+        <TerminalIcon size={14} class="text-text-muted" />
+        <span class="text-xs font-semibold text-text-secondary font-mono"
           >Command Prompt - jarswaf --stream</span
         >
       </div>
       <!-- Mock Window Controls -->
       <div class="flex items-center gap-2.5">
         <div
-          class="w-2.5 h-2.5 rounded-full bg-slate-700/60 hover:bg-slate-600 transition-colors"
+          class="w-2.5 h-2.5 rounded-full bg-slate-800 hover:bg-slate-700 transition-colors"
         ></div>
         <div
-          class="w-2.5 h-2.5 rounded-full bg-slate-700/60 hover:bg-slate-600 transition-colors"
+          class="w-2.5 h-2.5 rounded-full bg-slate-800 hover:bg-slate-700 transition-colors"
         ></div>
         <div
-          class="w-2.5 h-2.5 rounded-full bg-red-500/80 hover:bg-red-500 transition-colors"
+          class="w-2.5 h-2.5 rounded-full bg-error/80 hover:bg-error transition-colors"
         ></div>
       </div>
     </div>
-    <div class="p-4 flex-1 min-h-0 overflow-hidden flex flex-col bg-[#0c0c0c]">
+    <div class="p-4 flex-1 min-h-0 overflow-hidden flex flex-col bg-[#030712]">
       <div bind:this={terminalElement} class="w-full h-full flex-1 min-h-0"></div>
     </div>
   </Card>

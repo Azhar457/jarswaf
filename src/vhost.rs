@@ -1,5 +1,4 @@
 use crate::config::{Config, VHost};
-use axum::extract::Host;
 
 /// Helper to match host against a pattern (supports wildcard '*')
 fn match_pattern(host: &str, pattern: &str) -> bool {
@@ -36,10 +35,10 @@ fn match_pattern(host: &str, pattern: &str) -> bool {
 /// Mencari vhost berdasarkan Host header.
 /// Return backend address & matched vhost config.
 pub fn match_vhost<'a>(
-    host_header: Option<&Host>,
+    host_header: Option<&str>,
     config: &'a Config,
 ) -> Option<(&'a str, &'a VHost)> {
-    let host_str = host_header.map(|h| h.0.clone()).unwrap_or_default();
+    let host_str = host_header.unwrap_or_default().to_string();
 
     // Strip port if exists (e.g. localhost:80 -> localhost)
     let host_name = host_str.split(':').next().unwrap_or("").trim();
