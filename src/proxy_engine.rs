@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::prelude::*;
 use pingora_http::ResponseHeader;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 // Global Lock-Free Config
@@ -37,23 +36,31 @@ pub static ROUND_ROBIN_COUNTERS: once_cell::sync::Lazy<
 pub static ACME_CHALLENGES: once_cell::sync::Lazy<dashmap::DashMap<String, String>> =
     once_cell::sync::Lazy::new(dashmap::DashMap::new);
 
-pub fn start_health_checker() {
+pub fn start_health_checker(cancel: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
-            for entry in LOAD_BALANCER.iter() {
-                let backends = entry.value();
-                for backend in backends {
-                    let addr = backend.addr.clone();
-                    let clean_addr = addr
-                        .trim_start_matches("http://")
-                        .trim_start_matches("https://")
-                        .to_string();
+            tokio::select! {
+                _ = interval.tick() => {
+                    for entry in LOAD_BALANCER.iter() {
+                        let backends = entry.value();
+                        for backend in backends {
+                            let addr = backend.addr.clone();
+                            let clean_addr = addr
+                                .trim_start_matches("http://")
+                                .trim_start_matches("https://")
+                                .to_string();
 
-                    let is_up = tokio::net::TcpStream::connect(&clean_addr).await.is_ok();
-                    backend
-                        .healthy
-                        .store(is_up, std::sync::atomic::Ordering::Relaxed);
+                            let is_up = tokio::net::TcpStream::connect(&clean_addr).await.is_ok();
+                            backend
+                                .healthy
+                                .store(is_up, std::sync::atomic::Ordering::Relaxed);
+                        }
+                    }
+                }
+                _ = cancel.cancelled() => {
+                    tracing::info!("Health checker stopped");
+                    break;
                 }
             }
         }
@@ -61,8 +68,8 @@ pub fn start_health_checker() {
 }
 
 pub struct JarsWafProxy {
-    // For reputation blocklist
-    pub blocklist: Arc<std::sync::RwLock<HashSet<std::net::IpAddr>>>,
+    // For reputation blocklist — DashMap for lock-free concurrent access
+    pub blocklist: Arc<dashmap::DashMap<std::net::IpAddr, ()>>,
     // Logging channel
     pub log_tx: tokio::sync::mpsc::Sender<crate::logging::WafLogEntry>,
 }
@@ -184,14 +191,11 @@ impl ProxyHttp for JarsWafProxy {
         static HEALTH_CHECKER_STARTED: std::sync::atomic::AtomicBool =
             std::sync::atomic::AtomicBool::new(false);
         if !HEALTH_CHECKER_STARTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            start_health_checker();
+            start_health_checker(tokio_util::sync::CancellationToken::new());
         }
 
         // 1. Check Blocklist (Reputation)
-        let is_blocklisted = {
-            let blocklist_lock = self.blocklist.read().unwrap();
-            blocklist_lock.contains(&client_ip)
-        };
+        let is_blocklisted = self.blocklist.contains_key(&client_ip);
         if is_blocklisted {
             let entry = crate::logging::WafLogEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -382,7 +386,7 @@ impl ProxyHttp for JarsWafProxy {
         if let Some(ip) = ctx.client_ip {
             upstream_request
                 .insert_header("X-Forwarded-For", ip.to_string())
-                .unwrap_or_else(|_| ());
+                .unwrap_or(());
         }
         Ok(())
     }

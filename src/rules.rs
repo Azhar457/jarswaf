@@ -57,7 +57,7 @@ pub struct RequestInfo<'a> {
 }
 
 pub struct RuleEngine {
-    pub custom_rules: Vec<crate::config::CustomRule>,
+    pub custom_rules: Vec<CompiledCustomRule>,
 }
 
 struct TokenBucket {
@@ -101,8 +101,9 @@ pub fn record_block(ip: IpAddr) -> bool {
 
 pub fn start_rate_limiter_cleanup() {
     tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            interval.tick().await;
             let now = Instant::now();
             RATE_LIMITER.retain(|_, bucket| now.duration_since(bucket.last_access).as_secs() < 300);
             BLOCKED_COUNTERS
@@ -113,7 +114,34 @@ pub fn start_rate_limiter_cleanup() {
 
 impl RuleEngine {
     pub fn new(cfg: &Config) -> Self {
-        let mut custom_rules = cfg.custom_rules.clone();
+        let mut custom_rules: Vec<CompiledCustomRule> = Vec::new();
+
+        // Compile custom rules from config with pre-compiled regex
+        for rule in &cfg.custom_rules {
+            let regex = if rule.operator == "regex" {
+                let pattern = if rule.condition_type == "header" {
+                    let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
+                    if parts.len() == 2 { parts[1].trim() } else { "" }
+                } else {
+                    rule.condition_value.as_str()
+                };
+                Regex::new(pattern).ok()
+            } else {
+                None
+            };
+
+            custom_rules.push(CompiledCustomRule {
+                id: rule.id.clone(),
+                name: rule.name.clone(),
+                condition_type: rule.condition_type.clone(),
+                operator: rule.operator.clone(),
+                condition_value: rule.condition_value.clone(),
+                action: rule.action.clone(),
+                action_value: rule.action_value.clone(),
+                enabled: rule.enabled,
+                regex,
+            });
+        }
 
         // Dynamic rule loading from plugins directory
         let plugins_dir = std::path::Path::new("plugins");
@@ -128,11 +156,57 @@ impl RuleEngine {
                                 if let Ok(plugin_rules) =
                                     toml::from_str::<Vec<crate::config::CustomRule>>(&content)
                                 {
-                                    custom_rules.extend(plugin_rules);
+                                    for rule in plugin_rules {
+                                        let regex = if rule.operator == "regex" {
+                                            Regex::new(
+                                                if rule.condition_type == "header" {
+                                                    let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
+                                                    if parts.len() == 2 { parts[1].trim() } else { "" }
+                                                } else {
+                                                    rule.condition_value.as_str()
+                                                }
+                                            ).ok()
+                                        } else {
+                                            None
+                                        };
+                                        custom_rules.push(CompiledCustomRule {
+                                            id: rule.id.clone(),
+                                            name: rule.name.clone(),
+                                            condition_type: rule.condition_type.clone(),
+                                            operator: rule.operator.clone(),
+                                            condition_value: rule.condition_value.clone(),
+                                            action: rule.action.clone(),
+                                            action_value: rule.action_value.clone(),
+                                            enabled: rule.enabled,
+                                            regex,
+                                        });
+                                    }
                                 } else if let Ok(single_rule) =
                                     toml::from_str::<crate::config::CustomRule>(&content)
                                 {
-                                    custom_rules.push(single_rule);
+                                    let regex = if single_rule.operator == "regex" {
+                                        Regex::new(
+                                            if single_rule.condition_type == "header" {
+                                                let parts: Vec<&str> = single_rule.condition_value.splitn(2, ':').collect();
+                                                if parts.len() == 2 { parts[1].trim() } else { "" }
+                                            } else {
+                                                single_rule.condition_value.as_str()
+                                            }
+                                        ).ok()
+                                    } else {
+                                        None
+                                    };
+                                    custom_rules.push(CompiledCustomRule {
+                                        id: single_rule.id.clone(),
+                                        name: single_rule.name.clone(),
+                                        condition_type: single_rule.condition_type.clone(),
+                                        operator: single_rule.operator.clone(),
+                                        condition_value: single_rule.condition_value.clone(),
+                                        action: single_rule.action.clone(),
+                                        action_value: single_rule.action_value.clone(),
+                                        enabled: single_rule.enabled,
+                                        regex,
+                                    });
                                 }
                             }
                         }
@@ -251,18 +325,7 @@ impl RuleEngine {
                     }
                 }
                 "regex" => {
-                    let regex_pattern = if rule.condition_type == "header" {
-                        let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
-                        if parts.len() == 2 {
-                            parts[1].trim()
-                        } else {
-                            ""
-                        }
-                    } else {
-                        rule.condition_value.as_str()
-                    };
-
-                    if let Ok(re) = regex::Regex::new(regex_pattern) {
+                    if let Some(ref re) = rule.regex {
                         re.is_match(val_to_check)
                     } else {
                         false
@@ -373,40 +436,45 @@ pub fn calculate_entropy(input: &str) -> f64 {
 }
 
 pub fn normalize_string(input: &str) -> String {
-    let mut normalized = input.to_string();
+    // Pre-allocate dengan capacity 2x (normalisasi bisa expand karena URL/HTML decode)
+    let mut buf = String::with_capacity(input.len() * 2);
 
     // 1. URL Decode (Recursively up to 3 times for double encoding)
+    let mut decoded = input.to_string();
     for _ in 0..3 {
-        if let Ok(decoded) = urlencoding::decode(&normalized) {
-            if decoded == normalized {
+        if let Ok(d) = urlencoding::decode(&decoded) {
+            if d == decoded {
                 break;
             }
-            normalized = decoded.into_owned();
+            decoded = d.into_owned();
         } else {
             break;
         }
     }
 
     // 2. HTML Entity Decode (&lt; -> <, &gt; -> >, etc.)
-    normalized = htmlescape::decode_html(&normalized).unwrap_or(normalized);
+    let decoded = htmlescape::decode_html(&decoded).unwrap_or(decoded);
 
-    // 3. Unicode NFKC Normalization (prevents fullwidth and homoglyph bypasses)
-    normalized = normalized.nfkc().collect::<String>();
+    // 3. NFKC + lowercase + cleanup dalam single pass
+    //    Hindari multiple allocations: to_lowercase(), replace(), split_whitespace()
+    let mut prev_space = false;
+    for ch in decoded.nfkc() {
+        let ch_lower = ch.to_lowercase().next().unwrap_or(ch);
+        if ch_lower == '\0' {
+            continue;
+        }
+        if ch_lower == '+' || ch_lower.is_whitespace() {
+            if !prev_space {
+                buf.push(' ');
+                prev_space = true;
+            }
+        } else {
+            buf.push(ch_lower);
+            prev_space = false;
+        }
+    }
 
-    // 4. Lowercase for uniform signature matching
-    normalized = normalized.to_lowercase();
-
-    // Convert '+' to ' ' to handle form-urlencoded space encoding and prevent bypasses
-    normalized = normalized.replace('+', " ");
-
-    // 5. Strip Null Bytes & Collapse Whitespace
-    normalized = normalized.replace('\0', "");
-    normalized = normalized
-        .split_whitespace()
-        .collect::<Vec<&str>>()
-        .join(" ");
-
-    normalized
+    buf
 }
 
 fn is_rule_enabled(rule_id: &str, enabled_rules: &[String]) -> bool {

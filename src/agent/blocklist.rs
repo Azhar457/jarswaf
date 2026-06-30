@@ -6,7 +6,7 @@ use tracing::{debug, error};
 pub async fn start_blocklist_sync(
     controller_url: Option<String>,
     token: Option<String>,
-    blocklist: Arc<std::sync::RwLock<std::collections::HashSet<std::net::IpAddr>>>,
+    blocklist: Arc<dashmap::DashMap<std::net::IpAddr, ()>>,
     blocklist_file_path: String,
     use_sqlite: bool,
     db_path_local: String,
@@ -37,13 +37,14 @@ pub async fn start_blocklist_sync(
                             }
                             // Save to local JSON file as backup
                             logging::save_blocklist_to_file(&blocklist_file_path, &new_blocklist);
-                            if let Ok(mut lock) = blocklist.write() {
-                                *lock = new_blocklist;
-                                debug!(
-                                    "Reputation blocklist synced. Active blocked IPs: {}",
-                                    lock.len()
-                                );
+                            blocklist.clear();
+                            for ip in &new_blocklist {
+                                blocklist.insert(*ip, ());
                             }
+                            debug!(
+                                "Reputation blocklist synced. Active blocked IPs: {}",
+                                blocklist.len()
+                            );
                         }
                     }
                 }
@@ -61,9 +62,9 @@ pub async fn start_blocklist_sync(
                 let since = chrono::Utc::now() - chrono::Duration::minutes(5);
                 let since_str = since.to_rfc3339();
                 let mut stmt = conn.prepare(
-                    "SELECT client_ip FROM request_log 
-                     WHERE action = 'BLOCK' AND timestamp > ?1 
-                     GROUP BY client_ip 
+                    "SELECT client_ip FROM request_log
+                     WHERE action = 'BLOCK' AND timestamp > ?1
+                     GROUP BY client_ip
                      HAVING count() >= 5",
                 )?;
                 let rows = stmt.query_map([since_str], |row| {
@@ -84,15 +85,17 @@ pub async fn start_blocklist_sync(
 
             if let Ok(Ok(ips)) = res {
                 logging::save_blocklist_to_file(&blocklist_file_path_clone, &ips);
-                if let Ok(mut lock) = blocklist_clone.write() {
-                    *lock = ips;
+                blocklist_clone.clear();
+                for ip in &ips {
+                    blocklist_clone.insert(*ip, ());
                 }
             }
         } else {
             // Standalone File/Remote mode: Load from local JSON file
             let loaded = logging::load_blocklist_from_file(&blocklist_file_path);
-            if let Ok(mut lock) = blocklist.write() {
-                *lock = loaded;
+            blocklist.clear();
+            for ip in &loaded {
+                blocklist.insert(*ip, ());
             }
         }
 

@@ -39,7 +39,13 @@ pub fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
         .default_headers(headers)
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                "Failed to build ClickHouse HTTP client ({}). Using default client — ClickHouse requests may fail auth.",
+                e
+            );
+            reqwest::Client::new()
+        })
 }
 
 // Inisialisasi SQLite Table
@@ -51,8 +57,12 @@ pub fn init_sqlite_db(db_path: &str) -> Result<(), Box<dyn std::error::Error + S
     let conn = rusqlite::Connection::open(db_path)?;
 
     // Enable WAL mode for concurrent read/write performance
-    let _ = conn.execute("PRAGMA journal_mode=WAL;", []);
-    let _ = conn.execute("PRAGMA synchronous=NORMAL;", []);
+    if let Err(e) = conn.execute("PRAGMA journal_mode=WAL;", []) {
+        tracing::warn!("Failed to enable WAL mode: {}", e);
+    }
+    if let Err(e) = conn.execute("PRAGMA synchronous=NORMAL;", []) {
+        tracing::warn!("Failed to set synchronous mode: {}", e);
+    }
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS request_log (
@@ -222,16 +232,26 @@ pub fn load_blocklist_from_file(path: &str) -> std::collections::HashSet<std::ne
     set
 }
 
-/// Save blocked IPs to a local JSON file.
+/// Save blocked IPs to a local JSON file (atomic write via tmp + rename).
 pub fn save_blocklist_to_file(path: &str, blocklist: &std::collections::HashSet<std::net::IpAddr>) {
     if let Some(parent) = std::path::Path::new(path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let ips: Vec<String> = blocklist.iter().map(|ip| ip.to_string()).collect();
-    if let Ok(json) = serde_json::to_string_pretty(&ips) {
-        if let Err(e) = std::fs::write(path, json) {
-            tracing::error!("Failed to save blocklist to {}: {}", path, e);
+    match serde_json::to_string_pretty(&ips) {
+        Ok(json) => {
+            let tmp_path = format!("{}.tmp.{}", path, std::process::id());
+            match std::fs::write(&tmp_path, &json) {
+                Ok(()) => {
+                    if let Err(e) = std::fs::rename(&tmp_path, path) {
+                        tracing::error!("Failed to atomically save blocklist: {}", e);
+                        let _ = std::fs::remove_file(&tmp_path);
+                    }
+                }
+                Err(e) => tracing::error!("Failed to write blocklist temp file: {}", e),
+            }
         }
+        Err(e) => tracing::error!("Failed to serialize blocklist: {}", e),
     }
 }
 
