@@ -1,7 +1,18 @@
 use once_cell::sync::Lazy;
 
 static GEOIP_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> =
-    Lazy::new(|| maxminddb::Reader::open_readfile("GeoLite2-Country.mmdb").ok());
+    Lazy::new(|| {
+        match maxminddb::Reader::open_readfile("GeoLite2-Country.mmdb") {
+            Ok(reader) => Some(reader),
+            Err(e) => {
+                tracing::warn!(
+                    "GeoIP database not found ({}). Geo-blocking will return 'XX' for all IPs.",
+                    e
+                );
+                None
+            }
+        }
+    });
 
 pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
     if crate::types::is_local_ip(ip) {
