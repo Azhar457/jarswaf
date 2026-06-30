@@ -18,9 +18,9 @@
     const success = await toggleWafStatus(controllerUrl, nextState);
     if (success) {
       if (nextState) {
-        toast.success("Aegis WAF inspection started successfully.");
+        toast.success("jarsWAF inspection started successfully.");
       } else {
-        toast.warning("Aegis WAF bypassed. Traffic is flowing uninspected.");
+        toast.warning("jarsWAF bypassed. Traffic is flowing uninspected.");
       }
     } else {
       toast.error("Failed to update WAF status.");

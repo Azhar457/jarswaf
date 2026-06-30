@@ -183,7 +183,7 @@
     }, 50);
 
     // Write a beautiful welcome banner
-    term.writeln("\x1b[1;36mAegis WAF - Live Security Event Stream\x1b[0m");
+    term.writeln("\x1b[1;36mjarsWAF - Live Security Event Stream\x1b[0m");
     term.writeln(
       "\x1b[90m================================================================================\x1b[0m",
     );
@@ -234,7 +234,7 @@
 <div class="overview-panel flex flex-col gap-8">
   <!-- Header Section -->
   <PageHeader
-    breadcrumbs={[{ label: "Aegis WAF" }, { label: "Dashboard", active: true }]}
+    breadcrumbs={[{ label: "jarsWAF" }, { label: "Dashboard", active: true }]}
     title="Network Overview"
     subtitle="Real-time traffic telemetry and threat mitigation status."
   >

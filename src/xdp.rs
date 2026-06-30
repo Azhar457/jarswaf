@@ -27,8 +27,8 @@ impl XdpManager {
         #[cfg(target_os = "linux")]
         {
             // Try loading from Docker path first, then fall back to local development build path
-            let bpf = match Ebpf::load_file("/app/aegis-ebpf")
-                .or_else(|_| Ebpf::load_file("target/bpfel-unknown-none/release/aegis-ebpf"))
+            let bpf = match Ebpf::load_file("/app/jarswaf-ebpf")
+                .or_else(|_| Ebpf::load_file("target/bpfel-unknown-none/release/jarswaf-ebpf"))
             {
                 Ok(b) => Some(b),
                 Err(e) => {
@@ -57,7 +57,7 @@ impl XdpManager {
                 }
             };
             let program: &mut Xdp = bpf
-                .program_mut("aegis_ebpf")
+                .program_mut("jarswaf_ebpf")
                 .unwrap()
                 .try_into()
                 .map_err(|e| format!("{}", e))?;

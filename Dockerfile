@@ -32,7 +32,7 @@ COPY src/ ./src/
 # Single build pass — avoids doubling disk usage from dummy build caching
 # Clean up cargo registry + build artifacts we don't need afterward
 RUN cargo build --release && \
-    cp target/release/aegis-waf /app/aegis-waf-bin && \
+    cp target/release/jarswaf /app/jarswaf-bin && \
     rm -rf target /usr/local/cargo/registry /usr/local/cargo/git
 
 # ================================================================
@@ -46,18 +46,18 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy compiled Rust binary
-COPY --from=backend-builder /app/aegis-waf-bin /app/aegis-waf
+COPY --from=backend-builder /app/jarswaf-bin /app/jarswaf
 
 # Copy Svelte frontend build
 COPY --from=frontend-builder /app/dashboard/dist /app/dashboard/dist
 
 # Host the compiled Linux binary for Agent install script
 RUN mkdir -p /app/dashboard/dist/bin && \
-    cp /app/aegis-waf /app/dashboard/dist/bin/aegis-agent-Linux-x86_64
+    cp /app/jarswaf /app/dashboard/dist/bin/jarswaf-agent-Linux-x86_64
 
 EXPOSE 8080
 
 ENV RUST_LOG=info
-ENV AEGIS_PORT=8080
+ENV JARSWAF_PORT=8080
 
-CMD ["/app/aegis-waf"]
+CMD ["/app/jarswaf"]

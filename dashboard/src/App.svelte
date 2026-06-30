@@ -22,10 +22,10 @@
     typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
   let activeTab =
     typeof window !== "undefined"
-      ? localStorage.getItem("aegis_active_tab") || "dashboard"
+      ? localStorage.getItem("jarswaf_active_tab") || "dashboard"
       : "dashboard";
   $: if (typeof window !== "undefined") {
-    localStorage.setItem("aegis_active_tab", activeTab);
+    localStorage.setItem("jarswaf_active_tab", activeTab);
   }
 
   let showDeployToast = false;
@@ -165,7 +165,7 @@
         <Shield class="text-blue-400" size={32} />
       </div>
 
-      <h2 class="text-2xl font-bold text-slate-100 tracking-tight text-center">Aegis WAF</h2>
+      <h2 class="text-2xl font-bold text-slate-100 tracking-tight text-center">jarsWAF</h2>
       <p class="text-sm text-slate-400 mt-2 mb-8 text-center max-w-[280px]">
         Enter your administration token to access the control panel.
       </p>

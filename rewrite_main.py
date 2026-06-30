@@ -14,7 +14,7 @@ def rewrite():
     old_init = """    // Ensure logs folder exists
     let log_dir = Path::new("./logs");
     fs::create_dir_all(log_dir).ok();
-    let db_path = "./logs/aegis-controller.db";
+    let db_path = "./logs/jarswaf-controller.db";
 
     // Initialize database
     let conn = rusqlite::Connection::open(db_path).expect("Failed to open controller DB");
@@ -149,7 +149,7 @@ def rewrite():
         Ok(Ok(content)) => {
             Response::builder()
                 .header("Content-Type", "text/plain; charset=utf-8")
-                .header("Content-Disposition", "attachment; filename=\\"aegis-access.log\\"")
+                .header("Content-Disposition", "attachment; filename=\\"jarswaf-access.log\\"")
                 .body(Body::from(content))
                 .unwrap()
         }
@@ -171,7 +171,7 @@ def rewrite():
             if let Ok(content) = resp.text().await {
                 Response::builder()
                     .header("Content-Type", "text/plain; charset=utf-8")
-                    .header("Content-Disposition", "attachment; filename=\\"aegis-access.log\\"")
+                    .header("Content-Disposition", "attachment; filename=\\"jarswaf-access.log\\"")
                     .body(Body::from(content))
                     .unwrap()
             } else {

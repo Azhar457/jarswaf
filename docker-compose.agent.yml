@@ -1,5 +1,5 @@
 # ================================================================
-# Aegis WAF — Agent-Only Deployment (No ClickHouse, No Dashboard)
+# jarsWAF — Agent-Only Deployment (No ClickHouse, No Dashboard)
 # ================================================================
 # For small VPS (1 Core, 2GB RAM)
 # RAM usage: ~30MB total
@@ -9,11 +9,11 @@
 # ================================================================
 
 services:
-  aegis-agent:
+  jarswaf-agent:
     build:
       context: .
       dockerfile: Dockerfile.agent
-    container_name: aegis_agent
+    container_name: jarswaf_agent
     restart: unless-stopped
     ports:
       - "80:80"
@@ -21,10 +21,10 @@ services:
     volumes:
       - ./config.standalone.toml:/app/config.toml
       - ./certs:/app/certs
-      - aegis_logs:/var/log/aegis-waf
+      - jarswaf_logs:/var/log/jarswaf
     environment:
       - RUST_LOG=info
     # No ClickHouse dependency — zero overhead
 
 volumes:
-  aegis_logs:
+  jarswaf_logs:

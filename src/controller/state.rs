@@ -15,4 +15,5 @@ pub struct ControllerState {
     pub blocked: Arc<AtomicU64>,
     pub rate_limited: Arc<AtomicU64>,
     pub config_tx: broadcast::Sender<config::Config>,
+    pub config_lock: Arc<tokio::sync::Mutex<()>>,
 }

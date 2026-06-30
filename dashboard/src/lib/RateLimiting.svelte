@@ -220,7 +220,7 @@
   <div class="flex justify-between items-end">
     <div>
       <div class="flex items-center text-on-surface-variant text-xs mb-1">
-        <span>Aegis WAF</span>
+        <span>jarsWAF</span>
         <span class="material-symbols-outlined text-[12px]">chevron_right</span>
         <span>Configuration</span>
         <span class="material-symbols-outlined text-[12px]">chevron_right</span>

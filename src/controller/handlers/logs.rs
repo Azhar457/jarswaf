@@ -124,7 +124,10 @@ pub async fn export_logs_handler(State(state): State<ControllerState>) -> impl I
     match res {
         Ok(Ok(content)) => Response::builder()
             .header("Content-Type", "text/plain; charset=utf-8")
-            .header("Content-Disposition", "attachment; filename=\"aegis.log\"")
+            .header(
+                "Content-Disposition",
+                "attachment; filename=\"jarswaf.log\"",
+            )
             .body(Body::from(content))
             .unwrap()
             .into_response(),

@@ -57,7 +57,7 @@
     {#if !isCollapsed}
       <div class="flex items-center gap-2 text-slate-100 font-bold text-lg tracking-wider">
         <Shield class="text-blue-500" size={24} />
-        <span>AEGIS WAF</span>
+        <span>jarsWAF</span>
       </div>
     {/if}
     <button

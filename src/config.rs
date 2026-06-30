@@ -20,6 +20,8 @@ pub struct Config {
     pub allowlists: Vec<AllowlistRule>,
     #[serde(default)]
     pub blacklists: Vec<BlacklistRule>,
+    #[serde(default)]
+    pub redis: RedisConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -77,6 +79,10 @@ pub struct VHost {
     pub name: String,
     pub hosts: Vec<String>,
     pub backend: String,
+    #[serde(default)]
+    pub backends: Option<Vec<String>>,
+    #[serde(default = "default_tenant")]
+    pub tenant: String,
     #[serde(default)]
     pub rate_limit_tiers: Vec<RateLimitTier>,
     #[serde(default)]
@@ -199,7 +205,7 @@ fn default_logging_mode() -> String {
     "sqlite".to_string()
 }
 fn default_log_path() -> String {
-    "./logs/aegis.log".to_string()
+    "./logs/jarswaf.log".to_string()
 }
 fn default_max_log_size_mb() -> u64 {
     50
@@ -217,7 +223,7 @@ fn default_blocklist_path() -> String {
     "./blocklist.json".to_string()
 }
 fn default_db_path() -> String {
-    "/var/log/aegis-waf/aegis-waf.db".to_string()
+    "/var/log/jarswaf/jarswaf.db".to_string()
 }
 
 /// Configures which system components are active.
@@ -315,4 +321,58 @@ pub struct BlacklistRule {
 
 fn default_true() -> bool {
     true
+}
+
+pub fn save_config(path: &str, cfg: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    let toml_str = toml::to_string(cfg)?;
+    let tmp_path = format!("{}.tmp", path);
+    fs::write(&tmp_path, toml_str)?;
+
+    // Create backup before renaming
+    if std::path::Path::new(path).exists() {
+        let parent = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
+        let backups_dir = parent.join("config_backups");
+        let _ = fs::create_dir_all(&backups_dir);
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S").to_string();
+        let backup_path = backups_dir.join(format!("config_{}.toml", timestamp));
+        let _ = fs::copy(path, backup_path);
+
+        // Keep only the last 15 backups
+        if let Ok(entries) = fs::read_dir(&backups_dir) {
+            let mut paths: Vec<_> = entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .collect();
+            paths.sort();
+            if paths.len() > 15 {
+                for old_path in paths.iter().take(paths.len() - 15) {
+                    let _ = fs::remove_file(old_path);
+                }
+            }
+        }
+    }
+
+    fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RedisConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_redis_url")]
+    pub url: String,
+}
+
+fn default_false() -> bool {
+    false
+}
+
+fn default_redis_url() -> String {
+    "redis://127.0.0.1:6379".to_string()
+}
+
+fn default_tenant() -> String {
+    "default".to_string()
 }

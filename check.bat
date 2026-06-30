@@ -1,6 +1,6 @@
 @echo off
 echo ===================================================
-echo   Aegis WAF Code Verification and Linting Tool
+echo   jarsWAF Code Verification and Linting Tool
 echo ===================================================
 echo.
 

@@ -56,7 +56,9 @@ pub struct RequestInfo<'a> {
     pub ip: Option<IpAddr>,
 }
 
-pub struct RuleEngine {}
+pub struct RuleEngine {
+    pub custom_rules: Vec<crate::config::CustomRule>,
+}
 
 struct TokenBucket {
     tokens: f64,
@@ -68,6 +70,8 @@ struct TokenBucket {
 
 static RATE_LIMITER: Lazy<DashMap<IpAddr, TokenBucket>> = Lazy::new(DashMap::new);
 static BLOCKED_COUNTERS: Lazy<DashMap<IpAddr, (u32, Instant)>> = Lazy::new(DashMap::new);
+static REDIS_CLIENT: Lazy<tokio::sync::RwLock<Option<redis::Client>>> =
+    Lazy::new(|| tokio::sync::RwLock::new(None));
 
 pub fn record_block(ip: IpAddr) -> bool {
     let now = Instant::now();
@@ -108,8 +112,32 @@ pub fn start_rate_limiter_cleanup() {
 }
 
 impl RuleEngine {
-    pub fn new(_cfg: &Config) -> Self {
-        Self {}
+    pub fn new(cfg: &Config) -> Self {
+        let mut custom_rules = cfg.custom_rules.clone();
+
+        // Dynamic rule loading from plugins directory
+        let plugins_dir = std::path::Path::new("plugins");
+        let _ = std::fs::create_dir_all(plugins_dir);
+        if let Ok(entries) = std::fs::read_dir(plugins_dir) {
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension() {
+                        if ext == "toml" {
+                            if let Ok(content) = std::fs::read_to_string(&path) {
+                                if let Ok(plugin_rules) = toml::from_str::<Vec<crate::config::CustomRule>>(&content) {
+                                    custom_rules.extend(plugin_rules);
+                                } else if let Ok(single_rule) = toml::from_str::<crate::config::CustomRule>(&content) {
+                                    custom_rules.push(single_rule);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Self { custom_rules }
     }
 
     /// Jalankan semua rule terhadap request yang sudah diparse.
@@ -137,6 +165,107 @@ impl RuleEngine {
             body: &norm_body,
             ip,
         };
+
+        // Shannon Entropy-based Behavioral Anomaly Detection
+        if is_rule_enabled("ANOMALY-DETECTION", enabled_rules) {
+            let query_entropy = calculate_entropy(&norm_query);
+            if query_entropy > 5.5 {
+                return Some((
+                    "ANOMALY-DETECTION".to_string(),
+                    format!("High query entropy anomaly detected: {:.2} bits", query_entropy),
+                ));
+            }
+
+            let body_entropy = calculate_entropy(&norm_body);
+            if body_entropy > 5.8 {
+                return Some((
+                    "ANOMALY-DETECTION".to_string(),
+                    format!("High body entropy anomaly detected: {:.2} bits", body_entropy),
+                ));
+            }
+        }
+
+        // Evaluate Custom Rules & Plugins
+        for rule in &self.custom_rules {
+            if !rule.enabled {
+                continue;
+            }
+            if !is_rule_enabled(&rule.id, enabled_rules) {
+                continue;
+            }
+
+            let val_to_check = match rule.condition_type.as_str() {
+                "path" => path,
+                "query" => query,
+                "body" => body,
+                "method" => method,
+                "header" => {
+                    let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        let header_name = parts[0].trim().to_lowercase();
+                        headers.get(&header_name).map(|v| v.as_str()).unwrap_or("")
+                    } else {
+                        ""
+                    }
+                }
+                _ => "",
+            };
+
+            let matched = match rule.operator.as_str() {
+                "equals" => {
+                    if rule.condition_type == "header" {
+                        let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
+                        if parts.len() == 2 {
+                            val_to_check.to_lowercase() == parts[1].trim().to_lowercase()
+                        } else {
+                            false
+                        }
+                    } else {
+                        val_to_check.to_lowercase() == rule.condition_value.to_lowercase()
+                    }
+                }
+                "contains" => {
+                    if rule.condition_type == "header" {
+                        let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
+                        if parts.len() == 2 {
+                            val_to_check.to_lowercase().contains(&parts[1].trim().to_lowercase())
+                        } else {
+                            false
+                        }
+                    } else {
+                        val_to_check.to_lowercase().contains(&rule.condition_value.to_lowercase())
+                    }
+                }
+                "regex" => {
+                    let regex_pattern = if rule.condition_type == "header" {
+                        let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
+                        if parts.len() == 2 {
+                            parts[1].trim()
+                        } else {
+                            ""
+                        }
+                    } else {
+                        rule.condition_value.as_str()
+                    };
+
+                    if let Ok(re) = regex::Regex::new(regex_pattern) {
+                        re.is_match(val_to_check)
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+
+            if matched {
+                if rule.action == "block" {
+                    return Some((
+                        rule.id.clone(),
+                        format!("Custom rule block: {}", rule.name),
+                    ));
+                }
+            }
+        }
 
         // AST / Semantic WAF Engine checks
         if is_rule_enabled("SQLI-AST", enabled_rules) {
@@ -213,6 +342,25 @@ impl RuleEngine {
 
         None
     }
+}
+
+pub fn calculate_entropy(input: &str) -> f64 {
+    if input.is_empty() {
+        return 0.0;
+    }
+    let mut counts = [0usize; 256];
+    for &byte in input.as_bytes() {
+        counts[byte as usize] += 1;
+    }
+    let len = input.len() as f64;
+    let mut entropy = 0.0;
+    for &count in counts.iter() {
+        if count > 0 {
+            let p = count as f64 / len;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
 }
 
 pub fn normalize_string(input: &str) -> String {
@@ -651,7 +799,7 @@ fn check_xss_injection_semantic(input: &str) -> Option<String> {
 
 impl RuleEngine {
     /// Rate limiter check (token bucket). Return true jika diizinkan.
-    pub fn check_rate_limit(&self, ip: IpAddr, limit: u32) -> bool {
+    pub fn check_rate_limit_local(&self, ip: IpAddr, limit: u32) -> bool {
         let rate = limit as f64 / 60.0; // req per detik
         let capacity = rate * 2.0; // burst 2x
         let mut bucket = RATE_LIMITER.entry(ip).or_insert_with(|| TokenBucket {
@@ -686,6 +834,59 @@ impl RuleEngine {
             false
         }
     }
+
+    /// Rate limiter check. Supports distributed Redis rate limiting with local fallback.
+    pub async fn check_rate_limit(
+        &self,
+        ip: IpAddr,
+        limit: u32,
+        redis_config: &crate::config::RedisConfig,
+    ) -> bool {
+        if redis_config.enabled {
+            let mut client_guard = REDIS_CLIENT.read().await;
+            if client_guard.is_none() {
+                drop(client_guard);
+                let mut write_guard = REDIS_CLIENT.write().await;
+                if write_guard.is_none() {
+                    match redis::Client::open(redis_config.url.as_str()) {
+                        Ok(client) => {
+                            *write_guard = Some(client);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to open Redis client at {}: {:?}", redis_config.url, e);
+                        }
+                    }
+                }
+                client_guard = REDIS_CLIENT.read().await;
+            }
+
+            if let Some(client) = &*client_guard {
+                if let Ok(mut conn) = client.get_tokio_connection().await {
+                    let now_bucket = chrono::Utc::now().timestamp() / 60;
+                    let key = format!("ratelimit:{}:{}", ip, now_bucket);
+
+                    let count_res: redis::RedisResult<u32> = redis::cmd("INCR")
+                        .arg(&key)
+                        .query_async(&mut conn)
+                        .await;
+
+                    if let Ok(count) = count_res {
+                        if count == 1 {
+                            let _: redis::RedisResult<()> = redis::cmd("EXPIRE")
+                                .arg(&key)
+                                .arg(65)
+                                .query_async(&mut conn)
+                                .await;
+                        }
+                        return count <= limit;
+                    }
+                }
+            }
+        }
+
+        // Fallback to local rate limiting
+        self.check_rate_limit_local(ip, limit)
+    }
 }
 
 #[cfg(test)]
@@ -719,6 +920,10 @@ mod tests {
             custom_rules: vec![],
             allowlists: vec![],
             blacklists: vec![],
+            redis: crate::config::RedisConfig {
+                enabled: false,
+                url: "redis://127.0.0.1:6379".to_string(),
+            },
         }
     }
 

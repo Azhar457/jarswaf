@@ -65,7 +65,8 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
                         match config::load_config(&config_path_clone) {
                             Ok(new_cfg) => {
                                 if let Ok(mut lock) = config_arc_clone.write() {
-                                    *lock = new_cfg;
+                                    *lock = new_cfg.clone();
+                                    crate::pingora_proxy::GLOBAL_CONFIG.store(Arc::new(new_cfg));
                                     info!(
                                         "Configuration reloaded successfully from {}",
                                         config_path_clone
@@ -115,7 +116,7 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
 
     // Print active mode summary
     info!("──────────────────────────────────────────");
-    info!("  Aegis Agent Configuration Summary");
+    info!("  jarsWAF Agent Configuration Summary");
     info!("  Logging mode:      {}", log_mode);
     info!("  Log file:          {}", cfg.logging.log_path);
     info!(
@@ -158,14 +159,10 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
     };
 
     let blocklist = Arc::new(std::sync::RwLock::new(initial_blocklist));
-    let http_client =
-        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-            .build_http();
     let state = AppState {
         config: config_arc.clone(),
         log_tx,
         blocklist: blocklist.clone(),
-        http_client,
     };
 
     // Spawn background threat intelligence / reputation blocklist sync task

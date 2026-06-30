@@ -1,16 +1,16 @@
 #!/bin/bash
 # ================================================================
-#  Aegis WAF — One-Command Installer
+#  jarsWAF — One-Command Installer
 # ================================================================
 #  Usage:
-#    bash -c "$(curl -fsSLk https://raw.githubusercontent.com/Azhar457/aegis-waf/main/install.sh)"
+#    bash -c "$(curl -fsSLk https://raw.githubusercontent.com/Azhar457/jarswaf/main/install.sh)"
 #
 #  What this does:
 #    1. Checks/installs Docker
-#    2. Creates /opt/aegis-waf directory
+#    2. Creates /opt/jarswaf directory
 #    3. Generates Dockerfile, docker-compose.yml, and config.toml
 #    4. Asks for your backend app details
-#    5. Builds and starts the Aegis WAF Agent container
+#    5. Builds and starts the jarsWAF Agent container
 #
 #  No git clone needed. No Rust toolchain needed. Just Docker.
 # ================================================================
@@ -29,9 +29,9 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # ── Globals ──────────────────────────────────────────────────────
-INSTALL_DIR="/opt/aegis-waf"
-AEGIS_VERSION="1.0.0"
-GITHUB_REPO="https://raw.githubusercontent.com/Azhar457/aegis-waf/main"
+INSTALL_DIR="/opt/jarswaf"
+JARSWAF_VERSION="1.0.0"
+GITHUB_REPO="https://raw.githubusercontent.com/Azhar457/jarswaf/main"
 
 # ── Helper Functions ─────────────────────────────────────────────
 print_banner() {
@@ -45,8 +45,8 @@ print_banner() {
     echo "   ██║  ██║███████╗╚██████╔╝██║███████║    ╚███╔███╔╝██║  ██║██║     "
     echo "   ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝╚══════╝     ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝     "
     echo -e "${NC}"
-    echo -e "${DIM}   Web Application Firewall — Lightweight Agent Installer v${AEGIS_VERSION}${NC}"
-    echo -e "${DIM}   https://github.com/Azhar457/aegis-waf${NC}"
+    echo -e "${DIM}   Web Application Firewall — Lightweight Agent Installer v${JARSWAF_VERSION}${NC}"
+    echo -e "${DIM}   https://github.com/Azhar457/jarswaf${NC}"
     echo ""
 }
 
@@ -180,20 +180,20 @@ generate_files() {
     cd "${INSTALL_DIR}"
 
     # ── Download source or precompiled binary from GitHub ─────────
-    log_step "3" "Checking for precompiled Aegis WAF binary..."
+    log_step "3" "Checking for precompiled jarsWAF binary..."
     
-    BINARY_URL="https://github.com/Azhar457/aegis-waf/releases/latest/download/aegis-waf-linux-amd64"
-    EBPF_URL="https://github.com/Azhar457/aegis-waf/releases/latest/download/aegis-ebpf"
+    BINARY_URL="https://github.com/Azhar457/jarswaf/releases/latest/download/jarswaf-agent-linux-amd64"
+    EBPF_URL="https://github.com/Azhar457/jarswaf/releases/latest/download/jarswaf-ebpf"
     
     if curl -fsSL -I "$BINARY_URL" >/dev/null 2>&1; then
         log_success "Precompiled binary found! Downloading..."
-        curl -fsSL "$BINARY_URL" -o aegis-waf
-        chmod +x aegis-waf
+        curl -fsSL "$BINARY_URL" -o agent
+        chmod +x agent
         
         # Download eBPF object if available
         if curl -fsSL -I "$EBPF_URL" >/dev/null 2>&1; then
             log_success "Precompiled eBPF binary found! Downloading..."
-            curl -fsSL "$EBPF_URL" -o aegis-ebpf
+            curl -fsSL "$EBPF_URL" -o jarswaf-ebpf
         fi
         
         USE_PRECOMPILED=true
@@ -201,7 +201,7 @@ generate_files() {
         log_warn "Precompiled binary not found on GitHub. Falling back to compilation (this will take longer)..."
         USE_PRECOMPILED=false
         # Download and extract the entire repository tarball directly for compilation
-        curl -fsSL "https://github.com/Azhar457/aegis-waf/archive/refs/heads/main.tar.gz" | tar -xz --strip-components=1
+        curl -fsSL "https://github.com/Azhar457/jarswaf/archive/refs/heads/main.tar.gz" | tar -xz --strip-components=1
     fi
 
     # ── Generate Dockerfile ──────────────────────────────────────
@@ -209,13 +209,13 @@ generate_files() {
 
     if [ "$USE_PRECOMPILED" = true ]; then
         local EBPF_COPY=""
-        if [ -f "aegis-ebpf" ]; then
-            EBPF_COPY="COPY aegis-ebpf /app/aegis-ebpf"
+        if [ -f "jarswaf-ebpf" ]; then
+            EBPF_COPY="COPY jarswaf-ebpf /app/jarswaf-ebpf"
         fi
 
         cat > Dockerfile << DOCKERFILE_EOF
 # ================================================================
-# Aegis WAF — Precompiled Agent-Only Dockerfile
+# jarsWAF — Precompiled Agent-Only Dockerfile
 # ================================================================
 FROM ubuntu:24.04
 WORKDIR /app
@@ -223,10 +223,10 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /var/log/aegis-waf /app/certs
+    mkdir -p /var/log/jarswaf /app/certs
 
-COPY aegis-waf /app/aegis-waf
-RUN chmod +x /app/aegis-waf
+COPY agent /app/agent
+RUN chmod +x /app/agent
 ${EBPF_COPY}
 COPY config.toml /app/config.toml
 
@@ -234,12 +234,12 @@ EXPOSE 80 443
 
 ENV RUST_LOG=info
 
-CMD ["/app/aegis-waf", "--config", "/app/config.toml", "agent"]
+CMD ["/app/agent", "--config", "/app/config.toml"]
 DOCKERFILE_EOF
     else
         cat > Dockerfile << 'DOCKERFILE_EOF'
 # ================================================================
-# Aegis WAF — Lightweight Agent-Only Dockerfile (Compiler Fallback)
+# jarsWAF — Lightweight Agent-Only Dockerfile (Compiler Fallback)
 # ================================================================
 FROM rust:slim-bookworm AS builder
 WORKDIR /app
@@ -265,8 +265,8 @@ COPY src/ ./src/
 
 # Touch main.rs to force recompilation of our app, then build
 RUN touch src/main.rs && \
-    cargo build --release && \
-    cp target/release/aegis-waf /app/aegis-waf-bin && \
+    cargo build --release --bin agent && \
+    cp target/release/agent /app/agent-bin && \
     rm -rf target /usr/local/cargo/registry /usr/local/cargo/git
 
 FROM debian:bookworm-slim
@@ -275,16 +275,16 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates libssl3 curl && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /var/log/aegis-waf /app/certs
+    mkdir -p /var/log/jarswaf /app/certs
 
-COPY --from=builder /app/aegis-waf-bin /app/aegis-waf
+COPY --from=builder /app/agent-bin /app/agent
 COPY config.toml /app/config.toml
 
 EXPOSE 80 443
 
 ENV RUST_LOG=info
 
-CMD ["/app/aegis-waf", "--config", "/app/config.toml", "agent"]
+CMD ["/app/agent", "--config", "/app/config.toml"]
 DOCKERFILE_EOF
     fi
 
@@ -297,7 +297,7 @@ DOCKERFILE_EOF
 
     cat > config.toml << TOML_EOF
 # ============================================================
-# Aegis WAF — Agent Configuration (Auto-generated)
+# jarsWAF — Agent Configuration (Auto-generated)
 # ============================================================
 # Generated by install.sh on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 # ============================================================
@@ -309,17 +309,17 @@ port_http = ${HTTP_PORT}
 port_https = ${HTTPS_PORT}
 max_body_size = 10485760
 default_rate_limit = ${RATE_LIMIT}
-log_dir = "/var/log/aegis-waf"
+log_dir = "/var/log/jarswaf"
 log_level = "security"
 waf_enabled = true
 
 [logging]
 mode = "${LOG_MODE}"
-log_path = "/var/log/aegis-waf/aegis.log"
+log_path = "/var/log/jarswaf/jarswaf.log"
 max_log_size_mb = 50
 max_log_files = 5
-blocklist_path = "/var/log/aegis-waf/blocklist.json"
-db_path = "/var/log/aegis-waf/aegis-waf.db"
+blocklist_path = "/var/log/jarswaf/blocklist.json"
+db_path = "/var/log/jarswaf/jarswaf.db"
 TOML_EOF
 
     # Add remote URL if controller specified
@@ -357,7 +357,7 @@ custom_rules = []
 
 [vhosts.logging]
 enabled = true
-db_path = "/var/log/aegis-waf/aegis-waf.db"
+db_path = "/var/log/jarswaf/jarswaf.db"
 TOML_COMPONENTS_EOF
 
     log_success "config.toml generated."
@@ -367,17 +367,17 @@ TOML_COMPONENTS_EOF
 
     cat > docker-compose.yml << COMPOSE_EOF
 services:
-  aegis-agent:
+  jarswaf-agent:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: aegis_agent
+    container_name: jarswaf_agent
     restart: unless-stopped
     network_mode: host
     volumes:
       - ./config.toml:/app/config.toml
       - ./certs:/app/certs
-      - ./logs:/var/log/aegis-waf
+      - ./logs:/var/log/jarswaf
     environment:
       - RUST_LOG=info
 COMPOSE_EOF
@@ -389,12 +389,12 @@ COMPOSE_EOF
 build_and_start() {
     cd "${INSTALL_DIR}"
 
-    log_step "7" "Building Aegis WAF Docker image (this may take 3-5 minutes)..."
+    log_step "7" "Building jarsWAF Docker image (this may take 3-5 minutes)..."
     echo ""
     docker compose build
 
     echo ""
-    log_step "8" "Starting Aegis WAF Agent..."
+    log_step "8" "Starting jarsWAF Agent..."
     docker compose up -d
 
     echo ""
@@ -402,89 +402,89 @@ build_and_start() {
 
 # ── Create management script ────────────────────────────────────
 create_management_script() {
-    cat > "${INSTALL_DIR}/aegis" << 'MGMT_EOF'
+    cat > "${INSTALL_DIR}/jarswaf" << 'MGMT_EOF'
 #!/bin/bash
-# Aegis WAF Agent — Quick Management Commands
-INSTALL_DIR="/opt/aegis-waf"
+# jarsWAF Agent — Quick Management Commands
+INSTALL_DIR="/opt/jarswaf"
 cd "$INSTALL_DIR"
 
 case "${1:-help}" in
     start)
         docker compose up -d
-        echo "Aegis WAF Agent started."
+        echo "jarsWAF Agent started."
         ;;
     stop)
         docker compose down
-        echo "Aegis WAF Agent stopped."
+        echo "jarsWAF Agent stopped."
         ;;
     restart)
         docker compose restart
-        echo "Aegis WAF Agent restarted."
+        echo "jarsWAF Agent restarted."
         ;;
     status)
         docker compose ps
         echo ""
         echo "--- RAM Usage ---"
-        docker stats aegis_agent --no-stream 2>/dev/null || echo "Container not running."
+        docker stats jarswaf_agent --no-stream 2>/dev/null || echo "Container not running."
         ;;
     logs)
         docker compose logs -f --tail=100
         ;;
     waf-logs)
-        tail -f "${INSTALL_DIR}/logs/aegis.log"
+        tail -f "${INSTALL_DIR}/logs/jarswaf.log"
         ;;
     config)
         ${EDITOR:-nano} "${INSTALL_DIR}/config.toml"
-        echo "Config updated. Run: aegis restart"
+        echo "Config updated. Run: jarswaf restart"
         ;;
     rebuild)
         docker compose down
         docker compose build
         docker compose up -d
-        echo "Aegis WAF Agent rebuilt and started."
+        echo "jarsWAF Agent rebuilt and started."
         ;;
     update)
         echo "Pulling latest source from GitHub..."
-        mkdir -p /tmp/aegis-update
-        curl -fsSL "https://github.com/Azhar457/aegis-waf/archive/refs/heads/main.tar.gz" | tar -xz -C /tmp/aegis-update --strip-components=1
-        cp -r /tmp/aegis-update/src /tmp/aegis-update/Cargo.toml /tmp/aegis-update/Cargo.lock ./ 2>/dev/null || true
-        rm -rf /tmp/aegis-update
-        echo "Source updated. Run: aegis rebuild"
+        mkdir -p /tmp/jarswaf-update
+        curl -fsSL "https://github.com/Azhar457/jarswaf/archive/refs/heads/main.tar.gz" | tar -xz -C /tmp/jarswaf-update --strip-components=1
+        cp -r /tmp/jarswaf-update/src /tmp/jarswaf-update/Cargo.toml /tmp/jarswaf-update/Cargo.lock ./ 2>/dev/null || true
+        rm -rf /tmp/jarswaf-update
+        echo "Source updated. Run: jarswaf rebuild"
         ;;
     uninstall)
-        read -p "Remove Aegis WAF completely? [y/N]: " confirm
+        read -p "Remove jarsWAF completely? [y/N]: " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             docker compose down --rmi all --volumes 2>/dev/null
-            rm -f /usr/local/bin/aegis
-            rm -rf /opt/aegis-waf
-            echo "Aegis WAF has been uninstalled."
+            rm -f /usr/local/bin/jarswaf
+            rm -rf /opt/jarswaf
+            echo "jarsWAF has been uninstalled."
         fi
         ;;
     *)
-        echo "Aegis WAF Agent — Management Commands"
+        echo "jarsWAF Agent — Management Commands"
         echo ""
-        echo "Usage: aegis <command>"
+        echo "Usage: jarswaf <command>"
         echo ""
         echo "  start       Start the WAF agent"
         echo "  stop        Stop the WAF agent"
         echo "  restart     Restart the WAF agent"
         echo "  status      Show container status and RAM usage"
         echo "  logs        Stream container logs"
-        echo "  waf-logs    Stream WAF security logs (aegis.log)"
+        echo "  waf-logs    Stream WAF security logs (jarswaf.log)"
         echo "  config      Edit config.toml"
         echo "  rebuild     Rebuild and restart (after config/code changes)"
         echo "  update      Pull latest WAF rules from GitHub"
-        echo "  uninstall   Remove Aegis WAF completely"
+        echo "  uninstall   Remove jarsWAF completely"
         ;;
 esac
 MGMT_EOF
 
-    chmod +x "${INSTALL_DIR}/aegis"
+    chmod +x "${INSTALL_DIR}/jarswaf"
 
     # Symlink to /usr/local/bin for global access
-    ln -sf "${INSTALL_DIR}/aegis" /usr/local/bin/aegis
+    ln -sf "${INSTALL_DIR}/jarswaf" /usr/local/bin/jarswaf
 
-    log_success "Management script installed: ${BOLD}aegis${NC} command available globally."
+    log_success "Management script installed: ${BOLD}jarswaf${NC} command available globally."
 }
 
 # ── Print Success ────────────────────────────────────────────────
@@ -492,23 +492,23 @@ print_success() {
     echo ""
     echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}${BOLD}║                                                                  ║${NC}"
-    echo -e "${GREEN}${BOLD}║   ✅  Aegis WAF Agent installed and running!                     ║${NC}"
+    echo -e "${GREEN}${BOLD}║   ✅  jarsWAF Agent installed and running!                     ║${NC}"
     echo -e "${GREEN}${BOLD}║                                                                  ║${NC}"
     echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "  ${BOLD}Installation directory:${NC}  ${INSTALL_DIR}"
     echo -e "  ${BOLD}Config file:${NC}            ${INSTALL_DIR}/config.toml"
-    echo -e "  ${BOLD}WAF security logs:${NC}      ${INSTALL_DIR}/logs/aegis.log"
+    echo -e "  ${BOLD}WAF security logs:${NC}      ${INSTALL_DIR}/logs/jarswaf.log"
     echo -e "  ${BOLD}TLS certificates:${NC}       ${INSTALL_DIR}/certs/"
     echo ""
     echo -e "  ${CYAN}${BOLD}── Quick Commands ──${NC}"
-    echo -e "  ${BOLD}aegis status${NC}      Check container status and RAM usage"
-    echo -e "  ${BOLD}aegis logs${NC}        Stream container logs"
-    echo -e "  ${BOLD}aegis waf-logs${NC}    Stream WAF security logs"
-    echo -e "  ${BOLD}aegis config${NC}      Edit configuration"
-    echo -e "  ${BOLD}aegis restart${NC}     Restart after config changes"
-    echo -e "  ${BOLD}aegis update${NC}      Pull latest WAF rules from GitHub"
-    echo -e "  ${BOLD}aegis uninstall${NC}   Remove Aegis WAF"
+    echo -e "  ${BOLD}jarswaf status${NC}      Check container status and RAM usage"
+    echo -e "  ${BOLD}jarswaf logs${NC}        Stream container logs"
+    echo -e "  ${BOLD}jarswaf waf-logs${NC}    Stream WAF security logs"
+    echo -e "  ${BOLD}jarswaf config${NC}      Edit configuration"
+    echo -e "  ${BOLD}jarswaf restart${NC}     Restart after config changes"
+    echo -e "  ${BOLD}jarswaf update${NC}      Pull latest WAF rules from GitHub"
+    echo -e "  ${BOLD}jarswaf uninstall${NC}   Remove jarsWAF"
     echo ""
     echo -e "  ${YELLOW}${BOLD}── Test WAF ──${NC}"
     echo -e "  ${DIM}# Normal request (should pass through to your app):${NC}"

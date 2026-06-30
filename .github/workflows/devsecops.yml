@@ -113,14 +113,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Spin up Aegis WAF and Dashboard via Docker Compose for testing
+      # Spin up jarsWAF and Dashboard via Docker Compose for testing
       - name: Spin up Docker Services
         run: |
           docker-compose up -d --build
           # Wait for services to be fully healthy and listening on port 8080
           sleep 15
 
-      # Run OWASP ZAP Baseline scan against Aegis Controller/Dashboard
+      # Run OWASP ZAP Baseline scan against jarsWAF Controller/Dashboard
       - name: OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.13.0
         with:
@@ -131,21 +131,21 @@ jobs:
   # -------------------------------------------------------------
   # Job 4: CD - Auto Deploy to VM via SSH
   # -------------------------------------------------------------
-  deploy:
-    name: Auto Deploy to VM
-    runs-on: ubuntu-latest
-    needs: [sast_audit]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    steps:
-      - name: Deploy to Remote VM via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          port: ${{ secrets.VM_PORT || 22 }}
-          script: |
-            cd /app/aegis-waf # Ganti dengan path folder project Aegis WAF di VM Anda
-            git pull origin main || git pull origin master
-            docker compose down
-            docker compose up -d --build
+  # deploy:
+  #   name: Auto Deploy to VM
+  #   runs-on: ubuntu-latest
+  #   needs: [sast_audit]
+  #   if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+  #   steps:
+  #     - name: Deploy to Remote VM via SSH
+  #       uses: appleboy/ssh-action@v1.0.3
+  #       with:
+  #         host: ${{ secrets.VM_HOST }}
+  #         username: ${{ secrets.VM_USER }}
+  #         key: ${{ secrets.VM_SSH_KEY }}
+  #         port: ${{ secrets.VM_PORT || 22 }}
+  #         script: |
+  #           cd /app/jarswaf # Ganti dengan path folder project jarsWAF di VM Anda
+  #           git pull origin main || git pull origin master
+  #           docker compose down
+  #           docker compose up -d --build

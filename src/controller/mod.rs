@@ -27,30 +27,28 @@ pub async fn run_controller(port: u16, config_path: String) {
         if !has_token {
             let generated = uuid::Uuid::new_v4().simple().to_string();
             cfg.global.admin_token = Some(generated.clone());
-            if let Ok(toml_str) = toml::to_string(&cfg) {
-                if std::fs::write(&config_path, toml_str).is_ok() {
-                    println!("\n\n");
-                    println!(
-                        "========================================================================"
-                    );
-                    println!(
-                        "                   AEGIS WAF - SECURITY INITIALIZATION                  "
-                    );
-                    println!(
-                        "========================================================================"
-                    );
-                    println!("  A secure random administrator token has been generated for you:");
-                    println!("  ");
-                    println!("  Admin Token:  \x1b[1;33m{}\x1b[0m", generated);
-                    println!("  ");
-                    println!("  IMPORTANT: Please copy and save this key in a safe place (e.g., Notepad).");
-                    println!("  It is used to access the dashboard and register agents.");
-                    println!("  This token will NOT be shown again.");
-                    println!(
-                        "========================================================================"
-                    );
-                    println!("\n\n");
-                }
+            if config::save_config(&config_path, &cfg).is_ok() {
+                println!("\n\n");
+                println!(
+                    "========================================================================"
+                );
+                println!(
+                    "                   jarsWAF - SECURITY INITIALIZATION                  "
+                );
+                println!(
+                    "========================================================================"
+                );
+                println!("  A secure random administrator token has been generated for you:");
+                println!("  ");
+                println!("  Admin Token:  \x1b[1;33m{}\x1b[0m", generated);
+                println!("  ");
+                println!("  IMPORTANT: Please copy and save this key in a safe place (e.g., Notepad).");
+                println!("  It is used to access the dashboard and register agents.");
+                println!("  This token will NOT be shown again.");
+                println!(
+                    "========================================================================"
+                );
+                println!("\n\n");
             }
         }
     }
@@ -85,6 +83,7 @@ pub async fn run_controller(port: u16, config_path: String) {
         blocked: Arc::new(AtomicU64::new(initial_stats.blocked as u64)),
         rate_limited: Arc::new(AtomicU64::new(initial_stats.rate_limited as u64)),
         config_tx,
+        config_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     // CORS Configuration for local Svelte dashboard
@@ -117,6 +116,14 @@ pub async fn run_controller(port: u16, config_path: String) {
         .route(
             "/api/v1/config",
             get(handlers::get_config_handler).post(handlers::post_config_handler),
+        )
+        .route(
+            "/api/v1/config/history",
+            get(handlers::get_config_history_handler),
+        )
+        .route(
+            "/api/v1/config/rollback",
+            post(handlers::post_config_rollback_handler),
         )
         .route(
             "/api/v1/vhosts",
@@ -162,6 +169,7 @@ pub async fn run_controller(port: u16, config_path: String) {
 
     let app = Router::new()
         .route("/install.sh", get(handlers::serve_install_script))
+        .route("/metrics", get(handlers::get_metrics_handler))
         .merge(api_routes)
         .fallback_service(tower_http::services::ServeDir::new("dashboard/dist"))
         .layer(cors)
@@ -173,7 +181,7 @@ pub async fn run_controller(port: u16, config_path: String) {
         .expect("Cannot bind Controller port");
 
     info!(
-        "Aegis Controller API & Dashboard available at http://{}",
+        "jarsWAF Controller API & Dashboard available at http://{}",
         addr
     );
 

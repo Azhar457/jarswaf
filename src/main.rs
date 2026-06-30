@@ -1,27 +1,8 @@
-mod agent;
-mod config;
-mod controller;
-mod logging;
-mod proxy;
-pub mod rules;
-pub mod tls;
-pub mod types;
-pub mod vhost;
-pub mod xdp;
-
-pub use types::is_local_ip;
-
 use clap::{Parser, Subcommand};
-use once_cell::sync::Lazy;
-use std::sync::Arc;
-
-// Global XDP Manager
-pub static XDP_MANAGER: Lazy<Arc<tokio::sync::Mutex<xdp::XdpManager>>> =
-    Lazy::new(|| Arc::new(tokio::sync::Mutex::new(xdp::XdpManager::new())));
 
 #[derive(Parser, Debug)]
-#[command(name = "aegis-waf")]
-#[command(about = "Aegis WAF - Next Gen Layer 7 Web Application Firewall", long_about = None)]
+#[command(name = "jarswaf")]
+#[command(about = "jarsWAF - Next Gen Layer 7 Web Application Firewall", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -51,12 +32,14 @@ enum Commands {
     },
 }
 
-pub use agent::AppState;
-
 #[tokio::main]
 async fn main() {
-    // Init tracing
-    tracing_subscriber::fmt().with_env_filter("info").init();
+    // Init tracing with OpenTelemetry-compatible structured JSON format
+    tracing_subscriber::fmt()
+        .json()
+        .flatten_event(true)
+        .with_env_filter("info")
+        .init();
 
     let cli = Cli::parse();
 
@@ -65,10 +48,10 @@ async fn main() {
         token: None,
     }) {
         Commands::Agent { controller, token } => {
-            agent::run_agent(&cli.config, controller, token).await;
+            jarswaf::agent::run_agent(&cli.config, controller, token).await;
         }
         Commands::Controller { port } => {
-            controller::run_controller(port, cli.config).await;
+            jarswaf::controller::run_controller(port, cli.config).await;
         }
     }
 }

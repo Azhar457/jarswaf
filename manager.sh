@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ================================================================
-#  🛡️  AEGIS WAF - SYSTEM MANAGER
+#  🛡️  jarsWAF - SYSTEM MANAGER
 #  All-in-one installer, builder, and deployment tool
 #  Supports: Ubuntu/Debian, RHEL/CentOS/Fedora, macOS
 # ================================================================
@@ -20,7 +20,7 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # --- Constants ---
-INSTALL_DIR="/opt/aegis-waf"
+INSTALL_DIR="/opt/jarswaf"
 COMPOSE_CMD=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQUIRED_RUST_VERSION="1.75.0"
@@ -33,7 +33,7 @@ REQUIRED_NODE_VERSION="20"
 print_banner() {
     clear
     echo -e "${BLUE}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}${BOLD}║${NC}${CYAN}${BOLD}           🛡️  AEGIS WAF — SYSTEM MANAGER v2.0  🛡️              ${NC}${BLUE}${BOLD}║${NC}"
+    echo -e "${BLUE}${BOLD}║${NC}${CYAN}${BOLD}           🛡️  jarsWAF — SYSTEM MANAGER v2.0  🛡️              ${NC}${BLUE}${BOLD}║${NC}"
     echo -e "${BLUE}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -348,7 +348,7 @@ setup_all_dependencies() {
 
 build_from_source() {
     print_banner
-    echo -e "${CYAN}${BOLD}  Building Aegis WAF from source...${NC}"
+    echo -e "${CYAN}${BOLD}  Building jarsWAF from source...${NC}"
     echo ""
 
     cd "$SCRIPT_DIR"
@@ -395,16 +395,18 @@ build_from_source() {
 
     # 5. Build Rust backend
     log_step "5" "Building Rust backend (release mode)"
-    cargo build --release
-    log_success "Backend built to target/release/aegis-waf"
+    cargo build --release --workspace
+    log_success "Backend built to target/release/"
 
     echo ""
     echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}${BOLD}║  ✅  BUILD COMPLETED SUCCESSFULLY!                              ║${NC}"
     echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  Binary:    ${BOLD}${SCRIPT_DIR}/target/release/aegis-waf${NC}"
-    echo -e "  Dashboard: ${BOLD}${SCRIPT_DIR}/dashboard/dist/${NC}"
+    echo -e "  Unified Binary: ${BOLD}${SCRIPT_DIR}/target/release/jarswaf${NC}"
+    echo -e "  Agent Binary:   ${BOLD}${SCRIPT_DIR}/target/release/agent${NC}"
+    echo -e "  Controller:     ${BOLD}${SCRIPT_DIR}/target/release/controller${NC}"
+    echo -e "  Dashboard:      ${BOLD}${SCRIPT_DIR}/dashboard/dist/${NC}"
     echo ""
     echo -e "  Run in dev mode:  ${BOLD}./manager.sh dev${NC}"
     echo -e "  Deploy via Docker: ${BOLD}./manager.sh install${NC}"
@@ -417,7 +419,7 @@ build_from_source() {
 
 run_dev_mode() {
     print_banner
-    echo -e "${CYAN}${BOLD}  Starting Aegis WAF in Development Mode...${NC}"
+    echo -e "${CYAN}${BOLD}  Starting jarsWAF in Development Mode...${NC}"
     echo ""
 
     cd "$SCRIPT_DIR"
@@ -443,12 +445,12 @@ run_dev_mode() {
 
     # Export ClickHouse credentials
     export CLICKHOUSE_USER=default
-    export CLICKHOUSE_PASSWORD=aegis
+    export CLICKHOUSE_PASSWORD=jarswaf
 
     # Trap to cleanup child processes
     cleanup() {
         echo ""
-        log_info "Stopping all Aegis WAF processes..."
+        log_info "Stopping all jarsWAF processes..."
         kill "$PID_CONTROLLER" "$PID_AGENT" "$PID_VITE" 2>/dev/null || true
         exit
     }
@@ -487,9 +489,9 @@ run_dev_mode() {
 #  DOCKER PRODUCTION DEPLOYMENT
 # ================================================================
 
-install_aegis() {
+install_jarswaf() {
     print_banner
-    echo -e "${CYAN}${BOLD}  Deploying Aegis WAF via Docker (Production)...${NC}"
+    echo -e "${CYAN}${BOLD}  Deploying jarsWAF via Docker (Production)...${NC}"
     echo ""
 
     # 1. Check Docker
@@ -520,12 +522,12 @@ install_aegis() {
         log_info "Generating docker-compose.yml..."
         cat << 'EOF' | sudo tee "${INSTALL_DIR}/docker-compose.yml" > /dev/null
 services:
-  aegis-controller:
+  jarswaf-controller:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: aegis_controller
-    command: ["/app/aegis-waf", "controller"]
+    container_name: jarswaf_controller
+    command: ["/app/jarswaf", "controller"]
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -533,7 +535,7 @@ services:
       - RUST_LOG=info
       - CLICKHOUSE_URL=http://clickhouse:8123
       - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=aegis
+      - CLICKHOUSE_PASSWORD=jarswaf
     volumes:
       - ./config.toml:/app/config.toml
     depends_on:
@@ -542,11 +544,11 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
-    container_name: aegis_clickhouse
+    container_name: jarswaf_clickhouse
     restart: unless-stopped
     environment:
       - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=aegis
+      - CLICKHOUSE_PASSWORD=jarswaf
       - CLICKHOUSE_DB=default
     ports:
       - "8123:8123"
@@ -606,8 +608,8 @@ mode = "local_ca"
 cert_dir = "./certs"
 
 [[vhosts]]
-name = "aegis-demo"
-hosts = ["*.aegiswaf.demo"]
+name = "jarswaf-demo"
+hosts = ["*.jarswafwaf.demo"]
 backend = "127.0.0.1:8080"
 rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*"]
 blocked_countries = []
@@ -619,7 +621,7 @@ custom_rules = []
 
 [vhosts.logging]
 enabled = true
-db_path = "logs/aegis-waf.db"
+db_path = "logs/jarswaf.db"
 EOF
         fi
         log_success "config.toml created."
@@ -648,7 +650,7 @@ EOF
     fi
 
     echo ""
-    echo -e "${GREEN}${BOLD}  ✅  Aegis WAF deployed successfully!${NC}"
+    echo -e "${GREEN}${BOLD}  ✅  jarsWAF deployed successfully!${NC}"
     echo -e "  Dashboard: ${BOLD}http://localhost:8080${NC}"
     echo ""
     read -n 1 -s -r -p "Press any key to return to menu..."
@@ -658,9 +660,9 @@ EOF
 #  UNINSTALL
 # ================================================================
 
-uninstall_aegis() {
+uninstall_jarswaf() {
     print_banner
-    echo -e "${RED}${BOLD}  ⚠️  WARNING: This will PERMANENTLY remove Aegis WAF!${NC}"
+    echo -e "${RED}${BOLD}  ⚠️  WARNING: This will PERMANENTLY remove jarsWAF!${NC}"
     echo -e "${RED}  This includes all containers, volumes, and configuration.${NC}"
     echo ""
     read -p "Are you sure? Type 'yes' to confirm: " confirm
@@ -680,7 +682,7 @@ uninstall_aegis() {
 
     log_info "Removing installation directory..."
     sudo rm -rf "${INSTALL_DIR}"
-    log_success "Aegis WAF uninstalled completely."
+    log_success "jarsWAF uninstalled completely."
     read -n 1 -s -r -p "Press any key to return to menu..."
 }
 
@@ -688,9 +690,9 @@ uninstall_aegis() {
 #  UPGRADE
 # ================================================================
 
-upgrade_aegis() {
+upgrade_jarswaf() {
     print_banner
-    echo -e "${CYAN}${BOLD}  Upgrading Aegis WAF...${NC}"
+    echo -e "${CYAN}${BOLD}  Upgrading jarsWAF...${NC}"
     echo ""
 
     if [ -d "${INSTALL_DIR}" ]; then
@@ -701,7 +703,7 @@ upgrade_aegis() {
         sudo ${COMPOSE_CMD} up -d --build
         log_success "Upgrade completed!"
     else
-        log_error "Aegis WAF not found at ${INSTALL_DIR}. Run ${BOLD}./manager.sh install${NC} first."
+        log_error "jarsWAF not found at ${INSTALL_DIR}. Run ${BOLD}./manager.sh install${NC} first."
     fi
     read -n 1 -s -r -p "Press any key to return to menu..."
 }
@@ -840,7 +842,7 @@ run_formatters() {
 
 deploy_agent_only() {
     print_banner
-    echo -e "${CYAN}${BOLD}  Deploying Aegis Agent Only (Lightweight Mode)${NC}"
+    echo -e "${CYAN}${BOLD}  Deploying jarsWAF Agent Only (Lightweight Mode)${NC}"
     echo -e "${DIM}  No ClickHouse, No Dashboard — just the WAF proxy (~30MB RAM)${NC}"
     echo ""
 
@@ -869,24 +871,25 @@ deploy_agent_only() {
     # Check for standalone config
     if [ ! -f "config.standalone.toml" ]; then
         log_error "config.standalone.toml not found!"
-        read -n 1 -s -r -p "Press any key to return to menu..."
-        return
-    fi
-
-    log_step "1" "Building Agent-only Docker image"
-    ${COMPOSE_CMD} -f docker-compose.agent.yml build
-
-    log_step "2" "Starting Agent container"
-    ${COMPOSE_CMD} -f docker-compose.agent.yml up -d
+          log_step "1" "Building Rust Agent binary (release mode)"
+    cargo build --release --bin agent
 
     echo ""
     echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}${BOLD}║  ✅  Aegis Agent deployed in LIGHTWEIGHT mode!                  ║${NC}"
-    echo -e "${GREEN}${BOLD}║  RAM usage: ~30MB | No ClickHouse | No Dashboard               ║${NC}"
+    echo -e "${GREEN}${BOLD}║  ✅  AGENT BUILD COMPLETED!                                     ║${NC}"
     echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
+    echo -e "  Binary: ${BOLD}${SCRIPT_DIR}/target/release/agent${NC}"
+    echo ""
+    echo -e "  Run standalone:"
+    echo -e "    ${BOLD}./target/release/agent --config config.standalone.toml${NC}"
+    echo ""
+    echo -e "  Run with remote controller:"
+    echo -e "    ${BOLD}./target/release/agent --config config.standalone.toml --controller http://CENTRAL_IP:8080${NC}"
+    read -n 1 -s -r -p "Press any key to return to menu..."�════════════════════════════════╝${NC}"
+    echo ""
     echo -e "  Config:     ${BOLD}config.standalone.toml${NC}"
-    echo -e "  Logs:       ${BOLD}/var/log/aegis-waf/aegis.log${NC} (inside container)"
+    echo -e "  Logs:       ${BOLD}/var/log/jarswaf/jarswaf.log${NC} (inside container)"
     echo -e "  HTTP Proxy: ${BOLD}http://0.0.0.0:80${NC}"
     echo ""
     echo -e "  Edit ${BOLD}config.standalone.toml${NC} to configure your VHosts and backends."
@@ -895,7 +898,7 @@ deploy_agent_only() {
 
 build_agent_only() {
     print_banner
-    echo -e "${CYAN}${BOLD}  Building Aegis Agent binary only (no dashboard)...${NC}"
+    echo -e "${CYAN}${BOLD}  Building jarsWAF Agent binary only (no dashboard)...${NC}"
     echo ""
 
     cd "$SCRIPT_DIR"
@@ -919,13 +922,13 @@ build_agent_only() {
     echo -e "${GREEN}${BOLD}║  ✅  AGENT BUILD COMPLETED!                                     ║${NC}"
     echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  Binary: ${BOLD}${SCRIPT_DIR}/target/release/aegis-waf${NC}"
+    echo -e "  Binary: ${BOLD}${SCRIPT_DIR}/target/release/jarswaf${NC}"
     echo ""
     echo -e "  Run standalone:"
-    echo -e "    ${BOLD}./target/release/aegis-waf agent --config config.standalone.toml${NC}"
+    echo -e "    ${BOLD}./target/release/jarswaf agent --config config.standalone.toml${NC}"
     echo ""
     echo -e "  Run with remote controller:"
-    echo -e "    ${BOLD}./target/release/aegis-waf agent --config config.standalone.toml --controller http://CENTRAL_IP:8080${NC}"
+    echo -e "    ${BOLD}./target/release/jarswaf agent --config config.standalone.toml --controller http://CENTRAL_IP:8080${NC}"
     read -n 1 -s -r -p "Press any key to return to menu..."
 }
 
@@ -948,7 +951,7 @@ if [ "$1" != "" ]; then
             exit 0
             ;;
         --install|install|deploy)
-            install_aegis
+            install_jarswaf
             exit 0
             ;;
         --agent-deploy|agent-deploy)
@@ -960,11 +963,11 @@ if [ "$1" != "" ]; then
             exit 0
             ;;
         --uninstall|uninstall|remove)
-            uninstall_aegis
+            uninstall_jarswaf
             exit 0
             ;;
         --upgrade|upgrade|update)
-            upgrade_aegis
+            upgrade_jarswaf
             exit 0
             ;;
         --status|status|health)
@@ -980,7 +983,7 @@ if [ "$1" != "" ]; then
             exit 0
             ;;
         --help|help|-h)
-            echo "Aegis WAF System Manager"
+            echo "jarsWAF System Manager"
             echo ""
             echo "Usage: $0 [COMMAND]"
             echo ""
@@ -995,7 +998,7 @@ if [ "$1" != "" ]; then
             echo "  agent-build       Build Agent binary only (no dashboard build)"
             echo ""
             echo "Management Commands:"
-            echo "  uninstall         Remove Aegis WAF completely"
+            echo "  uninstall         Remove jarsWAF completely"
             echo "  upgrade           Pull latest and rebuild containers"
             echo "  status, health    Show system status and health checks"
             echo "  logs              Stream Docker container logs"
@@ -1030,7 +1033,7 @@ while true; do
     echo -e "  ${YELLOW}7)${NC}  🔧 Build Agent Binary Only"
     echo -e ""
     echo -e "  ${CYAN}${BOLD}── Management ──${NC}"
-    echo -e "  ${RED}8)${NC}  🗑️  Uninstall Aegis WAF"
+    echo -e "  ${RED}8)${NC}  🗑️  Uninstall jarsWAF"
     echo -e "  ${CYAN}9)${NC}  📊 System Status & Health Check"
     echo -e "  ${DIM}10)${NC} 📋 View Real-time Logs"
     echo -e "  ${MAGENTA}11)${NC} 🧹 Run Linters & Formatters"
@@ -1041,11 +1044,11 @@ while true; do
         1) setup_all_dependencies ;;
         2) build_from_source ;;
         3) run_dev_mode ;;
-        4) install_aegis ;;
-        5) upgrade_aegis ;;
+        4) install_jarswaf ;;
+        5) upgrade_jarswaf ;;
         6) deploy_agent_only ;;
         7) build_agent_only ;;
-        8) uninstall_aegis ;;
+        8) uninstall_jarswaf ;;
         9) show_status ;;
         10) show_logs ;;
         11) run_formatters ;;

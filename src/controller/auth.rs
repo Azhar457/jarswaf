@@ -34,11 +34,10 @@ pub async fn auth_middleware(
             }
 
             if !auth_valid {
-                if let Some(query) = req.uri().query() {
-                    for pair in query.split('&') {
-                        let mut parts = pair.splitn(2, '=');
-                        if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
-                            if k == "token" && v == expected_token {
+                if let Some(ws_protocol) = req.headers().get("sec-websocket-protocol") {
+                    if let Ok(proto_str) = ws_protocol.to_str() {
+                        for p in proto_str.split(',') {
+                            if p.trim() == expected_token {
                                 auth_valid = true;
                                 break;
                             }

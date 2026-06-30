@@ -89,7 +89,7 @@
       geoblock_type: item.geoblock_type || "Blocklist",
       custom_rules: item.custom_rules || [],
       rate_limit_tiers: item.rate_limit_tiers || [],
-      logging: item.logging || { enabled: true, db_path: "logs/aegis-waf.db" },
+      logging: item.logging || { enabled: true, db_path: "logs/jarswaf.db" },
     }));
 
     try {
@@ -259,7 +259,7 @@
 <div class="flex justify-between items-end mb-lg">
   <div>
     <div class="flex items-center text-on-surface-variant text-xs mb-1">
-      <span>Aegis WAF</span>
+      <span>jarsWAF</span>
       <span class="material-symbols-outlined text-[12px]">chevron_right</span>
       <span>Configuration</span>
       <span class="material-symbols-outlined text-[12px]">chevron_right</span>

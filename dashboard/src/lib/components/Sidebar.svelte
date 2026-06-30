@@ -43,7 +43,7 @@
         >
         <div class="flex flex-col">
           <span class="font-headline-md text-headline-md text-on-surface font-bold leading-tight"
-            >Aegis WAF</span
+            >jarsWAF</span
           >
           <span class="font-code-md text-body-sm text-on-surface-variant leading-tight"
             >v2.4.0-prod</span
@@ -114,7 +114,7 @@
     {#if !isCollapsed}
       <div class="flex flex-col px-2 pt-2">
         <a
-          href="https://github.com/Azhar457/aegis-waf#readme"
+          href="https://github.com/Azhar457/jarswaf#readme"
           target="_blank"
           rel="noopener noreferrer"
           class="flex items-center text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors"
@@ -135,7 +135,7 @@
     {:else}
       <div class="flex flex-col items-center pt-2">
         <a
-          href="https://github.com/Azhar457/aegis-waf#readme"
+          href="https://github.com/Azhar457/jarswaf#readme"
           target="_blank"
           rel="noopener noreferrer"
           class="text-on-surface-variant hover:text-on-surface transition-colors"

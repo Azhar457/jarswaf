@@ -37,7 +37,7 @@ impl LocalCA {
             fs::create_dir_all(parent)?;
         }
 
-        let mut params = CertificateParams::new(vec!["Aegis Local CA".to_string()])?;
+        let mut params = CertificateParams::new(vec!["jarsWAF Local CA".to_string()])?;
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
 
@@ -48,7 +48,7 @@ impl LocalCA {
         fs::write(&self.key_path, key_pair.serialize_pem())?;
 
         println!("Local CA generated at: {}", self.cert_path);
-        println!("Install this CA on your devices to trust Aegis certificates");
+        println!("Install this CA on your devices to trust jarsWAF certificates");
 
         Ok(())
     }
@@ -79,5 +79,33 @@ impl LocalCA {
         let key_der = PrivateKeyDer::Pkcs8(server_key.serialize_der().into());
 
         Ok((vec![cert_der], key_der))
+    }
+
+    pub fn generate_and_save_pem(
+        &self,
+        domains: Vec<String>,
+        cert_path: &str,
+        key_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let ca_cert_pem = fs::read_to_string(&self.cert_path)?;
+        let ca_key_pem = fs::read_to_string(&self.key_path)?;
+
+        let ca_key = KeyPair::from_pem(&ca_key_pem)?;
+        let ca = rcgen::Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key)?;
+
+        let mut server_params = CertificateParams::new(domains)?;
+        server_params.key_usages = vec![
+            KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::KeyEncipherment,
+        ];
+        server_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+
+        let server_key = KeyPair::generate()?;
+        let server_cert = server_params.signed_by(&server_key, &ca)?;
+
+        fs::write(cert_path, server_cert.pem())?;
+        fs::write(key_path, server_key.serialize_pem())?;
+
+        Ok(())
     }
 }

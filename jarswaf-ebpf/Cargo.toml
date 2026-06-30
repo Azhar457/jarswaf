@@ -1,5 +1,5 @@
 [package]
-name = "aegis-ebpf"
+name = "jarswaf-ebpf"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,7 +9,7 @@ aya-log-ebpf = { git = "https://github.com/aya-rs/aya", branch = "main" }
 network-types = "0.0.5"
 
 [[bin]]
-name = "aegis-ebpf"
+name = "jarswaf-ebpf"
 path = "src/main.rs"
 
 

@@ -1,6 +1,6 @@
 @echo off
 echo ===================================================
-echo   Aegis WAF Development Launcher (Windows)
+echo   jarsWAF Development Launcher (Windows)
 echo ===================================================
 echo.
 
@@ -8,15 +8,15 @@ echo.
 
 echo.
 echo Step 3: Starting WAF Controller in a new window...
-start "Aegis Controller" cmd /k cargo run -- controller
+start "jarsWAF Controller" cmd /k cargo run -- controller
 
 echo.
 echo Step 4: Starting WAF Agent (connecting to Controller) in a new window...
-start "Aegis Agent" cmd /k cargo run -- agent --controller http://localhost:8080
+start "jarsWAF Agent" cmd /k cargo run -- agent --controller http://localhost:8080
 
 echo.
 echo Step 5: Starting Dashboard Vite Dev Server in a new window...
-start "Aegis Dashboard" cmd /c "cd dashboard && npm run dev"
+start "jarsWAF Dashboard" cmd /c "cd dashboard && npm run dev"
 
 echo.
 echo All processes started! 

@@ -1,6 +1,6 @@
-# 🛡️ Aegis WAF (Web Application Firewall)
+# 🛡️ jarsWAF (Web Application Firewall)
 
-Aegis WAF is a modern, high-performance **Web Application Firewall** built with **Rust** (backend proxy & controller) and **Svelte** (frontend dashboard). It functions as a reverse proxy that inspects, filters, and logs HTTP traffic in real-time with a futuristic monitoring UI.
+jarsWAF is a modern, high-performance **Web Application Firewall** built with **Rust** (backend proxy & controller) and **Svelte** (frontend dashboard). **Secepat Pingora dan Sekuat Safeline**, it functions as a reverse proxy that inspects, filters, and logs HTTP traffic in real-time with a futuristic monitoring UI.
 
 ---
 
@@ -38,8 +38,8 @@ flowchart LR
     end
 
     %% WAF Agent
-    subgraph Agent ["Aegis WAF Agent Node"]
-        WAF_Engine{"Aegis Security Engine"}
+    subgraph Agent ["jarsWAF Agent Node"]
+        WAF_Engine{"jarsWAF Security Engine"}
         AST["AST Semantic Analyzer"]
         Regex["Signature/Regex Engine"]
         RateLimit["Rate Limiting"]
@@ -58,7 +58,7 @@ flowchart LR
     end
 
     %% Central Brain
-    subgraph Central ["Aegis Central Controller"]
+    subgraph Central ["jarsWAF Central Controller"]
         API("REST API")
         WebSocket("Realtime Broadcast")
         Reputation["Reputation Blocklist Sync"]
@@ -156,30 +156,30 @@ flowchart LR
 
 ### Option A: One-Command Install (Fastest)
 
-Install and start Aegis WAF Agent with a single command — no `git clone` needed:
+Install and start jarsWAF Agent with a single command — no `git clone` needed:
 
 ```bash
-sudo bash -c "$(curl -fsSLk https://raw.githubusercontent.com/Azhar457/aegis-waf/main/install.sh)"
+sudo bash -c "$(curl -fsSLk https://raw.githubusercontent.com/Azhar457/jarswaf/main/install.sh)"
 ```
 
 This will interactively ask for your backend address and domain, then build and start the WAF agent. After installation, manage with:
 
 ```bash
-aegis status      # Check status & RAM usage
-aegis logs        # Stream logs
-aegis config      # Edit config
-aegis restart     # Apply changes
-aegis uninstall   # Remove completely
+jarswaf status      # Check status & RAM usage
+jarswaf logs        # Stream logs
+jarswaf config      # Edit config
+jarswaf restart     # Apply changes
+jarswaf uninstall   # Remove completely
 ```
 
 ### Option B: Automated Setup (Full Stack)
 
-This is the **fastest way** to go from a fresh Ubuntu/Debian server to a running **full-stack** Aegis WAF (Agent + Controller + ClickHouse + Dashboard).
+This is the **fastest way** to go from a fresh Ubuntu/Debian server to a running **full-stack** jarsWAF (Agent + Controller + ClickHouse + Dashboard).
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Azhar457/aegis-waf.git
-cd aegis-waf
+git clone https://github.com/Azhar457/jarswaf.git
+cd jarswaf
 
 # 2. Make the manager script executable
 chmod +x manager.sh
@@ -194,7 +194,7 @@ exit
 # SSH back in...
 
 # 5. Deploy via Docker (Production Mode)
-cd aegis-waf
+cd jarswaf
 ./manager.sh install
 
 # OR: Build from source and run in dev mode
@@ -210,12 +210,12 @@ The `deps` command will automatically detect your OS and install:
 
 ### Option C: Docker-Only Deployment
 
-If you already have Docker installed and just want to run Aegis WAF without building from source:
+If you already have Docker installed and just want to run jarsWAF without building from source:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Azhar457/aegis-waf.git
-cd aegis-waf
+git clone https://github.com/Azhar457/jarswaf.git
+cd jarswaf
 
 # 2. Start everything (builds inside Docker containers)
 docker compose up -d --build
@@ -287,8 +287,8 @@ exit
 #### Step 5: Clone and Build
 
 ```bash
-git clone https://github.com/Azhar457/aegis-waf.git
-cd aegis-waf
+git clone https://github.com/Azhar457/jarswaf.git
+cd jarswaf
 
 # Install frontend dependencies
 cd dashboard && npm install && cd ..
@@ -307,13 +307,13 @@ sleep 5
 
 # Set credentials
 export CLICKHOUSE_USER=default
-export CLICKHOUSE_PASSWORD=aegis
+export CLICKHOUSE_PASSWORD=jarswaf
 
 # Start Controller
-./target/release/aegis-waf controller &
+./target/release/jarswaf controller &
 
 # Start Agent (separate terminal)
-./target/release/aegis-waf agent --controller http://localhost:8080 &
+./target/release/jarswaf agent --controller http://localhost:8080 &
 
 # Access dashboard at http://localhost:8080
 ```
@@ -322,12 +322,12 @@ export CLICKHOUSE_PASSWORD=aegis
 
 ### Option E: Standalone Agent Deployment (Lightweight VPS)
 
-For deploying the Aegis WAF Agent on a small VPS client (e.g., 1 Core, 2GB RAM) where running ClickHouse (~1GB RAM) and the Svelte Dashboard (~200MB RAM) is not feasible. This mode runs only the lightweight Rust proxy engine, which uses **~30MB of RAM**.
+For deploying the jarsWAF Agent on a small VPS client (e.g., 1 Core, 2GB RAM) where running ClickHouse (~1GB RAM) and the Svelte Dashboard (~200MB RAM) is not feasible. This mode runs only the lightweight Rust proxy engine, which uses **~30MB of RAM**.
 
 You can run the Agent in three logging modes:
 
 - **`file` mode**: Writes security logs as JSON Lines to a local file with auto-rotation. Zero external database or controller dependencies.
-- **`remote` mode**: Writes logs locally and pushes them asynchronously in batches to a central Aegis Controller.
+- **`remote` mode**: Writes logs locally and pushes them asynchronously in batches to a central jarsWAF Controller.
 - **`clickhouse` mode**: Standard mode, writes directly to ClickHouse (requires Docker).
 
 #### Deployment Steps:
@@ -335,8 +335,8 @@ You can run the Agent in three logging modes:
 1. **Clone the repository on the client VPS**:
 
    ```bash
-   git clone https://github.com/Azhar457/aegis-waf.git
-   cd aegis-waf
+   git clone https://github.com/Azhar457/jarswaf.git
+   cd jarswaf
    ```
 
 2. **Install dependencies (only Docker is needed for container deployment)**:
@@ -352,21 +352,21 @@ You can run the Agent in three logging modes:
    ./manager.sh agent-deploy
    ```
 
-   _This starts only the lightweight `aegis-agent` container using [Dockerfile.agent](file:///d:/Desktop/KERJA/aegis-waf/Dockerfile.agent) and [docker-compose.agent.yml](file:///d:/Desktop/KERJA/aegis-waf/docker-compose.agent.yml), using [config.standalone.toml](file:///d:/Desktop/KERJA/aegis-waf/config.standalone.toml) as the config._
+   _This starts only the lightweight `jarswaf-agent` container using [Dockerfile.agent](file:///d:/Desktop/KERJA/jarswaf/Dockerfile.agent) and [docker-compose.agent.yml](file:///d:/Desktop/KERJA/jarswaf/docker-compose.agent.yml), using [config.standalone.toml](file:///d:/Desktop/KERJA/jarswaf/config.standalone.toml) as the config._
 
 4. **Verify the installation**:
-   - Check container status: `docker ps` (should show `aegis_agent` running).
-   - Check logs: `tail -f logs/aegis.log` (outside container) or `/var/log/aegis-waf/aegis.log` (inside container).
+   - Check container status: `docker ps` (should show `jarswaf_agent` running).
+   - Check logs: `tail -f logs/jarswaf.log` (outside container) or `/var/log/jarswaf/jarswaf.log` (inside container).
 
 #### 🌐 Multi-Domain & Service Setup (Virtual Hosts)
 
-Aegis WAF operates similarly to NGINX, allowing you to proxy multiple domains to different backend services on a single agent. To configure this, edit your `/opt/aegis-waf/config.toml` (or `config.standalone.toml`) and define multiple `[[vhosts]]` blocks:
+jarsWAF operates similarly to NGINX, allowing you to proxy multiple domains to different backend services on a single agent. To configure this, edit your `/opt/jarswaf/config.toml` (or `config.standalone.toml`) and define multiple `[[vhosts]]` blocks:
 
 ```toml
 # Service 1 (e.g. Python App on port 9500)
 [[vhosts]]
 name = "python-app"
-hosts = ["aegis.local"]
+hosts = ["jarswaf.local"]
 backend = "127.0.0.1:9500"
 rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*"]
 ssl = "Auto (Local CA)"
@@ -382,24 +382,24 @@ ssl = "Auto (Local CA)"
 
 #### 🔒 Strict Domain Routing (Zero Trust)
 
-For security (preventing Host Header Injection and keeping a Zero Trust architecture), **Aegis WAF blocks direct IP accesses by default** (e.g., trying to access `http://192.168.56.102/` directly will return a `400 Bad Request`).
+For security (preventing Host Header Injection and keeping a Zero Trust architecture), **jarsWAF blocks direct IP accesses by default** (e.g., trying to access `http://192.168.56.102/` directly will return a `400 Bad Request`).
 
 To test your domains locally before pointing public DNS:
 
 1. Open your Windows/macOS/Linux host file (e.g. `C:\Windows\System32\drivers\etc\hosts`).
 2. Add a local mapping pointing to your WAF IP:
    ```text
-   192.168.56.102    aegis.local
+   192.168.56.102    jarswaf.local
    192.168.56.102    api.local
    ```
-3. Now access the apps in your browser using `http://aegis.local` or `http://api.local`.
+3. Now access the apps in your browser using `http://jarswaf.local` or `http://api.local`.
 
 #### RAM Usage Comparison:
 
 | Component                 | Full Stack (Option A/B) | Standalone Agent Only |
 | ------------------------- | ----------------------- | --------------------- |
-| Aegis Agent (Rust)        | ~30 MB                  | ~30 MB                |
-| Aegis Controller (Rust)   | ~50 MB                  | ❌ 0 MB               |
+| jarsWAF Agent (Rust)        | ~30 MB                  | ~30 MB                |
+| jarsWAF Controller (Rust)   | ~50 MB                  | ❌ 0 MB               |
 | ClickHouse DB             | ~800-1200 MB            | ❌ 0 MB               |
 | Client App (Laravel/Node) | ~200 MB                 | ~200 MB               |
 | Client DB (MySQL)         | ~300 MB                 | ~300 MB               |
@@ -447,7 +447,7 @@ This starts 3 processes:
 
 | Port   | Service                          | Protocol | Required      |
 | ------ | -------------------------------- | -------- | ------------- |
-| `8080` | Aegis Controller API + Dashboard | HTTP     | ✅ Always     |
+| `8080` | jarsWAF Controller API + Dashboard | HTTP     | ✅ Always     |
 | `8123` | ClickHouse HTTP Interface        | HTTP     | ✅ Always     |
 | `9000` | ClickHouse Native Interface      | TCP      | ⚪ Optional   |
 | `80`   | WAF HTTP Proxy (Agent)           | HTTP     | ⚡ Production |
@@ -456,7 +456,7 @@ This starts 3 processes:
 
 ### Cross-Platform Deployment Combinations
 
-Aegis WAF is designed as a **Controller + Agent** architecture. The Controller manages configuration, dashboard, and logs. Agents are reverse proxies deployed at target servers.
+jarsWAF is designed as a **Controller + Agent** architecture. The Controller manages configuration, dashboard, and logs. Agents are reverse proxies deployed at target servers.
 
 > ℹ️ The Controller and Agent can run on **different machines and different operating systems**.
 
@@ -481,7 +481,7 @@ Aegis WAF is designed as a **Controller + Agent** architecture. The Controller m
 
 ```bash
 # On the Agent machine:
-./target/release/aegis-waf agent --controller http://<CONTROLLER_IP>:8080
+./target/release/jarswaf agent --controller http://<CONTROLLER_IP>:8080
 
 # Windows Agent:
 cargo run -- agent --controller http://<CONTROLLER_IP>:8080
@@ -500,7 +500,7 @@ cargo run -- agent --controller http://<CONTROLLER_IP>:8080
 
 ## 🛠️ Manager Script Reference
 
-The `manager.sh` script is your single entry point for managing the entire Aegis WAF lifecycle.
+The `manager.sh` script is your single entry point for managing the entire jarsWAF lifecycle.
 
 ### Interactive Mode
 
@@ -520,7 +520,7 @@ The `manager.sh` script is your single entry point for managing the entire Aegis
 | `./manager.sh agent-deploy` | Deploy Agent-only via Docker (no ClickHouse, no Dashboard)    |
 | `./manager.sh agent-build`  | Build Agent binary only (no dashboard build)                  |
 | `./manager.sh upgrade`      | Pull latest images and rebuild                                |
-| `./manager.sh uninstall`    | Remove Aegis WAF completely                                   |
+| `./manager.sh uninstall`    | Remove jarsWAF completely                                   |
 | `./manager.sh status`       | Show system status and health checks                          |
 | `./manager.sh logs`         | Stream Docker container logs                                  |
 | `./manager.sh format`       | Run Rust fmt, Clippy, tests + Svelte check                    |
@@ -538,7 +538,7 @@ The `manager.sh` script is your single entry point for managing the entire Aegis
 ## 📁 Project Structure
 
 ```
-aegis-waf/
+jarswaf/
 ├── src/                    # Rust backend source
 │   ├── main.rs             # Entry point (Controller / Agent CLI)
 │   ├── proxy.rs            # Reverse proxy engine (Axum)
@@ -551,7 +551,7 @@ aegis-waf/
 │   │   ├── components/     # Reusable UI components (Globe, Terminal, Charts)
 │   │   └── App.svelte      # Root application
 │   └── package.json
-├── aegis-ebpf/             # eBPF XDP programs (Linux only)
+├── jarswaf-ebpf/             # eBPF XDP programs (Linux only)
 ├── certs/                  # Auto-generated TLS certificates
 ├── logs/                   # Runtime logs
 ├── config.toml             # WAF configuration (full stack)
@@ -576,7 +576,7 @@ aegis-waf/
 
 ### 🐧 Linux (eBPF XDP Enabled) — Production Recommended
 
-On Linux (Kernel ≥ 5.8), Aegis WAF uses **eBPF XDP** to drop malicious packets at the kernel/NIC driver level before they reach userspace.
+On Linux (Kernel ≥ 5.8), jarsWAF uses **eBPF XDP** to drop malicious packets at the kernel/NIC driver level before they reach userspace.
 
 **Advantages:**
 
@@ -621,7 +621,7 @@ The project includes a comprehensive DevSecOps pipeline in [`.github/workflows/d
 
 ## 🔒 WAF Rules & Security Engine
 
-Aegis WAF uses a **dual-layer detection engine**:
+jarsWAF uses a **dual-layer detection engine**:
 
 ### Layer 1: AST Semantic Analyzer
 

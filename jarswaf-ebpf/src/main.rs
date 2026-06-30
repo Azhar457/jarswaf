@@ -18,8 +18,8 @@ use network_types::{
 static mut BLOCKLIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(10240, 0);
 
 #[xdp]
-pub fn aegis_ebpf(ctx: XdpContext) -> u32 {
-    match try_aegis_ebpf(ctx) {
+pub fn jarswaf_ebpf(ctx: XdpContext) -> u32 {
+    match try_jarswaf_ebpf(ctx) {
         Ok(ret) => ret,
         Err(_) => xdp_action::XDP_ABORTED,
     }
@@ -38,7 +38,7 @@ fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
     Ok((start + offset) as *const T)
 }
 
-fn try_aegis_ebpf(ctx: XdpContext) -> Result<u32, ()> {
+fn try_jarswaf_ebpf(ctx: XdpContext) -> Result<u32, ()> {
     let ethhdr: *const EthHdr = ptr_at(&ctx, 0)?;
     match unsafe { (*ethhdr).ether_type } {
         EtherType::Ipv4 => {}

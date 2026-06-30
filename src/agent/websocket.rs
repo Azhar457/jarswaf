@@ -9,15 +9,29 @@ pub async fn start_config_sync_websocket(
     config_arc: Arc<std::sync::RwLock<config::Config>>,
 ) {
     loop {
-        let mut ws_url = format!("{}/ws/agent", controller_url.trim_end_matches('/'))
+        let ws_url = format!("{}/ws/agent", controller_url.trim_end_matches('/'))
             .replace("http://", "ws://")
             .replace("https://", "wss://");
-        if let Some(ref t) = token {
-            ws_url = format!("{}?token={}", ws_url, urlencoding::encode(t));
-        }
 
         info!("Connecting to Controller config WebSocket at {}...", ws_url);
-        match tokio_tungstenite::connect_async(&ws_url).await {
+
+        let mut request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
+            .uri(&ws_url);
+
+        if let Some(ref t) = token {
+            request = request.header("Sec-WebSocket-Protocol", t);
+        }
+
+        let request = match request.body(()) {
+            Ok(req) => req,
+            Err(e) => {
+                error!("Failed to build WebSocket handshake request: {:?}", e);
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+
+        match tokio_tungstenite::connect_async(request).await {
             Ok((mut ws_stream, _)) => {
                 info!("Connected to Controller configuration WebSocket");
                 while let Some(msg) = ws_stream.next().await {
