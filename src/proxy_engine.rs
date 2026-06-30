@@ -341,43 +341,25 @@ impl ProxyHttp for JarsWafProxy {
         let (host, port, tls) = if backend.starts_with("https://") {
             let stripped = backend.trim_start_matches("https://");
             let clean_host = stripped.split(':').next().unwrap_or(stripped);
-            let p = if stripped.contains(':') {
-                stripped
-                    .split(':')
-                    .next_back()
-                    .unwrap()
-                    .parse()
-                    .unwrap_or(443)
-            } else {
-                443
-            };
+            let p = stripped
+                .rsplit_once(':')
+                .and_then(|(_, port)| port.parse().ok())
+                .unwrap_or(443);
             (clean_host, p, true)
         } else if backend.starts_with("http://") {
             let stripped = backend.trim_start_matches("http://");
             let clean_host = stripped.split(':').next().unwrap_or(stripped);
-            let p = if stripped.contains(':') {
-                stripped
-                    .split(':')
-                    .next_back()
-                    .unwrap()
-                    .parse()
-                    .unwrap_or(80)
-            } else {
-                80
-            };
+            let p = stripped
+                .rsplit_once(':')
+                .and_then(|(_, port)| port.parse().ok())
+                .unwrap_or(80);
             (clean_host, p, false)
         } else {
             let clean_host = backend.split(':').next().unwrap_or(&backend);
-            let p = if backend.contains(':') {
-                backend
-                    .split(':')
-                    .next_back()
-                    .unwrap()
-                    .parse()
-                    .unwrap_or(80)
-            } else {
-                80
-            };
+            let p = stripped
+                .rsplit_once(':')
+                .and_then(|(_, port)| port.parse().ok())
+                .unwrap_or(80);
             (clean_host, p, false)
         };
 
@@ -400,7 +382,7 @@ impl ProxyHttp for JarsWafProxy {
         if let Some(ip) = ctx.client_ip {
             upstream_request
                 .insert_header("X-Forwarded-For", ip.to_string())
-                .unwrap_or_else(());
+                .unwrap_or_else(|_| ());
         }
         Ok(())
     }
@@ -547,6 +529,8 @@ impl ProxyHttp for JarsWafProxy {
                     ));
                 }
             }
+            ctx.body_buffer.clear();
+            ctx.body_buffer.shrink_to_fit();
         }
 
         Ok(())
