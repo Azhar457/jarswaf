@@ -15,7 +15,7 @@ use network_types::{
 };
 
 #[map(name = "BLOCKLIST")]
-static mut BLOCKLIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(10240, 0);
+static BLOCKLIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(10240, 0);
 
 #[xdp]
 pub fn jarswaf_ebpf(ctx: XdpContext) -> u32 {
@@ -49,7 +49,7 @@ fn try_jarswaf_ebpf(ctx: XdpContext) -> Result<u32, ()> {
     let source_ip = unsafe { (*ipv4hdr).src_addr }; // network byte order
 
     // Check against our blocklist map
-    let blocked = unsafe { BLOCKLIST.get(&source_ip) };
+    let blocked = BLOCKLIST.get(&source_ip);
     if let Some(&1) = blocked {
         // IP is in the blocklist, drop the packet!
         info!(&ctx, "XDP DROP -> Banned IP: {:i}", source_ip);
