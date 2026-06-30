@@ -50,7 +50,6 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
 
     // Spawn background config reloader
     let config_path_clone = config_path.to_string();
-    let config_arc_clone = config_arc.clone();
     tokio::spawn(async move {
         let mut last_modified = std::fs::metadata(&config_path_clone)
             .and_then(|m| m.modified())
@@ -64,14 +63,12 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
                         last_modified = modified;
                         match config::load_config(&config_path_clone) {
                             Ok(new_cfg) => {
-                                if let Ok(mut lock) = config_arc_clone.write() {
-                                    *lock = new_cfg.clone();
-                                    crate::proxy_engine::GLOBAL_CONFIG.store(Arc::new(new_cfg));
-                                    info!(
-                                        "Configuration reloaded successfully from {}",
-                                        config_path_clone
-                                    );
-                                }
+                                // Atomic update via ArcSwap — no RwLock race window
+                                crate::proxy_engine::GLOBAL_CONFIG.store(Arc::new(new_cfg));
+                                info!(
+                                    "Configuration reloaded successfully from {}",
+                                    config_path_clone
+                                );
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -148,17 +145,21 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
     // Build application state — load blocklist from file
     let initial_blocklist = {
         let loaded = logging::load_blocklist_from_file(&cfg.logging.blocklist_path);
+        let blocklist = dashmap::DashMap::new();
         if !loaded.is_empty() {
             info!(
                 "Loaded {} blocked IPs from {}",
                 loaded.len(),
                 cfg.logging.blocklist_path
             );
+            for ip in loaded {
+                blocklist.insert(ip, ());
+            }
         }
-        loaded
+        blocklist
     };
 
-    let blocklist = Arc::new(std::sync::RwLock::new(initial_blocklist));
+    let blocklist = Arc::new(initial_blocklist);
     let state = AppState {
         config: config_arc.clone(),
         log_tx,

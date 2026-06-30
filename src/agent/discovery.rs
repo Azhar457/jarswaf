@@ -5,11 +5,11 @@ use crate::types::DiscoveredService;
 /// Discover running Docker containers with exposed ports.
 pub fn get_docker_services() -> Vec<DiscoveredService> {
     let mut services = Vec::new();
-    if let Ok(output) = std::process::Command::new("docker")
+    match std::process::Command::new("docker")
         .args(["ps", "--format", "{{json .}}"])
         .output()
     {
-        if output.status.success() {
+        Ok(output) if output.status.success() => {
             let out_str = String::from_utf8_lossy(&output.stdout);
             for line in out_str.lines() {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
@@ -40,6 +40,11 @@ pub fn get_docker_services() -> Vec<DiscoveredService> {
                 }
             }
         }
+        Ok(output) => tracing::debug!(
+            "docker ps failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ),
+        Err(e) => tracing::debug!("docker not available: {}", e),
     }
     services
 }
