@@ -117,7 +117,7 @@
       >
         <div class="absolute top-4 left-4 z-10">
           <Badge variant="danger" className="animate-pulse">LIVE SYNC ACTIVE</Badge>
-          <p class="text-xs font-mono text-slate-400 mt-2">Aegis Reputation Network</p>
+          <p class="text-xs font-mono text-slate-400 mt-2">jarsWAF Reputation Network</p>
         </div>
 
         <div class="flex-1 w-full h-full flex items-center justify-center p-8">
@@ -171,7 +171,7 @@
           <Activity size={16} class="text-blue-400" /> Network Sync Status
         </h3>
         <p class="text-xs text-slate-400 leading-relaxed">
-          The Aegis Reputation Network is currently distributing blocklist updates to all your Agent
+          The jarsWAF Reputation Network is currently distributing blocklist updates to all your Agent
           Nodes.
         </p>
       </Card>

@@ -1,5 +1,5 @@
 # ============================================================
-# Aegis WAF — Standalone Agent Configuration
+# jarsWAF — Standalone Agent Configuration
 # ============================================================
 # This config is optimized for small VPS (1 Core, 2GB RAM).
 # No ClickHouse, no Dashboard — just the WAF proxy.
@@ -13,7 +13,7 @@ port_http = 80
 port_https = 443
 max_body_size = 10485760        # 10MB
 default_rate_limit = 600        # requests per minute
-log_dir = "/var/log/aegis-waf"
+log_dir = "/var/log/jarswaf"
 log_level = "security"
 waf_enabled = true
 
@@ -24,11 +24,11 @@ waf_enabled = true
 #   "sqlite"     → Direct insert to local SQLite (requires db_path)
 [logging]
 mode = "file"
-log_path = "/var/log/aegis-waf/aegis.log"
+log_path = "/var/log/jarswaf/jarswaf.log"
 max_log_size_mb = 50            # Rotate when file exceeds this size
 max_log_files = 5               # Keep max N rotated files
-blocklist_path = "/var/log/aegis-waf/blocklist.json"
-db_path = "/var/log/aegis-waf/aegis-waf.db"
+blocklist_path = "/var/log/jarswaf/blocklist.json"
+db_path = "/var/log/jarswaf/jarswaf.db"
 
 # Uncomment for remote monitoring from your central server:
 # mode = "remote"
@@ -65,7 +65,7 @@ custom_rules = []
 
 [vhosts.logging]
 enabled = true
-db_path = "/var/log/aegis-waf/aegis-waf.db"
+db_path = "/var/log/jarswaf/jarswaf.db"
 
 # ── Example: Laravel Application ─────────────────────────────
 # Uncomment to protect a Laravel app running on port 8000

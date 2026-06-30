@@ -1,13 +1,13 @@
 #!/bin/bash
 echo "==================================================="
-echo "  Aegis WAF Development Launcher (Unix/macOS)"
+echo "  jarsWAF Development Launcher (Unix/macOS)"
 echo "==================================================="
 echo
 
 # Handler to terminate all child processes on exit
 cleanup() {
     echo
-    echo "Stopping Aegis WAF processes..."
+    echo "Stopping jarsWAF processes..."
     kill "$PID_CONTROLLER" "$PID_AGENT" "$PID_VITE" 2>/dev/null
     exit
 }
@@ -17,13 +17,13 @@ trap cleanup SIGINT SIGTERM
 
 echo
 echo "Step 3: Starting WAF Controller..."
-cargo run -- controller &
+cargo run --bin controller -- --port 8080 &
 PID_CONTROLLER=$!
 
 sleep 2
 
 echo "Step 4: Starting WAF Agent (connecting to Controller)..."
-cargo run -- agent --controller http://localhost:8080 &
+cargo run --bin agent -- --controller http://localhost:8080 &
 PID_AGENT=$!
 
 echo "Step 5: Starting Dashboard Vite Dev Server..."

@@ -18,7 +18,7 @@ PAYLOADS = {
         "/about",
         "/contact",
         "/products?category=security",
-        "/blog/introducing-aegis-waf"
+        "/blog/introducing-jarswaf"
     ],
     "sqli": [
         "/?id=1%20OR%201=1",
@@ -59,7 +59,7 @@ def send_request(url, type_name):
         
     req = urllib.request.Request(url)
     req.add_header("Host", HOST_HEADER)
-    req.add_header("User-Agent", "Aegis-Stress-Tester/1.0")
+    req.add_header("User-Agent", "jarsWAF-Stress-Tester/1.0")
     
     try:
         with urllib.request.urlopen(req, timeout=3.0) as response:
@@ -119,7 +119,7 @@ def print_stats():
 
 if __name__ == "__main__":
     print("=========================================================")
-    print("         Aegis WAF Real-Time Stress Tester               ")
+    print("         jarsWAF Real-Time Stress Tester               ")
     print("=========================================================")
     print(f"Target URL : {TARGET_URL}")
     print(f"Host Header: {HOST_HEADER}")

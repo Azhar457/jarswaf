@@ -18,6 +18,8 @@ pub async fn post_custom_rules_handler(
     State(state): State<ControllerState>,
     Json(custom_rules): Json<Vec<config::CustomRule>>,
 ) -> impl IntoResponse {
+    let _lock = state.config_lock.lock().await;
+
     let mut cfg = match config::load_config(&state.config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -28,19 +30,7 @@ pub async fn post_custom_rules_handler(
 
     cfg.custom_rules = custom_rules;
 
-    let toml_str = match toml::to_string(&cfg) {
-        Ok(t) => t,
-        Err(e) => {
-            error!("Failed to serialize updated config to TOML: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to serialize config",
-            )
-                .into_response();
-        }
-    };
-
-    match std::fs::write(&state.config_path, toml_str) {
+    match config::save_config(&state.config_path, &cfg) {
         Ok(_) => {
             info!(
                 "Custom rules configuration updated successfully in {}",

@@ -31,7 +31,7 @@ pub fn build_client() -> reqwest::Client {
         headers.insert("X-ClickHouse-User", val);
     }
 
-    let pass = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "aegis".to_string());
+    let pass = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "jarswaf".to_string());
     if let Ok(val) = HeaderValue::from_str(&pass) {
         headers.insert("X-ClickHouse-Key", val);
     }
@@ -178,7 +178,7 @@ fn write_to_local_log(entry: &WafLogEntry, log_path: &str) {
 }
 
 /// Rotate log files when the current file exceeds max_size_mb.
-/// Renames: aegis.log -> aegis.log.1, aegis.log.1 -> aegis.log.2, etc.
+/// Renames: jarswaf.log -> jarswaf.log.1, jarswaf.log.1 -> jarswaf.log.2, etc.
 /// Deletes the oldest file beyond max_files.
 fn rotate_log_if_needed(log_path: &str, max_size_mb: u64, max_files: u32) {
     let path = std::path::Path::new(log_path);

@@ -43,8 +43,8 @@ path = "/static/*, *.css, *.js, *.png"
 description = "Exempted assets to reduce WAF engine evaluation overhead."
 
 [[vhosts]]
-name = "aegis-demo"
-hosts = ["*.aegiswaf.demo"]
+name = "jarswaf-demo"
+hosts = ["*.jarswafwaf.demo"]
 backend = "127.0.0.1:8080"
 rate_limit_tiers = []
 rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*"]
@@ -57,7 +57,7 @@ rate_limit = "600 req/min"
 
 [vhosts.logging]
 enabled = true
-db_path = "logs/aegis-waf.db"
+db_path = "logs/jarswaf.db"
 
 [[custom_rules]]
 id = "CR-825"

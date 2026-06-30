@@ -8,6 +8,7 @@ pub mod ssl;
 pub mod stats;
 pub mod threat_intel;
 pub mod vhosts;
+pub mod metrics;
 
 pub use agents::*;
 pub use config::*;
@@ -19,3 +20,4 @@ pub use ssl::*;
 pub use stats::*;
 pub use threat_intel::*;
 pub use vhosts::*;
+pub use metrics::*;

@@ -1,4 +1,4 @@
-//! Shared types used by both the Agent and Controller modes of Aegis WAF.
+//! Shared types used by both the Agent and Controller modes of jarsWAF.
 
 /// A service discovered on the host via Docker or OS-level port scanning.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

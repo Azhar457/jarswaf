@@ -1,8 +1,8 @@
 {
-  "name": "aegis-waf-root",
+  "name": "jarswaf-root",
   "version": "1.0.0",
   "private": true,
-  "description": "Root script manager for Aegis WAF and Dashboard",
+  "description": "Root script manager for jarsWAF and Dashboard",
   "scripts": {
     "dashboard:install": "npm install --prefix dashboard",
     "dashboard:build": "npm run build --prefix dashboard",

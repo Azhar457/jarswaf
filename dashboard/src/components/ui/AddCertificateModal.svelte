@@ -6,7 +6,7 @@
 
   let domain = "";
   let provider = "Let's Encrypt";
-  let email = "admin@aegiswaf.local";
+  let email = "admin@jarswafwaf.local";
   let isLoading = false;
 
   const dispatch = createEventDispatcher();
@@ -14,7 +14,7 @@
   function close() {
     domain = "";
     provider = "Let's Encrypt";
-    email = "admin@aegiswaf.local";
+    email = "admin@jarswafwaf.local";
     show = false;
     dispatch("close");
   }

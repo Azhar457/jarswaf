@@ -2,7 +2,7 @@
 set -e
 
 echo "================================================="
-echo " 🛡️ Aegis WAF Agent Installation (Linux / macOS)"
+echo " 🛡️ jarsWAF Agent Installation (Linux / macOS)"
 echo "================================================="
 
 if [ -z "$CONTROLLER_IP" ]; then
@@ -11,7 +11,7 @@ if [ -z "$CONTROLLER_IP" ]; then
   exit 1
 fi
 
-echo "[*] Connecting to Aegis Central Controller at: $CONTROLLER_IP"
+echo "[*] Connecting to jarsWAF Central Controller at: $CONTROLLER_IP"
 echo "[*] Detecting OS..."
 
 OS="$(uname -s)"
@@ -52,13 +52,13 @@ if [ $DEPS_MISSING -eq 1 ]; then
     echo "   sudo apt update && sudo apt install curl sudo systemd openssl -y"
     exit 1
 fi
-INSTALL_DIR="/opt/aegis-waf"
+INSTALL_DIR="/opt/jarswaf"
 echo "[*] Creating installation directory at $INSTALL_DIR..."
 sudo mkdir -p "$INSTALL_DIR"
 
-echo "[*] Downloading Aegis WAF Agent binary dari Controller..."
-sudo curl -sSL "http://$CONTROLLER_IP/bin/aegis-agent-$OS-$ARCH" -o "$INSTALL_DIR/aegis-agent"
-sudo chmod +x "$INSTALL_DIR/aegis-agent"
+echo "[*] Downloading jarsWAF Agent binary dari Controller..."
+sudo curl -sSL "http://$CONTROLLER_IP/bin/jarswaf-agent-$OS-$ARCH" -o "$INSTALL_DIR/jarswaf-agent"
+sudo chmod +x "$INSTALL_DIR/jarswaf-agent"
 
 echo "[*] Generating Agent Configuration (config.toml)..."
 sudo bash -c "cat <<EOF > $INSTALL_DIR/config.toml
@@ -69,14 +69,14 @@ EOF"
 
 if [ "$OS" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
     echo "[*] Setting up systemd background service..."
-    sudo bash -c "cat <<EOF > /etc/systemd/system/aegis-agent.service
+    sudo bash -c "cat <<EOF > /etc/systemd/system/jarswaf-agent.service
 [Unit]
-Description=Aegis WAF Agent
+Description=jarsWAF Agent
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR/aegis-agent --config $INSTALL_DIR/config.toml
+ExecStart=$INSTALL_DIR/jarswaf-agent --config $INSTALL_DIR/config.toml
 Restart=on-failure
 User=root
 
@@ -84,13 +84,13 @@ User=root
 WantedBy=multi-user.target
 EOF"
     sudo systemctl daemon-reload
-    sudo systemctl enable aegis-agent
-    echo "[*] Service registered. Run 'sudo systemctl start aegis-agent' to begin proxying traffic."
+    sudo systemctl enable jarswaf-agent
+    echo "[*] Service registered. Run 'sudo systemctl start jarswaf-agent' to begin proxying traffic."
 else
     echo "[*] To start the agent manually, run:"
-    echo "    sudo $INSTALL_DIR/aegis-agent --config $INSTALL_DIR/config.toml"
+    echo "    sudo $INSTALL_DIR/jarswaf-agent --config $INSTALL_DIR/config.toml"
 fi
 
 echo "================================================="
-echo " ✅ Aegis Agent installation completed!"
+echo " ✅ jarsWAF Agent installation completed!"
 echo "================================================="

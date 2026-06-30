@@ -78,12 +78,12 @@ export const rateLimits = writable<RateLimitPolicy[]>([]);
 export const customRulesList = writable<CustomRule[]>([]);
 export const wafEnabled = writable<boolean>(true);
 export const token = writable<string>(
-  typeof window !== "undefined" ? localStorage.getItem("aegis_token") || "" : "",
+  typeof window !== "undefined" ? localStorage.getItem("jarswaf_token") || "" : "",
 );
 
 if (typeof window !== "undefined") {
   token.subscribe((val) => {
-    localStorage.setItem("aegis_token", val);
+    localStorage.setItem("jarswaf_token", val);
   });
 }
 
@@ -161,10 +161,9 @@ export function initGlobalStore(controllerUrl: string) {
 
   const connectWs = () => {
     const wsToken = get(token);
-    const tokenParam = wsToken ? `?token=${encodeURIComponent(wsToken)}` : "";
-    const wsUrl = controllerUrl.replace(/^http/, "ws") + "/ws/dashboard" + tokenParam;
+    const wsUrl = controllerUrl.replace(/^http/, "ws") + "/ws/dashboard";
 
-    ws = new WebSocket(wsUrl);
+    ws = wsToken ? new WebSocket(wsUrl, [wsToken]) : new WebSocket(wsUrl);
 
     ws.onopen = () => {
       connectionStatus.set("online");

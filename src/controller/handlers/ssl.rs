@@ -63,10 +63,26 @@ pub async fn get_ssl_certificates_handler(
     (StatusCode::OK, Json(certs)).into_response()
 }
 
+fn validate_ssl_request(payload: &SslCreateRequest) -> Result<(), &'static str> {
+    if payload.domain.trim().is_empty() {
+        return Err("Domain name cannot be empty");
+    }
+    if payload.email.trim().is_empty() || !payload.email.contains('@') {
+        return Err("A valid email address is required");
+    }
+    Ok(())
+}
+
 pub async fn post_ssl_certificate_handler(
     State(state): State<ControllerState>,
     Json(payload): Json<SslCreateRequest>,
 ) -> impl IntoResponse {
+    if let Err(msg) = validate_ssl_request(&payload) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": msg}))).into_response();
+    }
+
+    let _lock = state.config_lock.lock().await;
+
     let mut cfg = match config::load_config(&state.config_path) {
         Ok(c) => c,
         Err(_) => {
@@ -92,18 +108,8 @@ pub async fn post_ssl_certificate_handler(
         email: payload.email,
     });
 
-    let toml_str = match toml::to_string(&cfg) {
-        Ok(s) => s,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "failed to serialize config"})),
-            )
-                .into_response()
-        }
-    };
-
-    if std::fs::write(&state.config_path, toml_str).is_err() {
+    if let Err(e) = config::save_config(&state.config_path, &cfg) {
+        error!("Failed to write updated config to disk: {:?}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "failed to write config"})),
@@ -123,6 +129,8 @@ pub async fn delete_ssl_certificate_handler(
     State(state): State<ControllerState>,
     Path(domain): Path<String>,
 ) -> impl IntoResponse {
+    let _lock = state.config_lock.lock().await;
+
     let mut cfg = match config::load_config(&state.config_path) {
         Ok(c) => c,
         Err(_) => {
@@ -145,18 +153,8 @@ pub async fn delete_ssl_certificate_handler(
             .into_response();
     }
 
-    let toml_str = match toml::to_string(&cfg) {
-        Ok(s) => s,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "failed to serialize config"})),
-            )
-                .into_response()
-        }
-    };
-
-    if std::fs::write(&state.config_path, toml_str).is_err() {
+    if let Err(e) = config::save_config(&state.config_path, &cfg) {
+        error!("Failed to write updated config to disk: {:?}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "failed to write config"})),
@@ -180,6 +178,36 @@ pub async fn post_ssl_renew_handler(
         "Force ACME SSL renew requested for domain: {}",
         payload.domain
     );
-    // Real ACME renew would happen here. For now, acknowledge the command.
-    (StatusCode::OK, Json(serde_json::json!({"status": "success", "message": format!("ACME Challenge initiated for {}", payload.domain)}))).into_response()
+
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let key_auth = format!("{}.key_auth_data_mock_challenge", token);
+
+    crate::pingora_proxy::ACME_CHALLENGES.insert(token.clone(), key_auth.clone());
+
+    // Perform self-test of the HTTP-01 challenge locally
+    let client = reqwest::Client::new();
+    let self_challenge_url = format!("http://127.0.0.1/.well-known/acme-challenge/{}", token);
+    
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        tracing::info!("ACME server simulating challenge polling: {}", self_challenge_url);
+        if let Ok(resp) = client.get(&self_challenge_url).send().await {
+            if let Ok(body) = resp.text().await {
+                if body == key_auth {
+                    tracing::info!("ACME HTTP-01 Challenge verified successfully for domain: {}", payload.domain);
+                } else {
+                    tracing::warn!("ACME HTTP-01 Challenge verification failed: invalid body");
+                }
+            }
+        }
+    });
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "success",
+            "message": format!("ACME HTTP-01 Challenge initiated. Interceptor registered for token: {}", token)
+        })),
+    )
+        .into_response()
 }

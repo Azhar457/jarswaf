@@ -250,5 +250,5 @@ pub fn get_network_interfaces() -> Vec<String> {
 pub fn get_hostname() -> String {
     std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "Aegis-Agent".to_string())
+        .unwrap_or_else(|_| "jarsWAF-Agent".to_string())
 }

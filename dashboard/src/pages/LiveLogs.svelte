@@ -126,9 +126,9 @@
     term.writeln("Microsoft Windows [Version 10.0.22631.3737]");
     term.writeln("(c) Microsoft Corporation. All rights reserved.");
     term.writeln("");
-    term.writeln("C:\\AegisWAF> aegis-waf --stream --verbose");
+    term.writeln("C:\\jarsWAFWAF> jarswaf --stream --verbose");
     term.writeln(
-      "\x1b[32m[SYSTEM]\x1b[0m Aegis WAF Engine connected. Streaming real-time proxy events...",
+      "\x1b[32m[SYSTEM]\x1b[0m jarsWAF Engine connected. Streaming real-time proxy events...",
     );
     term.writeln("");
 
@@ -205,7 +205,7 @@
       <div class="flex items-center gap-2">
         <TerminalIcon size={14} class="text-slate-400" />
         <span class="text-xs font-medium text-slate-300 font-mono"
-          >Command Prompt - aegis-waf --stream</span
+          >Command Prompt - jarswaf --stream</span
         >
       </div>
       <!-- Mock Window Controls -->
