@@ -1,42 +1,48 @@
 #!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
 echo "==================================================="
-echo "  jarsWAF Development Launcher (Unix/macOS)"
+echo "  jarsWAF Development Launcher"
 echo "==================================================="
 echo
 
-# Handler to terminate all child processes on exit
 cleanup() {
     echo
     echo "Stopping jarsWAF processes..."
-    kill "$PID_CONTROLLER" "$PID_AGENT" "$PID_VITE" 2>/dev/null
+    kill "$PID_CNTR" "$PID_AGENT" "$PID_VITE" 2>/dev/null || true
     exit
 }
 trap cleanup SIGINT SIGTERM
 
-# No database setup needed for SQLite! WAF Controller initializes database automatically.
+# Check for config
+CONFIG="config.standalone.toml"
+[ -f "$CONFIG" ] || { echo "Missing $CONFIG"; exit 1; }
 
-echo
-echo "Step 3: Starting WAF Controller..."
+echo "Step 1: Starting Controller (API server)..."
 cargo run --bin controller -- --port 8080 &
-PID_CONTROLLER=$!
+PID_CNTR=$!
+
+sleep 3
+
+echo "Step 2: Starting Agent (WAF proxy)..."
+cargo run --bin agent -- -c "$CONFIG" &
+PID_AGENT=$!
 
 sleep 2
 
-echo "Step 4: Starting WAF Agent (connecting to Controller)..."
-cargo run --bin agent -- --controller http://localhost:8080 &
-PID_AGENT=$!
-
-echo "Step 5: Starting Dashboard Vite Dev Server..."
+echo "Step 3: Starting Dashboard (Vite dev server)..."
 cd dashboard && npm run dev &
 PID_VITE=$!
-cd ..
+cd "$SCRIPT_DIR"
 
 echo
-echo "All processes started!"
-echo "Dashboard UI available at: http://localhost:5173/"
-echo "Controller API available at: http://localhost:8080/"
-echo "Press Ctrl+C to terminate all processes."
+echo "==================================================="
+echo "  UI → http://localhost:5173/"
+echo "  API → http://localhost:8080/"
+echo "  Ctrl+C to stop all"
 echo "==================================================="
 
-# Keep the script running to monitor background processes
 wait
