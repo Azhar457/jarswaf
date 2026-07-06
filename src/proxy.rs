@@ -1,8 +1,8 @@
 use once_cell::sync::Lazy;
 
 static GEOIP_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> =
-    Lazy::new(|| {
-        match maxminddb::Reader::open_readfile("GeoLite2-Country.mmdb") {
+    Lazy::new(
+        || match maxminddb::Reader::open_readfile("GeoLite2-Country.mmdb") {
             Ok(reader) => Some(reader),
             Err(e) => {
                 tracing::warn!(
@@ -11,8 +11,8 @@ static GEOIP_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> =
                 );
                 None
             }
-        }
-    });
+        },
+    );
 
 pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
     if crate::types::is_local_ip(ip) {
