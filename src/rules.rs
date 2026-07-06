@@ -9,6 +9,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::config::Config;
 use once_cell::sync::Lazy;
+use quick_cache::sync::Cache;
+use regex::Regex;
 use tokio::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
@@ -56,6 +58,19 @@ pub struct RequestInfo<'a> {
     pub ip: Option<IpAddr>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CompiledCustomRule {
+    pub id: String,
+    pub name: String,
+    pub condition_type: String,
+    pub operator: String,
+    pub condition_value: String,
+    pub action: String,
+    pub action_value: String,
+    pub enabled: bool,
+    pub regex: Option<Regex>,
+}
+
 pub struct RuleEngine {
     pub custom_rules: Vec<CompiledCustomRule>,
 }
@@ -69,33 +84,168 @@ struct TokenBucket {
 }
 
 static RATE_LIMITER: Lazy<DashMap<IpAddr, TokenBucket>> = Lazy::new(DashMap::new);
-static BLOCKED_COUNTERS: Lazy<DashMap<IpAddr, (u32, Instant)>> = Lazy::new(DashMap::new);
+static TOKEN_RATE_LIMITER: Lazy<DashMap<String, TokenBucket>> = Lazy::new(DashMap::new);
 static REDIS_CLIENT: Lazy<tokio::sync::RwLock<Option<redis::Client>>> =
     Lazy::new(|| tokio::sync::RwLock::new(None));
 
+// ── Auto-remediation (step-down block durations) ────────────────────────────
+
+/// Duration tiers for automatic temporary blocks.
+const BLOCK_TIERS: &[u64] = &[60, 300, 1800, 86400]; // 1m, 5m, 30m, 24h
+
+struct BlockRecord {
+    count: u32,
+    first_seen: Instant,
+    block_until: Instant,
+    tier: usize,
+}
+
+static BLOCKED_IPS: Lazy<DashMap<IpAddr, BlockRecord>> = Lazy::new(DashMap::new);
+
+/// Record a block event for `ip`. Returns `true` if the IP should be
+/// blocked at the kernel level (XDP) after repeated offences.
+///
+/// The IP is temporarily banned from the *application-level* (*not* XDP) for
+/// progressively longer durations each time it is blocked within a
+/// sliding 5-minute window.
 pub fn record_block(ip: IpAddr) -> bool {
     let now = Instant::now();
-    let mut entry = BLOCKED_COUNTERS.entry(ip).or_insert((0, now));
-    let (count, first_seen) = entry.value_mut();
+    let mut entry = BLOCKED_IPS.entry(ip).or_insert_with(|| BlockRecord {
+        count: 0,
+        first_seen: now,
+        block_until: now,
+        tier: 0,
+    });
+    let rec = entry.value_mut();
 
-    if now.duration_since(*first_seen).as_secs() > 300 {
-        *count = 1;
-        *first_seen = now;
+    // Reset window if older than 5 minutes since first_seen
+    if now.duration_since(rec.first_seen).as_secs() > 300 {
+        rec.count = 1;
+        rec.first_seen = now;
+        rec.tier = 0;
     } else {
-        *count += 1;
+        rec.count += 1;
     }
 
-    if *count >= 5 {
-        let ip_clone = ip;
-        tokio::spawn(async move {
-            let mut xdp = crate::XDP_MANAGER.lock().await;
-            if let IpAddr::V4(v4) = ip_clone {
-                let _ = xdp.block_ip(v4);
-            }
-        });
+    // Escalate tier every 5 offences
+    if rec.count >= 5 && rec.count.is_multiple_of(5) {
+        let tier = rec.tier.min(BLOCK_TIERS.len() - 1);
+        let duration = BLOCK_TIERS[tier];
+        rec.block_until = now + std::time::Duration::from_secs(duration);
+        rec.tier = tier + 1;
+
+        tracing::warn!(
+            "Auto-remediation: {} blocked for {}s (tier {}, count={})",
+            ip,
+            duration,
+            rec.tier,
+            rec.count,
+        );
+
+        // On the first escalation (tier 0 → 1) also add to XDP
+        if tier == 0 {
+            let ip_clone = ip;
+            tokio::spawn(async move {
+                let mut xdp = crate::XDP_MANAGER.lock().await;
+                if let IpAddr::V4(v4) = ip_clone {
+                    let _ = xdp.block_ip(v4);
+                }
+            });
+        }
         true
     } else {
         false
+    }
+}
+
+/// Check whether `ip` is currently under a temporary auto-remediation block.
+pub fn is_ip_temporarily_blocked(ip: IpAddr) -> bool {
+    BLOCKED_IPS.get(&ip).is_some_and(|rec| {
+        let now = Instant::now();
+        now < rec.block_until
+    })
+}
+
+/// Return the remaining block duration in seconds for `ip`, or 0 if not blocked.
+#[allow(dead_code)]
+pub fn remaining_block_secs(ip: IpAddr) -> u64 {
+    BLOCKED_IPS.get(&ip).map_or(0, |rec| {
+        let now = Instant::now();
+        if now < rec.block_until {
+            rec.block_until.duration_since(now).as_secs()
+        } else {
+            0
+        }
+    })
+}
+
+// ── Dynamic IP Reputation Scoring ───────────────────────────────────────────
+
+#[derive(Clone)]
+struct IpReputation {
+    score: f64,
+    last_decay: Instant,
+}
+
+impl IpReputation {
+    fn decay(&mut self) {
+        // Lose 1 point per minute, floor at 0
+        let elapsed = self.last_decay.elapsed().as_secs_f64();
+        let decay = (elapsed / 60.0).min(self.score);
+        self.score = (self.score - decay).max(0.0);
+        self.last_decay = Instant::now();
+    }
+}
+
+/// Global reputation table: IP → score. LRU cache bounded at 10k entries.
+static IP_REPUTATION: Lazy<Cache<IpAddr, IpReputation>> = Lazy::new(|| Cache::new(10_000));
+
+/// Score at which an IP is automatically added to the blocklist.
+const REPUTATION_BLOCK_THRESHOLD: f64 = 50.0;
+
+/// How many points to add for each type of event.
+const REPUTATION_RATE_LIMIT_PENALTY: f64 = 5.0;
+const REPUTATION_BLOCKED_ATTACK_PENALTY: f64 = 15.0;
+
+/// Adjust `fn check_request` calls this whenever a rule triggers a block.
+pub fn record_reputation_penalty(ip: IpAddr, is_rate_limit: bool) {
+    let penalty = if is_rate_limit {
+        REPUTATION_RATE_LIMIT_PENALTY
+    } else {
+        REPUTATION_BLOCKED_ATTACK_PENALTY
+    };
+    let mut rep = IP_REPUTATION.get(&ip).unwrap_or(IpReputation {
+        score: 0.0,
+        last_decay: Instant::now(),
+    });
+    rep.decay();
+    rep.score = (rep.score + penalty).min(100.0);
+    IP_REPUTATION.insert(ip, rep);
+}
+
+/// Returns `true` if this IP has crossed the reputation block threshold.
+pub fn is_ip_reputation_blocked(ip: IpAddr) -> bool {
+    if let Some(mut rep) = IP_REPUTATION.get(&ip) {
+        rep.decay();
+        let blocked = rep.score >= REPUTATION_BLOCK_THRESHOLD;
+        // Write back updated last_decay so next check doesn't double-decay
+        IP_REPUTATION.insert(ip, rep);
+        blocked
+    } else {
+        false
+    }
+}
+
+/// Get current reputation score (0.0–100.0) for an IP.
+#[allow(dead_code)]
+pub fn get_reputation_score(ip: IpAddr) -> f64 {
+    if let Some(mut rep) = IP_REPUTATION.get(&ip) {
+        rep.decay();
+        let score = rep.score;
+        IP_REPUTATION.insert(ip, rep);
+        score
+    } else {
+        0.0
     }
 }
 
@@ -106,8 +256,16 @@ pub fn start_rate_limiter_cleanup() {
             interval.tick().await;
             let now = Instant::now();
             RATE_LIMITER.retain(|_, bucket| now.duration_since(bucket.last_access).as_secs() < 300);
-            BLOCKED_COUNTERS
-                .retain(|_, (_, first_seen)| now.duration_since(*first_seen).as_secs() < 300);
+            BLOCKED_IPS.retain(|ip, rec| {
+                // Keep only if still in the active window or under an active block
+                let window_ok = now.duration_since(rec.first_seen).as_secs() < 300;
+                let blocked = now < rec.block_until;
+                if !window_ok && !blocked {
+                    tracing::debug!("Cleaning up auto-remediation record for {}", ip);
+                }
+                window_ok || blocked
+            });
+            // Reputation is LRU-bounded at 10k in quick_cache, auto-evicts — no retain needed.
         }
     });
 }
@@ -121,7 +279,11 @@ impl RuleEngine {
             let regex = if rule.operator == "regex" {
                 let pattern = if rule.condition_type == "header" {
                     let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
-                    if parts.len() == 2 { parts[1].trim() } else { "" }
+                    if parts.len() == 2 {
+                        parts[1].trim()
+                    } else {
+                        ""
+                    }
                 } else {
                     rule.condition_value.as_str()
                 };
@@ -158,14 +320,18 @@ impl RuleEngine {
                                 {
                                     for rule in plugin_rules {
                                         let regex = if rule.operator == "regex" {
-                                            Regex::new(
-                                                if rule.condition_type == "header" {
-                                                    let parts: Vec<&str> = rule.condition_value.splitn(2, ':').collect();
-                                                    if parts.len() == 2 { parts[1].trim() } else { "" }
+                                            Regex::new(if rule.condition_type == "header" {
+                                                let parts: Vec<&str> =
+                                                    rule.condition_value.splitn(2, ':').collect();
+                                                if parts.len() == 2 {
+                                                    parts[1].trim()
                                                 } else {
-                                                    rule.condition_value.as_str()
+                                                    ""
                                                 }
-                                            ).ok()
+                                            } else {
+                                                rule.condition_value.as_str()
+                                            })
+                                            .ok()
                                         } else {
                                             None
                                         };
@@ -185,14 +351,20 @@ impl RuleEngine {
                                     toml::from_str::<crate::config::CustomRule>(&content)
                                 {
                                     let regex = if single_rule.operator == "regex" {
-                                        Regex::new(
-                                            if single_rule.condition_type == "header" {
-                                                let parts: Vec<&str> = single_rule.condition_value.splitn(2, ':').collect();
-                                                if parts.len() == 2 { parts[1].trim() } else { "" }
+                                        Regex::new(if single_rule.condition_type == "header" {
+                                            let parts: Vec<&str> = single_rule
+                                                .condition_value
+                                                .splitn(2, ':')
+                                                .collect();
+                                            if parts.len() == 2 {
+                                                parts[1].trim()
                                             } else {
-                                                single_rule.condition_value.as_str()
+                                                ""
                                             }
-                                        ).ok()
+                                        } else {
+                                            single_rule.condition_value.as_str()
+                                        })
+                                        .ok()
                                     } else {
                                         None
                                     };
@@ -912,6 +1084,45 @@ impl RuleEngine {
         }
     }
 
+    /// Rate limiter check by API token/key.
+    /// Uses a separate token bucket pool keyed on the token string.
+    pub fn check_rate_limit_token(&self, token: &str, limit: u32) -> bool {
+        let rate = limit as f64 / 60.0;
+        let capacity = rate * 2.0;
+        let key = token.to_string();
+        let mut bucket = TOKEN_RATE_LIMITER
+            .entry(key)
+            .or_insert_with(|| TokenBucket {
+                tokens: capacity,
+                last_check: Instant::now(),
+                last_access: Instant::now(),
+                rate,
+                capacity,
+            });
+
+        if (bucket.rate - rate).abs() > f64::EPSILON
+            || (bucket.capacity - capacity).abs() > f64::EPSILON
+        {
+            bucket.rate = rate;
+            bucket.capacity = capacity;
+            bucket.tokens = bucket.tokens.min(capacity);
+        }
+
+        let now = Instant::now();
+        bucket.last_access = now;
+        let elapsed = now.duration_since(bucket.last_check).as_secs_f64();
+        bucket.last_check = now;
+
+        bucket.tokens = (bucket.tokens + elapsed * bucket.rate).min(bucket.capacity);
+
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Rate limiter check. Supports distributed Redis rate limiting with local fallback.
     pub async fn check_rate_limit(
         &self,
@@ -985,6 +1196,9 @@ mod tests {
                 trusted_proxies: Some(vec![]),
                 admin_token: None,
                 waf_enabled: true,
+                webhooks: vec![],
+                metrics_push_url: None,
+                metrics_push_interval_secs: 60,
             },
             tls: TlsConfig {
                 mode: "local_ca".to_string(),

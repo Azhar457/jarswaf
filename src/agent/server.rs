@@ -25,6 +25,7 @@ pub async fn run_server(cfg: &config::Config, state: AppState) {
     let proxy = proxy_engine::JarsWafProxy {
         blocklist: state.blocklist.clone(),
         log_tx: state.log_tx.clone(),
+        webhooks: cfg.global.webhooks.clone(),
     };
 
     // Store config in ArcSwap for lock-free reads in Pingora

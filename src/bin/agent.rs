@@ -9,7 +9,7 @@ struct Cli {
     config: String,
 
     /// URL of the central Controller
-    #[arg(short, long)]
+    #[arg(short = 'u', long)]
     controller: Option<String>,
 
     /// Registration token for the Controller

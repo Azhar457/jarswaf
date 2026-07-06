@@ -1,13 +1,16 @@
 pub mod agent;
 pub mod config;
 pub mod controller;
+pub mod dlp;
 pub mod logging;
+pub mod metrics;
 pub mod proxy;
 pub mod proxy_engine;
 pub mod rules;
 pub mod tls;
 pub mod types;
 pub mod vhost;
+pub mod webhook;
 pub mod xdp;
 
 use once_cell::sync::Lazy;

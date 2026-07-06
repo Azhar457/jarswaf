@@ -1,4 +1,4 @@
-use crate::config::{Config, VHost};
+﻿use crate::config::{Config, VHost};
 
 /// Helper to match host against a pattern (supports wildcard '*')
 /// Uses `eq_ignore_ascii_case` to avoid allocations from `to_lowercase()`.
@@ -11,14 +11,12 @@ fn match_pattern(host: &str, pattern: &str) -> bool {
     let pattern = pattern.trim();
 
     if pattern.contains('*') {
-        if pattern.starts_with('*') {
+        if let Some(suffix) = pattern.strip_prefix('*') {
             // E.g., *.domainsaya.my.id -> matches sub.domainsaya.my.id
-            let suffix = &pattern[1..];
             host.len() >= suffix.len()
                 && host[host.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
-        } else if pattern.ends_with('*') {
+        } else if let Some(prefix) = pattern.strip_suffix('*') {
             // E.g., admin.* -> matches admin.domainsaya.my.id
-            let prefix = &pattern[..pattern.len() - 1];
             host.len() >= prefix.len() && host[..prefix.len()].eq_ignore_ascii_case(prefix)
         } else {
             // Middle wildcard, e.g., api.*.example.com

@@ -56,6 +56,40 @@ pub struct GlobalConfig {
     pub admin_token: Option<String>,
     #[serde(default = "default_waf_enabled")]
     pub waf_enabled: bool,
+    /// Alert webhooks — fired on blocked requests or reputation events.
+    #[serde(default)]
+    pub webhooks: Vec<WebhookConfig>,
+    /// URL for Prometheus Pushgateway / VictoriaMetrics push endpoint.
+    /// Example: "http://pushgateway.example.com:9091/metrics/job/jarswaf"
+    #[serde(default)]
+    pub metrics_push_url: Option<String>,
+    /// Interval in seconds between prometheus metric pushes (default 60)
+    #[serde(default = "default_metrics_push_interval")]
+    pub metrics_push_interval_secs: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WebhookConfig {
+    /// Name / label for this webhook (e.g. "slack-security", "discord")
+    pub name: String,
+    /// URL to POST the JSON payload to
+    pub url: String,
+    /// Secret token to include as Bearer auth (optional)
+    #[serde(default)]
+    pub secret: Option<String>,
+    /// Minimum event severity to trigger: "low" | "medium" | "high" | "critical"
+    #[serde(default = "default_webhook_severity")]
+    pub min_severity: String,
+    /// Cooldown in seconds between alerts for the same rule (default 300)
+    #[serde(default = "default_webhook_cooldown")]
+    pub cooldown_secs: u64,
+}
+
+fn default_webhook_severity() -> String {
+    "high".to_string()
+}
+fn default_webhook_cooldown() -> u64 {
+    300
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -109,6 +143,37 @@ pub struct VHost {
     pub allowlists: Vec<AllowlistRule>,
     #[serde(default)]
     pub blacklists: Vec<BlacklistRule>,
+    /// Security headers to inject into every response.
+    /// Default: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy.
+    #[serde(default)]
+    pub security_headers: Option<SecurityHeadersConfig>,
+    /// DLP (Data Loss Prevention) — inspect response bodies for sensitive data.
+    #[serde(default)]
+    pub dlp: Option<DlpConfig>,
+    #[serde(default = "default_max_conns_per_ip")]
+    pub max_conns_per_ip: usize,
+    #[serde(default = "default_max_concurrent_requests")]
+    pub max_concurrent_requests: usize,
+    #[serde(default = "default_bot_challenge_enabled")]
+    pub bot_challenge_enabled: bool,
+    #[serde(default = "default_websocket_security_enabled")]
+    pub websocket_security_enabled: bool,
+}
+
+fn default_max_conns_per_ip() -> usize {
+    50
+}
+
+fn default_max_concurrent_requests() -> usize {
+    100
+}
+
+fn default_bot_challenge_enabled() -> bool {
+    false
+}
+
+fn default_websocket_security_enabled() -> bool {
+    false
 }
 
 fn default_geoblock_type() -> String {
@@ -133,6 +198,10 @@ fn default_log_level() -> String {
 
 fn default_waf_enabled() -> bool {
     true
+}
+
+fn default_metrics_push_interval() -> u64 {
+    60
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -216,6 +285,9 @@ impl Default for Config {
                 trusted_proxies: None,
                 admin_token: None,
                 waf_enabled: true,
+                metrics_push_url: None,
+                metrics_push_interval_secs: 60,
+                webhooks: Vec::new(),
             },
             tls: TlsConfig {
                 mode: "disabled".to_string(),
@@ -416,4 +488,147 @@ fn default_redis_url() -> String {
 
 fn default_tenant() -> String {
     "default".to_string()
+}
+
+// ─── DLP (Data Loss Prevention) Config ─────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DlpConfig {
+    #[serde(default = "default_dlp_enabled")]
+    pub enabled: bool,
+    /// Action: "log" (default) or "block"
+    #[serde(default = "default_dlp_action")]
+    pub action: String,
+    /// Regex: credit card (Luhn-validatable numbers)
+    #[serde(default = "default_dlp_cc")]
+    pub credit_card: bool,
+    /// Regex: JWT / Bearer tokens
+    #[serde(default = "default_dlp_jwt")]
+    pub jwt_token: bool,
+    /// Regex: AWS / Azure / GCP secret keys
+    #[serde(default = "default_dlp_cloud_secrets")]
+    pub cloud_secrets: bool,
+    /// Regex: password/reset token patterns
+    #[serde(default = "default_dlp_password")]
+    pub password_in_body: bool,
+    /// Regex: email addresses in response body
+    #[serde(default = "default_dlp_email")]
+    pub email: bool,
+    /// Allow-list: response bodies matching any part of these strings are NOT flagged
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    /// Custom regex patterns (key = pattern name, value = regex)
+    #[serde(default)]
+    pub custom_patterns: std::collections::HashMap<String, String>,
+}
+
+impl Default for DlpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_dlp_enabled(),
+            action: default_dlp_action(),
+            credit_card: default_dlp_cc(),
+            jwt_token: default_dlp_jwt(),
+            cloud_secrets: default_dlp_cloud_secrets(),
+            password_in_body: default_dlp_password(),
+            email: default_dlp_email(),
+            allowlist: Vec::new(),
+            custom_patterns: std::collections::HashMap::new(),
+        }
+    }
+}
+
+fn default_dlp_enabled() -> bool {
+    false
+}
+fn default_dlp_action() -> String {
+    "log".to_string()
+}
+fn default_dlp_cc() -> bool {
+    true
+}
+fn default_dlp_jwt() -> bool {
+    true
+}
+fn default_dlp_cloud_secrets() -> bool {
+    true
+}
+fn default_dlp_password() -> bool {
+    true
+}
+fn default_dlp_email() -> bool {
+    false
+}
+
+// ─── Security Headers Config ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SecurityHeadersConfig {
+    #[serde(default = "default_sh_enabled")]
+    pub enabled: bool,
+    /// Content-Security-Policy header value
+    #[serde(default = "default_sh_csp")]
+    pub content_security_policy: Option<String>,
+    /// Strict-Transport-Security (only applied on HTTPS responses)
+    #[serde(default = "default_sh_hsts")]
+    pub strict_transport_security: Option<String>,
+    /// X-Frame-Options
+    #[serde(default = "default_sh_xfo")]
+    pub x_frame_options: Option<String>,
+    /// X-Content-Type-Options
+    #[serde(default = "default_sh_xcto")]
+    pub x_content_type_options: Option<String>,
+    /// Referrer-Policy
+    #[serde(default = "default_sh_referrer")]
+    pub referrer_policy: Option<String>,
+    /// Permissions-Policy
+    #[serde(default = "default_sh_permissions")]
+    pub permissions_policy: Option<String>,
+    /// Cross-Origin-Resource-Policy
+    #[serde(default = "default_sh_corp")]
+    pub cross_origin_resource_policy: Option<String>,
+    /// Custom extra headers (key=value pairs)
+    #[serde(default)]
+    pub extra_headers: std::collections::HashMap<String, String>,
+}
+
+impl Default for SecurityHeadersConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_sh_enabled(),
+            content_security_policy: default_sh_csp(),
+            strict_transport_security: default_sh_hsts(),
+            x_frame_options: default_sh_xfo(),
+            x_content_type_options: default_sh_xcto(),
+            referrer_policy: default_sh_referrer(),
+            permissions_policy: default_sh_permissions(),
+            cross_origin_resource_policy: default_sh_corp(),
+            extra_headers: std::collections::HashMap::new(),
+        }
+    }
+}
+
+fn default_sh_enabled() -> bool {
+    true
+}
+fn default_sh_csp() -> Option<String> {
+    Some("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'".to_string())
+}
+fn default_sh_hsts() -> Option<String> {
+    Some("max-age=63072000; includeSubDomains; preload".to_string())
+}
+fn default_sh_xfo() -> Option<String> {
+    Some("DENY".to_string())
+}
+fn default_sh_xcto() -> Option<String> {
+    Some("nosniff".to_string())
+}
+fn default_sh_referrer() -> Option<String> {
+    Some("strict-origin-when-cross-origin".to_string())
+}
+fn default_sh_permissions() -> Option<String> {
+    Some("camera=(), microphone=(), geolocation=(), interest-cohort=()".to_string())
+}
+fn default_sh_corp() -> Option<String> {
+    Some("same-origin".to_string())
 }

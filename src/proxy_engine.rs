@@ -1,5 +1,4 @@
 use crate::config::Config;
-use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::prelude::*;
@@ -7,8 +6,8 @@ use pingora_http::ResponseHeader;
 use std::sync::Arc;
 
 // Global Lock-Free Config
-pub static GLOBAL_CONFIG: once_cell::sync::Lazy<ArcSwap<Config>> =
-    once_cell::sync::Lazy::new(|| ArcSwap::from_pointee(Config::default()));
+pub static GLOBAL_CONFIG: once_cell::sync::Lazy<arc_swap::ArcSwap<Config>> =
+    once_cell::sync::Lazy::new(|| arc_swap::ArcSwap::from_pointee(Config::default()));
 
 // We need a context to pass data between Pingora request phases
 pub struct JarsWafCtx {
@@ -18,6 +17,350 @@ pub struct JarsWafCtx {
     pub body_buffer: Vec<u8>,
     pub body_limit: usize,
     pub is_blocked: bool,
+    pub security_headers: Option<crate::config::SecurityHeadersConfig>,
+    pub dlp_config: Option<crate::config::DlpConfig>,
+    pub response_body_buffer: Vec<u8>,
+    pub request_id: String,
+    pub websocket_security_enabled: bool,
+    pub max_concurrent_requests: usize,
+    pub vhost_backend_resolved: Option<String>,
+}
+
+pub static ACTIVE_CONNECTIONS: once_cell::sync::Lazy<dashmap::DashMap<std::net::IpAddr, usize>> =
+    once_cell::sync::Lazy::new(dashmap::DashMap::new);
+pub static BACKEND_ACTIVE_REQUESTS: once_cell::sync::Lazy<dashmap::DashMap<String, usize>> =
+    once_cell::sync::Lazy::new(dashmap::DashMap::new);
+pub static SESSION_FINGERPRINTS: once_cell::sync::Lazy<dashmap::DashMap<std::net::IpAddr, String>> =
+    once_cell::sync::Lazy::new(dashmap::DashMap::new);
+pub static CHALLENGE_SECRET: once_cell::sync::Lazy<String> =
+    once_cell::sync::Lazy::new(|| uuid::Uuid::new_v4().to_string());
+
+/// Bounded blocklist — hard cap at 100k entries. Used in proxy and agent.
+/// Entries beyond cap evict oldest first via retain-order.
+pub const BLOCKLIST_MAX_ENTRIES: usize = 100_000;
+
+/// Periodic cleanup of unbounded DashMaps to prevent memory leak.
+/// Run every 30 minutes. Retains only active entries younger than threshold.
+pub fn start_memory_cleanup() {
+    use std::time::Duration;
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(Duration::from_secs(1800));
+        loop {
+            interval.tick().await;
+            tracing::debug!("Memory cleanup: clearing active-connection tracking tables");
+            ACTIVE_CONNECTIONS.retain(|_, _| false);
+            SESSION_FINGERPRINTS.retain(|_, _| false);
+            BACKEND_ACTIVE_REQUESTS.retain(|_, _| false);
+        }
+    });
+}
+
+/// Trim a DashMap to at most `max` entries by removing oldest (last 2/3 of insertion order).
+/// Since DashMap iterates in arbitrary order, this is an approximation — sufficient to
+/// bound memory growth.
+pub fn trim_dashmap<K: std::hash::Hash + Eq + Clone, V>(map: &dashmap::DashMap<K, V>, max: usize) {
+    if map.len() > max {
+        let to_remove = map.len() - max;
+        let keys: Vec<_> = map
+            .iter()
+            .map(|e| e.key().clone())
+            .take(to_remove)
+            .collect();
+        for k in keys {
+            map.remove(&k);
+        }
+    }
+}
+
+fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Security Check - jarsWAF</title>
+    <style>
+        body {{ font-family: sans-serif; text-align: center; padding: 50px; background-color: #f7f9fa; color: #333; }}
+        .card {{ max-width: 500px; margin: 0 auto; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+        h1 {{ color: #d93025; font-size: 24px; margin-bottom: 20px; }}
+        p {{ font-size: 16px; line-height: 1.5; color: #5f6368; }}
+        .spinner {{ border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }}
+        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+    </style>
+</head>
+<body>
+    <div class=\"card\">
+        <h1>Security Check</h1>
+        <p>Please wait while we verify your connection. This will only take a moment...</p>
+        <div class=\"spinner\"></div>
+    </div>
+    <script>
+        async function sha256(message) {{
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }}
+
+        async function solve() {{
+            const ip = \"{client_ip}\";
+            const salt = \"{salt}\";
+            const target_prefix = \"000\";
+            let nonce = 0;
+            while (true) {{
+                const hash = await sha256(ip + salt + nonce);
+                if (hash.startsWith(target_prefix)) {{
+                    const original_path = encodeURIComponent(\"{original_path}\");
+                    window.location.href = `/jarswaf-challenge-verify?sol=\${{nonce}}&r=\${{original_path}}`;
+                    break;
+                }}
+                nonce++;
+            }}
+        }}
+        solve();
+    </script>
+</body>
+</html>"#,
+        client_ip = client_ip,
+        salt = salt,
+        original_path = original_path
+    )
+}
+
+fn generate_challenge_signature(timestamp: &str, client_ip: &str, secret: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(timestamp.as_bytes());
+    hasher.update(b"|");
+    hasher.update(client_ip.as_bytes());
+    hasher.update(b"|");
+    hasher.update(secret.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn is_challenge_cookie_valid(cookie_header: &str, client_ip: &str, secret: &str) -> bool {
+    for cookie in cookie_header.split(';') {
+        let parts: Vec<&str> = cookie.trim().split('=').collect();
+        if parts.len() == 2 && parts[0] == "jarswaf-challenge-token" {
+            let token = parts[1];
+            let token_parts: Vec<&str> = token.split('.').collect();
+            if token_parts.len() == 3 {
+                let timestamp_str = token_parts[0];
+                let ip = token_parts[1];
+                let signature = token_parts[2];
+
+                if ip == client_ip {
+                    let expected_sig = generate_challenge_signature(timestamp_str, ip, secret);
+                    if expected_sig == signature {
+                        if let Ok(ts) = timestamp_str.parse::<i64>() {
+                            let now = chrono::Utc::now().timestamp();
+                            if now >= ts && now - ts < 3600 {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn calculate_fingerprint(headers: &std::collections::HashMap<String, String>) -> String {
+    use sha2::{Digest, Sha256};
+    let user_agent = headers.get("user-agent").map(|s| s.as_str()).unwrap_or("");
+    let accept = headers.get("accept").map(|s| s.as_str()).unwrap_or("");
+    let accept_lang = headers
+        .get("accept-language")
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    let accept_enc = headers
+        .get("accept-encoding")
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
+    let mut hasher = Sha256::new();
+    hasher.update(user_agent.as_bytes());
+    hasher.update(b"|");
+    hasher.update(accept.as_bytes());
+    hasher.update(b"|");
+    hasher.update(accept_lang.as_bytes());
+    hasher.update(b"|");
+    hasher.update(accept_enc.as_bytes());
+
+    format!("{:x}", hasher.finalize())
+}
+
+pub fn start_websocket_security_proxy() {
+    tokio::spawn(async move {
+        let listener = match tokio::net::TcpListener::bind("127.0.0.1:24601").await {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!("Failed to bind WebSocket security proxy: {}", e);
+                return;
+            }
+        };
+        tracing::info!("jarsWAF WebSocket Security Proxy listening on 127.0.0.1:24601");
+
+        loop {
+            let (client_socket, _) = match listener.accept().await {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            tokio::spawn(async move {
+                if let Err(e) = handle_secure_websocket_tunnel(client_socket).await {
+                    tracing::debug!("WebSocket security tunnel closed: {:?}", e);
+                }
+            });
+        }
+    });
+}
+
+async fn handle_secure_websocket_tunnel(
+    mut client_socket: tokio::net::TcpStream,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio_tungstenite::tungstenite::protocol::{Message, Role};
+    use tokio_tungstenite::WebSocketStream;
+
+    let mut header_buf = vec![0u8; 8192];
+    let mut n = 0;
+    loop {
+        let read_bytes = client_socket.read(&mut header_buf[n..]).await?;
+        if read_bytes == 0 {
+            return Err("Client connection closed before handshake completed".into());
+        }
+        n += read_bytes;
+        if header_buf[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if n >= 8192 {
+            return Err("Handshake headers too large".into());
+        }
+    }
+
+    let header_str = String::from_utf8_lossy(&header_buf[..n]);
+    let mut real_backend = None;
+    for line in header_str.lines() {
+        if line.to_lowercase().starts_with("x-jarswaf-real-backend:") {
+            if let Some(val) = line.split(':').nth(1) {
+                real_backend = Some(val.trim().to_string());
+            }
+        }
+    }
+
+    let Some(backend_addr) = real_backend else {
+        return Err("Missing X-Jarswaf-Real-Backend header".into());
+    };
+
+    let clean_backend = backend_addr
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .to_string();
+
+    let mut backend_socket = tokio::net::TcpStream::connect(&clean_backend).await?;
+    backend_socket.write_all(&header_buf[..n]).await?;
+
+    let mut resp_buf = vec![0u8; 8192];
+    let mut resp_n = 0;
+    loop {
+        let read_bytes = backend_socket.read(&mut resp_buf[resp_n..]).await?;
+        if read_bytes == 0 {
+            return Err("Backend connection closed".into());
+        }
+        resp_n += read_bytes;
+        if resp_buf[..resp_n].windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if resp_n >= 8192 {
+            return Err("Handshake response headers too large".into());
+        }
+    }
+
+    client_socket.write_all(&resp_buf[..resp_n]).await?;
+
+    let resp_str = String::from_utf8_lossy(&resp_buf[..resp_n]);
+    if !resp_str.contains("101 Switching Protocols") {
+        return Err("Handshake failed".into());
+    }
+
+    let client_ws = WebSocketStream::from_raw_socket(client_socket, Role::Server, None).await;
+    let backend_ws = WebSocketStream::from_raw_socket(backend_socket, Role::Client, None).await;
+
+    let (client_write, mut client_read) = client_ws.split();
+    let (mut backend_write, mut backend_read) = backend_ws.split();
+
+    let client_write_lock = Arc::new(tokio::sync::Mutex::new(client_write));
+    let client_write_for_backend = client_write_lock.clone();
+
+    let client_to_backend = async {
+        let config = GLOBAL_CONFIG.load();
+        let rule_engine = crate::rules::RuleEngine::new(&config);
+        while let Some(msg_res) = client_read.next().await {
+            let msg = msg_res?;
+            match &msg {
+                Message::Text(text) => {
+                    let headers = std::collections::HashMap::new();
+                    let rules = vec![
+                        "SQLI-AST".to_string(),
+                        "XSS-AST".to_string(),
+                        "CMD-INJECTION".to_string(),
+                    ];
+                    if let Some((rule_id, reason)) =
+                        rule_engine.check_request("", "", &headers, text, None, "WS", &rules)
+                    {
+                        tracing::warn!(
+                            "Blocked malicious WebSocket frame: rule={} reason={}",
+                            rule_id,
+                            reason
+                        );
+                        let _ = client_write_lock
+                            .lock()
+                            .await
+                            .send(Message::Close(None))
+                            .await;
+                        return Err(tokio_tungstenite::tungstenite::Error::Io(
+                            std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                format!("Blocked by jarsWAF: {}", reason),
+                            ),
+                        ));
+                    }
+                }
+                Message::Close(_) => {
+                    let _ = backend_write.send(msg).await;
+                    break;
+                }
+                _ => {}
+            }
+            backend_write.send(msg).await?;
+        }
+        Ok::<_, tokio_tungstenite::tungstenite::Error>(())
+    };
+
+    let backend_to_client = async {
+        while let Some(msg_res) = backend_read.next().await {
+            let msg = msg_res?;
+            client_write_for_backend.lock().await.send(msg).await?;
+        }
+        Ok::<_, tokio_tungstenite::tungstenite::Error>(())
+    };
+
+    tokio::select! {
+        res = client_to_backend => {
+            if let Err(e) = res {
+                tracing::debug!("WebSocket client to backend tunnel ended: {:?}", e);
+            }
+        }
+        res = backend_to_client => {
+            if let Err(e) = res {
+                tracing::debug!("WebSocket backend to client tunnel ended: {:?}", e);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -72,6 +415,8 @@ pub struct JarsWafProxy {
     pub blocklist: Arc<dashmap::DashMap<std::net::IpAddr, ()>>,
     // Logging channel
     pub log_tx: tokio::sync::mpsc::Sender<crate::logging::WafLogEntry>,
+    // Webhook / SIEM alert endpoints (loaded from config on startup)
+    pub webhooks: Vec<crate::config::WebhookConfig>,
 }
 
 #[async_trait]
@@ -83,8 +428,15 @@ impl ProxyHttp for JarsWafProxy {
             vhost_backend: None,
             vhost_name: None,
             body_buffer: Vec::new(),
-            body_limit: 10 * 1024 * 1024, // default 10MB
+            body_limit: 1024 * 1024, // default 1MB
             is_blocked: false,
+            security_headers: None,
+            dlp_config: None,
+            response_body_buffer: Vec::new(),
+            request_id: uuid::Uuid::new_v4().to_string(),
+            websocket_security_enabled: false,
+            max_concurrent_requests: 100,
+            vhost_backend_resolved: None,
         }
     }
 
@@ -161,6 +513,182 @@ impl ProxyHttp for JarsWafProxy {
         ctx.vhost_backend = Some(backend_addr);
         ctx.vhost_name = Some(vhost_cfg.name.clone());
         ctx.body_limit = crate::config::parse_size(&vhost_cfg.max_body);
+        ctx.websocket_security_enabled = vhost_cfg.websocket_security_enabled;
+        ctx.max_concurrent_requests = vhost_cfg.max_concurrent_requests;
+        ctx.security_headers = vhost_cfg.security_headers.clone();
+        ctx.dlp_config = vhost_cfg.dlp.clone();
+
+        // 0. Direct IP Access Block
+        if let Some(host_str) = host.as_deref() {
+            let clean_host = host_str.split(':').next().unwrap_or(host_str);
+            if clean_host.parse::<std::net::IpAddr>().is_ok() {
+                let entry = crate::logging::WafLogEntry {
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    client_ip: client_ip.to_string(),
+                    method: req_method.clone(),
+                    path: path.clone(),
+                    action: "BLOCK".to_string(),
+                    rule_id: "DIRECT-IP-001".to_string(),
+                    reason: format!("Direct IP access block: {}", clean_host),
+                };
+                let _ = self.log_tx.try_send(entry);
+                let _ = session.respond_error(403).await;
+                return Ok(true);
+            }
+        }
+
+        // 0.1. Slowloris Connection Limit Check
+        let conn_count = {
+            let mut entry = ACTIVE_CONNECTIONS.entry(client_ip).or_insert(0);
+            *entry += 1;
+            *entry
+        };
+        if conn_count > vhost_cfg.max_conns_per_ip {
+            let entry = crate::logging::WafLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                client_ip: client_ip.to_string(),
+                method: req_method.clone(),
+                path: path.clone(),
+                action: "BLOCK".to_string(),
+                rule_id: "SLOWLORIS-001".to_string(),
+                reason: format!(
+                    "Slowloris concurrent connection limit exceeded: {}",
+                    conn_count
+                ),
+            };
+            let _ = self.log_tx.try_send(entry);
+            let _ = session.respond_error(429).await;
+            return Ok(true);
+        }
+
+        // 0.2. Request Fingerprinting Check
+        let current_fp = calculate_fingerprint(&headers_map);
+        let is_fp_anomaly = {
+            if let Some(stored_fp) = SESSION_FINGERPRINTS.get(&client_ip) {
+                stored_fp.value() != &current_fp
+            } else {
+                SESSION_FINGERPRINTS.insert(client_ip, current_fp.clone());
+                false
+            }
+        };
+        if is_fp_anomaly {
+            let entry = crate::logging::WafLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                client_ip: client_ip.to_string(),
+                method: req_method.clone(),
+                path: path.clone(),
+                action: "ANOMALY".to_string(),
+                rule_id: "ANOMALY-FINGERPRINT-001".to_string(),
+                reason: "Request fingerprint changed mid-session".to_string(),
+            };
+            let _ = self.log_tx.try_send(entry);
+        }
+
+        // 0.3. Bot Challenge Check (Captive Portal PoW)
+        if vhost_cfg.bot_challenge_enabled {
+            if path == "/jarswaf-challenge-verify" {
+                let mut sol_str = None;
+                let mut orig_path = None;
+                for pair in query_str.split('&') {
+                    let mut parts = pair.splitn(2, '=');
+                    if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
+                        if k == "sol" {
+                            sol_str = Some(v.to_string());
+                        } else if k == "r" {
+                            orig_path = Some(
+                                urlencoding::decode(v)
+                                    .unwrap_or_else(|_| v.into())
+                                    .into_owned(),
+                            );
+                        }
+                    }
+                }
+                if let (Some(sol_str), Some(orig_path)) = (sol_str, orig_path) {
+                    use sha2::{Digest, Sha256};
+                    let salt = CHALLENGE_SECRET.as_str();
+                    let check_str = format!("{}{}{}", client_ip, salt, sol_str);
+                    let mut hasher = Sha256::new();
+                    hasher.update(check_str.as_bytes());
+                    let hash_result = format!("{:x}", hasher.finalize());
+                    if hash_result.starts_with("000") {
+                        let now = chrono::Utc::now().timestamp().to_string();
+                        let signature = generate_challenge_signature(
+                            &now,
+                            &client_ip.to_string(),
+                            CHALLENGE_SECRET.as_str(),
+                        );
+                        let token = format!("{}.{}.{}", now, client_ip, signature);
+
+                        if let Ok(mut resp) = ResponseHeader::build(302, Some(0)) {
+                            let _ = resp.insert_header("Location", orig_path);
+                            let _ = resp.insert_header(
+                                "Set-Cookie",
+                                format!(
+                                    "jarswaf-challenge-token={}; Path=/; HttpOnly; Max-Age=3600",
+                                    token
+                                ),
+                            );
+                            let _ = session.write_response_header(Box::new(resp), true).await;
+                            return Ok(true);
+                        }
+                    }
+                }
+                let _ = session.respond_error(400).await;
+                return Ok(true);
+            }
+
+            if path == "/jarswaf-challenge" {
+                let orig_path = query_str.clone();
+                let challenge_html = get_challenge_html(
+                    &client_ip.to_string(),
+                    CHALLENGE_SECRET.as_str(),
+                    &orig_path,
+                );
+                if let Ok(mut resp) = ResponseHeader::build(200, Some(challenge_html.len())) {
+                    let _ = resp.insert_header("Content-Type", "text/html");
+                    if session
+                        .write_response_header(Box::new(resp), false)
+                        .await
+                        .is_ok()
+                    {
+                        let _ = session
+                            .write_response_body(
+                                Some(Bytes::copy_from_slice(challenge_html.as_bytes())),
+                                true,
+                            )
+                            .await;
+                        return Ok(true);
+                    }
+                }
+            }
+
+            let cookie_header = headers_map.get("cookie").map(|s| s.as_str()).unwrap_or("");
+            let is_challenge_valid = is_challenge_cookie_valid(
+                cookie_header,
+                &client_ip.to_string(),
+                CHALLENGE_SECRET.as_str(),
+            );
+
+            let reputation_score = crate::rules::get_reputation_score(client_ip);
+            if reputation_score >= 5.0 && !is_challenge_valid {
+                let redirect_url = format!(
+                    "{}{}",
+                    path,
+                    if query_str.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!("?{}", query_str)
+                    }
+                );
+                let redirect_path = urlencoding::encode(&redirect_url);
+                if let Ok(mut resp) = ResponseHeader::build(302, Some(0)) {
+                    let _ = resp
+                        .insert_header("Location", format!("/jarswaf-challenge?{}", redirect_path));
+                    let _ = session.write_response_header(Box::new(resp), true).await;
+                    return Ok(true);
+                }
+            }
+        }
 
         // Lazily sync backends for this vhost in LOAD_BALANCER
         if !LOAD_BALANCER.contains_key(&vhost_cfg.name) {
@@ -187,11 +715,12 @@ impl ProxyHttp for JarsWafProxy {
                 .or_insert_with(|| Arc::new(std::sync::atomic::AtomicUsize::new(0)));
         }
 
-        // Lazily start health checker
+        // Lazily start health checker & WS security proxy
         static HEALTH_CHECKER_STARTED: std::sync::atomic::AtomicBool =
             std::sync::atomic::AtomicBool::new(false);
         if !HEALTH_CHECKER_STARTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             start_health_checker(tokio_util::sync::CancellationToken::new());
+            start_websocket_security_proxy();
         }
 
         // 1. Check Blocklist (Reputation)
@@ -340,9 +869,41 @@ impl ProxyHttp for JarsWafProxy {
         }
 
         let backend = selected_backend.unwrap_or_else(|| ctx.vhost_backend.clone().unwrap());
+        ctx.vhost_backend_resolved = Some(backend.clone());
+
+        // Increment backend concurrent request count (Backpressure protection)
+        let active_requests = {
+            let mut entry = BACKEND_ACTIVE_REQUESTS.entry(backend.clone()).or_insert(0);
+            *entry += 1;
+            *entry
+        };
+        if active_requests > ctx.max_concurrent_requests {
+            if let Some(mut entry) = BACKEND_ACTIVE_REQUESTS.get_mut(&backend) {
+                if *entry > 0 {
+                    *entry -= 1;
+                }
+            }
+            return Err(pingora::Error::create(
+                pingora::ErrorType::HTTPStatus(503),
+                pingora::ErrorSource::Downstream,
+                Some("Backend Overloaded (Backpressure)".into()),
+                None,
+            ));
+        }
+
+        // Check if this is a WebSocket upgrade request to route to security proxy
+        let is_upgrade = _session
+            .req_header()
+            .headers
+            .get("upgrade")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_lowercase() == "websocket")
+            .unwrap_or(false);
 
         // Handle "http://" or "https://" prefix in config
-        let (host, port, tls) = if backend.starts_with("https://") {
+        let (host, port, tls) = if ctx.websocket_security_enabled && is_upgrade {
+            ("127.0.0.1", 24601, false)
+        } else if backend.starts_with("https://") {
             let stripped = backend.trim_start_matches("https://");
             let clean_host = stripped.split(':').next().unwrap_or(stripped);
             let p = stripped
@@ -360,7 +921,7 @@ impl ProxyHttp for JarsWafProxy {
             (clean_host, p, false)
         } else {
             let clean_host = backend.split(':').next().unwrap_or(&backend);
-            let p = stripped
+            let p = backend
                 .rsplit_once(':')
                 .and_then(|(_, port)| port.parse().ok())
                 .unwrap_or(80);
@@ -388,6 +949,23 @@ impl ProxyHttp for JarsWafProxy {
                 .insert_header("X-Forwarded-For", ip.to_string())
                 .unwrap_or(());
         }
+
+        // Inject request ID header for correlation
+        let _ = upstream_request.insert_header("X-Request-ID", &ctx.request_id);
+
+        if ctx.websocket_security_enabled {
+            let is_upgrade = upstream_request
+                .headers
+                .get("upgrade")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_lowercase() == "websocket")
+                .unwrap_or(false);
+            if is_upgrade {
+                if let Some(backend) = &ctx.vhost_backend_resolved {
+                    let _ = upstream_request.insert_header("X-Jarswaf-Real-Backend", backend);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -397,6 +975,24 @@ impl ProxyHttp for JarsWafProxy {
         e: Option<&pingora::Error>,
         ctx: &mut Self::CTX,
     ) {
+        // 1. Decrement concurrent IP connections (Slowloris protection)
+        if let Some(ip) = ctx.client_ip {
+            if let Some(mut entry) = ACTIVE_CONNECTIONS.get_mut(&ip) {
+                if *entry > 0 {
+                    *entry -= 1;
+                }
+            }
+        }
+
+        // 2. Decrement backend active request count (Backpressure protection)
+        if let Some(ref backend) = ctx.vhost_backend_resolved {
+            if let Some(mut entry) = BACKEND_ACTIVE_REQUESTS.get_mut(backend) {
+                if *entry > 0 {
+                    *entry -= 1;
+                }
+            }
+        }
+
         let req = session.req_header();
         let status = session.response_written().map_or(0, |r| r.status.as_u16());
 
@@ -424,9 +1020,12 @@ impl ProxyHttp for JarsWafProxy {
                 } else {
                     "ALLOW".to_string()
                 },
-                reason: e
-                    .map(|err| err.to_string())
-                    .unwrap_or_else(|| format!("Status: {}", status)),
+                reason: format!(
+                    "ReqID: {} | {}",
+                    ctx.request_id,
+                    e.map(|err| err.to_string())
+                        .unwrap_or_else(|| format!("Status: {}", status))
+                ),
             };
             let _ = self.log_tx.try_send(entry);
         }

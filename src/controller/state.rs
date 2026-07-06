@@ -6,6 +6,7 @@ use tokio::sync::broadcast;
 #[derive(Clone)]
 pub struct ControllerState {
     pub tx: broadcast::Sender<logging::WafLogEntry>,
+    pub block_tx: broadcast::Sender<crate::controller::BlockCommand>,
     pub db_path: String,
     pub logging_enabled: Arc<AtomicBool>,
     pub log_size_limit_mb: Arc<AtomicU64>,

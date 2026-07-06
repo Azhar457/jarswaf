@@ -6,6 +6,7 @@
 /node_modules/
 /dashboard/node_modules/
 /dashboard/dist/
+/jarswaf-ebpf/target/
 
 # WAF logs, databases & certificates
 /logs/
@@ -16,7 +17,8 @@
 Thumbs.db
 .idea/
 .vscode/
-
+.claude/
 #Document
 docs/
 .env
+IDEA.md

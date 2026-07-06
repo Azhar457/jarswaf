@@ -2,13 +2,17 @@ use super::state::ControllerState;
 use crate::config;
 use axum::{
     extract::{
-        ws::{WebSocket, WebSocketUpgrade},
+        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
     response::IntoResponse,
 };
 use std::sync::atomic::Ordering;
-use tracing::info;
+use std::time::Duration;
+use tracing::{info, warn};
+
+/// Max time without any message from an agent before we consider it dead.
+const AGENT_HEARTBEAT_TIMEOUT_SECS: u64 = 120;
 
 pub async fn ws_dashboard_handler(
     ws: WebSocketUpgrade,
@@ -85,22 +89,59 @@ async fn handle_agent_socket(mut socket: WebSocket, state: ControllerState) {
         }
     }
 
-    let mut rx = state.config_tx.subscribe();
+    let mut config_rx = state.config_tx.subscribe();
+    let mut block_rx = state.block_tx.subscribe();
+
+    // Heartbeat: if no message (including Ping) received in 120s, close the connection
+    let heartbeat = Duration::from_secs(AGENT_HEARTBEAT_TIMEOUT_SECS);
+
     loop {
         tokio::select! {
-            Ok(new_cfg) = rx.recv() => {
+            biased; // prefer data messages over timer
+
+            Ok(new_cfg) = config_rx.recv() => {
                 if let Ok(json) = serde_json::to_string(&new_cfg) {
                     if socket.send(axum::extract::ws::Message::Text(json)).await.is_err() {
                         break;
                     }
                 }
             }
-            Some(msg) = socket.recv() => {
-                if msg.is_err() {
+            Ok(block_cmd) = block_rx.recv() => {
+                let payload = serde_json::json!({
+                    "type": "block_command",
+                    "data": block_cmd,
+                });
+                if socket.send(axum::extract::ws::Message::Text(payload.to_string())).await.is_err() {
                     break;
+                }
+            }
+            msg = timeout_recv(&mut socket, heartbeat) => {
+                match msg {
+                    Some(Ok(msg)) => {
+                        if let axum::extract::ws::Message::Close(_) = msg {
+                            break;
+                        }
+                    }
+                    Some(Err(_)) | None => {
+                        // Connection error or heartbeat timeout
+                        warn!("Agent connection closed or heartbeat expired");
+                        break;
+                    }
                 }
             }
         }
     }
     info!("Agent client disconnected from WebSocket");
+
+    // Note: agent_registry cleanup happens via the WebSocket drop handler
+}
+
+/// Receive a WS message with a timeout, returning `None` on timeout or close.
+async fn timeout_recv(
+    socket: &mut WebSocket,
+    timeout: Duration,
+) -> Option<Result<Message, axum::Error>> {
+    tokio::time::timeout(timeout, socket.recv())
+        .await
+        .unwrap_or(None)
 }

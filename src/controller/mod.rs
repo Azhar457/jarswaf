@@ -16,6 +16,15 @@ use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
+/// Command types pushed from Controller → Agent via WebSocket
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+pub struct BlockCommand {
+    pub action: String, // "block" | "unblock" | "sync"
+    pub ip: String,
+    pub ttl: Option<u64>, // seconds, None = permanent
+    pub reason: Option<String>,
+}
+
 pub async fn run_controller(port: u16, config_path: String) {
     // Ensure admin token is generated if not exists
     if let Ok(mut cfg) = config::load_config(&config_path) {
@@ -60,6 +69,8 @@ pub async fn run_controller(port: u16, config_path: String) {
     // Initialize broadcast channel for live logs
     let (tx, _rx) = broadcast::channel(10000);
     let (config_tx, _config_rx) = broadcast::channel(100);
+    // Channel for real-time block commands pushed to agents
+    let (block_tx, _block_rx) = broadcast::channel(1000);
 
     // App state
     let initial_stats = logging::sqlite_get_stats(&db_path, 24).unwrap_or(logging::Stats {
@@ -74,6 +85,7 @@ pub async fn run_controller(port: u16, config_path: String) {
 
     let state = ControllerState {
         tx,
+        block_tx,
         db_path,
         logging_enabled: Arc::new(AtomicBool::new(true)),
         log_size_limit_mb: Arc::new(AtomicU64::new(500)), // default 500MB
@@ -149,6 +161,10 @@ pub async fn run_controller(port: u16, config_path: String) {
         .route(
             "/api/v1/threat-intel/events",
             get(handlers::get_threat_intel_events_handler),
+        )
+        .route(
+            "/api/v1/agent/block",
+            post(handlers::post_agent_block_handler),
         )
         .route(
             "/api/v1/ssl/certificates",
