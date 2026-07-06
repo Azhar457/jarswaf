@@ -2,6 +2,8 @@ use super::super::state::ControllerState;
 use crate::types::is_local_ip;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 
+use crate::controller::BlockCommand;
+
 #[derive(serde::Serialize)]
 pub struct ThreatEvent {
     pub ip: String,
@@ -117,5 +119,61 @@ pub async fn get_threat_intel_events_handler(
             Json(Vec::<ThreatEvent>::new()),
         )
             .into_response(),
+    }
+}
+
+/// POST /api/v1/agent/block  —  Push a block command to all connected agents in real-time.
+#[derive(serde::Deserialize)]
+pub struct BlockRequest {
+    pub ip: String,
+    pub ttl: Option<u64>,
+    pub reason: Option<String>,
+}
+
+pub async fn post_agent_block_handler(
+    State(state): State<ControllerState>,
+    Json(req): Json<BlockRequest>,
+) -> impl IntoResponse {
+    // Validate IP
+    if req.ip.parse::<std::net::IpAddr>().is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid IP address"})),
+        )
+            .into_response();
+    }
+
+    let cmd = BlockCommand {
+        action: "block".to_string(),
+        ip: req.ip.clone(),
+        ttl: req.ttl,
+        reason: req.reason.clone(),
+    };
+
+    match state.block_tx.send(cmd) {
+        Ok(receivers) => {
+            tracing::info!(
+                "Block command broadcast for {} to {} receiver(s)",
+                req.ip,
+                receivers
+            );
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": "broadcast",
+                    "ip": req.ip,
+                    "receivers": receivers,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to broadcast block command: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "No connected agents"})),
+            )
+                .into_response()
+        }
     }
 }

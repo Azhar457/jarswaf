@@ -41,20 +41,24 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 urlencoding = "2.1.3"
 sysinfo = "0.30.12"
 tokio-tungstenite = "0.21.0"
+tokio-util = "0.7"
 maxminddb = "0.27.0"
 htmlescape = "0.3"
 unicode-normalization = "0.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
-pingora = { version = "0.4.0", features = ["proxy", "openssl"] }
+pingora = { version = "0.4.0", features = ["proxy", "rustls"] }
 bytes = "1"
-pingora-core = { version = "0.4.0", features = ["openssl"] }
+pingora-core = { version = "0.4.0", features = ["rustls"] }
 pingora-proxy = "0.4.0"
 pingora-http = "0.4.0"
 pingora-load-balancing = "0.4.0"
 arc-swap = "1.7.1"
 async-trait = "0.1.80"
+futures-util = "0.3"
+sha2 = "0.10"
 redis = { version = "0.25.3", features = ["tokio-comp"] }
-openssl = { version = "0.10", features = ["vendored"] }
+prometheus = { version = "0.13", features = ["process"] }
+quick_cache = "0.7"
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27", features = ["user"] } # for privilege dropping
 

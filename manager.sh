@@ -871,28 +871,16 @@ deploy_agent_only() {
     # Check for standalone config
     if [ ! -f "config.standalone.toml" ]; then
         log_error "config.standalone.toml not found!"
-          log_step "1" "Building Rust Agent binary (release mode)"
-    cargo build --release --bin agent
+        read -n 1 -s -r -p "Press any key to return to menu..."
+        return
+    fi
+
+    # Deploy agent via Docker
+    log_step "1" "Deploying jarsWAF Agent"
+    ${COMPOSE_CMD} -f docker-compose.agent.yml up -d --build 2>&1 | sed 's/^/  /'
+    log_success "jarsWAF Agent deployed."
 
     echo ""
-    echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}${BOLD}║  ✅  AGENT BUILD COMPLETED!                                     ║${NC}"
-    echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "  Binary: ${BOLD}${SCRIPT_DIR}/target/release/agent${NC}"
-    echo ""
-    echo -e "  Run standalone:"
-    echo -e "    ${BOLD}./target/release/agent --config config.standalone.toml${NC}"
-    echo ""
-    echo -e "  Run with remote controller:"
-    echo -e "    ${BOLD}./target/release/agent --config config.standalone.toml --controller http://CENTRAL_IP:8080${NC}"
-    read -n 1 -s -r -p "Press any key to return to menu..."�════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "  Config:     ${BOLD}config.standalone.toml${NC}"
-    echo -e "  Logs:       ${BOLD}/var/log/jarswaf/jarswaf.log${NC} (inside container)"
-    echo -e "  HTTP Proxy: ${BOLD}http://0.0.0.0:80${NC}"
-    echo ""
-    echo -e "  Edit ${BOLD}config.standalone.toml${NC} to configure your VHosts and backends."
     read -n 1 -s -r -p "Press any key to return to menu..."
 }
 
@@ -919,7 +907,7 @@ build_agent_only() {
 
     echo ""
     echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}${BOLD}║  ✅  AGENT BUILD COMPLETED!                                     ║${NC}"
+    echo -e "${GREEN}${BOLD}║  ✅  AGENT BUILD COMPLETED!                                      ║${NC}"
     echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "  Binary: ${BOLD}${SCRIPT_DIR}/target/release/jarswaf${NC}"

@@ -1,4 +1,5 @@
 use crate::logging;
+use crate::proxy_engine;
 use crate::types::is_local_ip;
 use std::sync::Arc;
 use tracing::{debug, error};
@@ -40,6 +41,18 @@ pub async fn start_blocklist_sync(
                             blocklist.clear();
                             for ip in &new_blocklist {
                                 blocklist.insert(*ip, ());
+                            }
+                            // Enforce max entries to cap memory usage
+                            if blocklist.len() > proxy_engine::BLOCKLIST_MAX_ENTRIES {
+                                proxy_engine::trim_dashmap(
+                                    &blocklist,
+                                    proxy_engine::BLOCKLIST_MAX_ENTRIES,
+                                );
+                                tracing::warn!(
+                                    "Blocklist trimmed to {} entries (max={})",
+                                    blocklist.len(),
+                                    proxy_engine::BLOCKLIST_MAX_ENTRIES
+                                );
                             }
                             debug!(
                                 "Reputation blocklist synced. Active blocked IPs: {}",
