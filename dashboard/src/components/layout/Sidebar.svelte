@@ -9,6 +9,7 @@
     Menu,
     LayoutDashboard,
     ShieldCheck,
+    Terminal,
   } from "lucide-svelte";
   import SidebarItem from "./SidebarItem.svelte";
 
@@ -22,7 +23,7 @@
       title: "MAIN",
       items: [
         { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-        { id: "traffic", label: "Traffic Analysis", icon: Activity },
+        { id: "traffic", label: "Live Logs", icon: Terminal },
       ],
     },
     {
@@ -50,18 +51,18 @@
 </script>
 
 <aside
-  class={`bg-slate-900 border-r border-slate-800 flex flex-col transition-all duration-300 ${isCollapsed ? "w-16" : "w-64"} h-full`}
+  class={`bg-bg-secondary border-r border-border-subtle flex flex-col transition-all duration-300 ${isCollapsed ? "w-16" : "w-64"} h-full`}
 >
   <!-- Logo Area -->
-  <div class="h-16 flex items-center justify-between px-4 border-b border-slate-800">
+  <div class="h-16 flex items-center justify-between px-4 border-b border-border-subtle">
     {#if !isCollapsed}
-      <div class="flex items-center gap-2 text-slate-100 font-bold text-lg tracking-wider">
-        <Shield class="text-blue-500" size={24} />
+      <div class="flex items-center gap-2 text-text-primary font-bold text-lg tracking-wider">
+        <Shield class="text-accent-blue" size={24} />
         <span>jarsWAF</span>
       </div>
     {/if}
     <button
-      class="text-slate-400 hover:text-slate-100 p-1 rounded-md hover:bg-slate-800"
+      class="text-text-muted hover:text-text-primary p-1 rounded-md hover:bg-surface-hover/30"
       on:click={() => dispatch("toggleCollapse")}
     >
       <Menu size={20} />
@@ -73,7 +74,7 @@
     {#each menuSections as section}
       <div class="mb-6">
         {#if !isCollapsed}
-          <div class="px-5 mb-2 text-xs font-semibold text-slate-500 tracking-wider">
+          <div class="px-6 mb-2 text-xs font-semibold text-text-muted tracking-wider">
             {section.title}
           </div>
         {/if}

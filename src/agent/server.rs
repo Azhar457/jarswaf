@@ -11,7 +11,7 @@ use pingora_proxy::http_proxy_service;
 pub struct AppState {
     pub config: Arc<std::sync::RwLock<config::Config>>,
     pub log_tx: tokio::sync::mpsc::Sender<logging::WafLogEntry>,
-    pub blocklist: Arc<dashmap::DashMap<std::net::IpAddr, ()>>,
+    pub blocklist: Arc<dashmap::DashMap<std::net::IpAddr, std::time::Instant>>,
 }
 
 #[cfg(unix)]

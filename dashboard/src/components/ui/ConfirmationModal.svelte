@@ -40,12 +40,12 @@
             <AlertTriangle size={24} />
           </div>
           <div class="flex-1">
-            <h3 class="text-lg font-bold text-white mb-2">{title}</h3>
+            <h3 class="text-lg font-bold text-text-primary mb-2">{title}</h3>
             <p class="text-text-secondary text-sm leading-relaxed">{message}</p>
           </div>
         </div>
       </div>
-      <div class="bg-slate-900/20 px-6 py-4 border-t border-border-muted flex justify-end gap-3">
+      <div class="bg-slate-900/20 px-6 py-4 border-t border-border-muted flex justify-end gap-4">
         <Button
           variant="ghost"
           on:click={onCancel}

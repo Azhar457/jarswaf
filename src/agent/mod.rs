@@ -17,6 +17,46 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
     // Start background memory cleanup for rate limiter & reputation counters
     rules::start_rate_limiter_cleanup();
 
+    // Attach eBPF XDP if an interface is configured
+    if let Some(interface) = &cfg.global.xdp_interface {
+        info!("Attaching eBPF XDP to interface: {}", interface);
+        let mut xdp = crate::XDP_MANAGER.lock().await;
+        if let Err(e) = xdp.attach(interface) {
+            tracing::error!("Failed to attach eBPF XDP: {}", e);
+        }
+    }
+
+    // Attach RASP Monitor (eBPF Kernel Monitor)
+    {
+        info!("Starting RASP Agent (eBPF Kernel Monitor)...");
+        let (rasp_tx, mut rasp_rx) = tokio::sync::mpsc::channel::<()>(100);
+        let mut xdp = crate::XDP_MANAGER.lock().await;
+        if let Err(e) = xdp.attach_rasp(Some(rasp_tx)) {
+            tracing::error!("Failed to attach RASP eBPF: {}", e);
+        }
+        
+        tokio::spawn(async move {
+            while rasp_rx.recv().await.is_some() {
+                tracing::warn!("RASP Alert received! Flushing suspicious IPs to blocklist!");
+                crate::proxy_engine::flush_suspicious_ips_to_blocklist().await;
+            }
+        });
+    }
+
+
+    // Initialize Gossip Protocol
+    if cfg.gossip.enabled {
+        info!("Starting Gossip protocol on {}", cfg.gossip.bind_addr);
+        let mut gossip = crate::gossip::GossipNode::new(cfg.gossip.clone());
+        gossip.set_handler(Arc::new(rules::WafGossipHandler));
+        
+        if let Err(e) = gossip.start().await {
+            tracing::error!("Failed to start Gossip node: {}", e);
+        } else {
+            *crate::GOSSIP_MANAGER.lock().await = Some(gossip);
+        }
+    }
+
     // Determine logging mode from config
     let log_mode = cfg.logging.mode.clone();
     // Initialize SQLite database
@@ -84,6 +124,13 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
         }
     });
 
+    if cfg.global.mode == "agent" && cfg.global.manager_url.is_some() {
+        let grpc_config = Arc::new(cfg.clone());
+        tokio::spawn(async move {
+            crate::grpc::client::run_agent_client(grpc_config).await;
+        });
+    }
+
     // Build application state — load blocklist from file
     let initial_blocklist = {
         let loaded = logging::load_blocklist_from_file(&cfg.logging.blocklist_path);
@@ -94,14 +141,44 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
                 loaded.len(),
                 cfg.logging.blocklist_path
             );
+            let mut xdp = crate::XDP_MANAGER.lock().await;
             for ip in loaded {
-                blocklist.insert(ip, ());
+                blocklist.insert(ip, std::time::Instant::now() + std::time::Duration::from_secs(31536000));
+                if let std::net::IpAddr::V4(ipv4) = ip {
+                    let _ = xdp.block_ip(ipv4);
+                }
             }
         }
         blocklist
     };
 
     let blocklist = Arc::new(initial_blocklist);
+    
+    // Spawn background sweeper for expired blocklist entries
+    let sweeper_blocklist = blocklist.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let now = std::time::Instant::now();
+            
+            // Clean up blocklist
+            let mut expired_ips = Vec::new();
+            for entry in sweeper_blocklist.iter() {
+                if now > *entry.value() {
+                    expired_ips.push(*entry.key());
+                }
+            }
+            for ip in expired_ips {
+                sweeper_blocklist.remove(&ip);
+                if let std::net::IpAddr::V4(ipv4) = ip {
+                    let mut xdp = crate::XDP_MANAGER.lock().await;
+                    let _ = xdp.unblock_ip(ipv4);
+                }
+                tracing::info!("Unblocked IP {} after duration expired", ip);
+            }
+        }
+    });
     let state = AppState {
         config: config_arc.clone(),
         log_tx,
@@ -191,6 +268,34 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
             db_path_local,
         )
         .await;
+    });
+
+    // Spawn Public Threat Intelligence Fetcher
+    let threat_blocklist = blocklist.clone();
+    tokio::spawn(async move {
+        // Fetch immediately on startup
+        let ips = rules::threat_intel::fetch_threat_intel_ips().await;
+        for ip in ips {
+            threat_blocklist.insert(ip, std::time::Instant::now() + std::time::Duration::from_secs(86400));
+            if let std::net::IpAddr::V4(ipv4) = ip {
+                let mut xdp = crate::XDP_MANAGER.lock().await;
+                let _ = xdp.block_ip(ipv4);
+            }
+        }
+        
+        // Then fetch periodically every 24 hours
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(86400));
+        loop {
+            interval.tick().await;
+            let ips = rules::threat_intel::fetch_threat_intel_ips().await;
+            for ip in ips {
+                threat_blocklist.insert(ip, std::time::Instant::now() + std::time::Duration::from_secs(86400));
+                if let std::net::IpAddr::V4(ipv4) = ip {
+                    let mut xdp = crate::XDP_MANAGER.lock().await;
+                    let _ = xdp.block_ip(ipv4);
+                }
+            }
+        }
     });
 
     // Start periodic memory cleanup (clears global DashMaps every 30 min)

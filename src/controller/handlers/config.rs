@@ -7,7 +7,7 @@ use axum::{
     Json,
 };
 use std::sync::atomic::Ordering;
-use tracing::error;
+use tracing::{error, info};
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct ConfigPayload {
@@ -67,6 +67,15 @@ pub async fn post_config_handler(
 
     // Broadcast updated config to all agents via config_tx
     let _ = state.config_tx.send(cfg);
+
+    // Record audit trail
+    let _ = crate::logging::write_audit_log(
+        &state.db_path,
+        "controller",
+        "CONFIG_UPDATE",
+        &format!("waf_enabled={}, logging={}, log_limit={}MB", payload.waf_enabled, payload.logging_enabled, payload.log_limit_mb),
+    );
+    info!("Config updated via API — audit logged");
 
     StatusCode::OK.into_response()
 }
@@ -172,6 +181,15 @@ pub async fn post_config_rollback_handler(
     // Broadcast updated config to all agents via config_tx
     let _ = state.config_tx.send(cfg);
 
+    // Record audit trail
+    let _ = crate::logging::write_audit_log(
+        &state.db_path,
+        "controller",
+        "CONFIG_ROLLBACK",
+        &format!("Rolled back to backup: {}", payload.filename),
+    );
+    info!("Config rolled back to {} — audit logged", payload.filename);
+
     StatusCode::OK.into_response()
 }
 
@@ -215,4 +233,19 @@ echo "✅ jarsWAF Agent installation script configuration completed."
         [(axum::http::header::CONTENT_TYPE, "text/x-shellscript")],
         script,
     )
+}
+
+pub async fn get_config_poll_handler(
+    State(state): State<ControllerState>,
+) -> impl IntoResponse {
+    let mut rx = state.config_tx.subscribe();
+    
+    match tokio::time::timeout(tokio::time::Duration::from_secs(30), rx.recv()).await {
+        Ok(Ok(cfg)) => {
+            (StatusCode::OK, Json(cfg)).into_response()
+        }
+        _ => {
+            StatusCode::NOT_MODIFIED.into_response()
+        }
+    }
 }

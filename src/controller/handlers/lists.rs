@@ -58,7 +58,15 @@ pub async fn post_allowlists_handler(
                 "Allowlists configuration updated successfully in {}",
                 state.config_path
             );
-            let _ = state.config_tx.send(cfg);
+            let _ = state.config_tx.send(cfg.clone());
+
+            let _ = crate::logging::write_audit_log(
+                &state.db_path,
+                "controller",
+                "ALLOWLIST_UPDATE",
+                &format!("{} allowlist rules applied", cfg.allowlists.len()),
+            );
+
             StatusCode::OK.into_response()
         }
         Err(e) => {
@@ -127,7 +135,15 @@ pub async fn post_blacklists_handler(
                 "Blacklists configuration updated successfully in {}",
                 state.config_path
             );
-            let _ = state.config_tx.send(cfg);
+            let _ = state.config_tx.send(cfg.clone());
+
+            let _ = crate::logging::write_audit_log(
+                &state.db_path,
+                "controller",
+                "BLACKLIST_UPDATE",
+                &format!("{} blacklist rules applied", cfg.blacklists.len()),
+            );
+
             StatusCode::OK.into_response()
         }
         Err(e) => {

@@ -7,7 +7,7 @@
 
 <div class="space-y-6 max-h-full overflow-y-auto pr-1">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2 md:text-3xl">
+    <h1 class="text-2xl font-bold tracking-tight text-text-primary flex items-center gap-2 md:text-3xl">
       <Server class="text-accent-blue" /> WAF Agent Nodes
     </h1>
     <p class="text-text-secondary text-sm mt-1">
@@ -17,11 +17,11 @@
 
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     {#each $agents as node}
-      <Card className="flex flex-col border-border-muted" interactive={true}>
+      <Card className="flex flex-col border-border-muted p-6 md:p-8" interactive={true}>
         <!-- Card Header -->
         <div class="flex items-start justify-between border-b border-border-muted/80 pb-4 mb-4">
           <div>
-            <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <h3 class="text-base font-bold text-text-primary flex items-center gap-2">
               <Server size={16} class="text-accent-blue" />
               <span>{node.hostname}</span>
             </h3>
@@ -39,14 +39,14 @@
         </div>
 
         <!-- Hardware Metrics Grid -->
-        <div class="grid grid-cols-2 gap-4 flex-1">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
           <!-- CPU -->
           <div class="bg-slate-950/40 p-3.5 rounded-xl border border-border-muted/60 shadow-inner">
             <div class="flex items-center gap-2 text-text-secondary mb-2">
               <Cpu size={14} />
               <span class="text-[10px] font-bold uppercase tracking-wider">CPU Usage</span>
             </div>
-            <div class="text-lg font-mono font-bold text-white">
+            <div class="text-lg font-mono font-bold text-text-primary">
               {node.cpu.toFixed(1)}%
             </div>
             <div class="w-full bg-slate-900 h-1.5 mt-2 rounded-full overflow-hidden">
@@ -63,7 +63,7 @@
               <MemoryStick size={14} />
               <span class="text-[10px] font-bold uppercase tracking-wider">RAM Usage</span>
             </div>
-            <div class="text-lg font-mono font-bold text-white">
+            <div class="text-lg font-mono font-bold text-text-primary">
               {node.ram.toFixed(1)}%
             </div>
             <div class="w-full bg-slate-900 h-1.5 mt-2 rounded-full overflow-hidden">
@@ -80,7 +80,7 @@
               <HardDrive size={14} />
               <span class="text-[10px] font-bold uppercase tracking-wider">Disk</span>
             </div>
-            <div class="text-sm font-mono font-bold text-white mt-1">
+            <div class="text-sm font-mono font-bold text-text-primary mt-1">
               {node.disk.toFixed(1)}% Used
             </div>
           </div>
@@ -91,7 +91,7 @@
               <Clock size={14} />
               <span class="text-[10px] font-bold uppercase tracking-wider">Uptime</span>
             </div>
-            <div class="text-sm font-mono font-bold text-white mt-1">
+            <div class="text-sm font-mono font-bold text-text-primary mt-1">
               {node.uptime}
             </div>
           </div>

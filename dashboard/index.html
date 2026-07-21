@@ -1,6 +1,17 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
+    <script>
+      (function() {
+        try {
+          var t = localStorage.getItem('jarswaf-theme') ||
+            (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          document.documentElement.className = 'theme-' + t;
+        } catch(e) {
+          document.documentElement.className = 'theme-dark';
+        }
+      })();
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -16,7 +27,7 @@
       rel="stylesheet"
     />
   </head>
-  <body class="dark bg-surface-container-lowest text-on-surface">
+  <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

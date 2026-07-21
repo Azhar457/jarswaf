@@ -1,0 +1,31 @@
+{{- if .Values.controller.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "jarswaf.fullname" . }}-controller
+  labels:
+    {{- include "jarswaf.labels" . | nindent 4 }}
+  {{- if .Values.controller.ingress.basicAuth.enabled }}
+  annotations:
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: {{ include "jarswaf.fullname" . }}-auth
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+  {{- end }}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: {{ .Values.controller.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "jarswaf.fullname" . }}-controller
+                port:
+                  number: {{ .Values.controller.port }}
+  tls:
+    - hosts:
+        - {{ .Values.controller.ingress.host }}
+      secretName: {{ include "jarswaf.fullname" . }}-controller-tls
+{{- end }}
