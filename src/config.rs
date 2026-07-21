@@ -24,6 +24,12 @@ pub struct Config {
     pub blacklists: Vec<BlacklistRule>,
     #[serde(default)]
     pub redis: RedisConfig,
+    #[serde(default)]
+    pub gossip: GossipConfig,
+    #[serde(default)]
+    pub api_schemas: Vec<RouteSchema>,
+    #[serde(default)]
+    pub zero_trust: ZeroTrustConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -52,6 +58,12 @@ pub struct GlobalConfig {
     #[serde(default = "default_log_level")]
     pub log_level: String,
     pub trusted_proxies: Option<Vec<String>>,
+    #[serde(default = "default_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub manager_url: Option<String>,
+    #[serde(default)]
+    pub grpc_token: Option<String>,
     #[serde(default)]
     pub admin_token: Option<String>,
     #[serde(default = "default_waf_enabled")]
@@ -66,6 +78,17 @@ pub struct GlobalConfig {
     /// Interval in seconds between prometheus metric pushes (default 60)
     #[serde(default = "default_metrics_push_interval")]
     pub metrics_push_interval_secs: u64,
+    /// XDP network interface to attach to (e.g., "eth0", "podman0")
+    #[serde(default = "default_xdp_interface")]
+    pub xdp_interface: Option<String>,
+    #[serde(default = "default_scoring_mode")]
+    pub scoring_mode: String,
+    #[serde(default = "default_anomaly_threshold")]
+    pub anomaly_threshold: u32,
+}
+
+fn default_mode() -> String {
+    "standalone".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -143,6 +166,8 @@ pub struct VHost {
     pub allowlists: Vec<AllowlistRule>,
     #[serde(default)]
     pub blacklists: Vec<BlacklistRule>,
+    #[serde(default)]
+    pub deception_mode: bool,
     /// Security headers to inject into every response.
     /// Default: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy.
     #[serde(default)]
@@ -158,6 +183,40 @@ pub struct VHost {
     pub bot_challenge_enabled: bool,
     #[serde(default = "default_websocket_security_enabled")]
     pub websocket_security_enabled: bool,
+    #[serde(default)]
+    pub blocked_asns: Vec<u32>,
+}
+
+impl Default for VHost {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            hosts: Vec::new(),
+            backend: String::new(),
+            backends: None,
+            tenant: default_tenant(),
+            rate_limit_tiers: Vec::new(),
+            logging: None,
+            rules: Vec::new(),
+            blocked_countries: Vec::new(),
+            geoblock_type: default_geoblock_type(),
+            custom_rules: Vec::new(),
+            ssl: default_ssl(),
+            max_body: default_max_body(),
+            rate_limit: default_rate_limit_str(),
+            is_default: false,
+            allowlists: Vec::new(),
+            blacklists: Vec::new(),
+            deception_mode: false,
+            security_headers: None,
+            dlp: None,
+            max_conns_per_ip: default_max_conns_per_ip(),
+            max_concurrent_requests: default_max_concurrent_requests(),
+            bot_challenge_enabled: default_bot_challenge_enabled(),
+            websocket_security_enabled: default_websocket_security_enabled(),
+            blocked_asns: Vec::new(),
+        }
+    }
 }
 
 fn default_max_conns_per_ip() -> usize {
@@ -202,6 +261,10 @@ fn default_waf_enabled() -> bool {
 
 fn default_metrics_push_interval() -> u64 {
     60
+}
+
+fn default_xdp_interface() -> Option<String> {
+    None
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -283,11 +346,17 @@ impl Default for Config {
                 log_dir: "./logs".to_string(),
                 log_level: "security".to_string(),
                 trusted_proxies: None,
+                mode: default_mode(),
+                manager_url: None,
+                grpc_token: None,
                 admin_token: None,
                 waf_enabled: true,
                 metrics_push_url: None,
                 metrics_push_interval_secs: 60,
                 webhooks: Vec::new(),
+                xdp_interface: None,
+                scoring_mode: default_scoring_mode(),
+                anomaly_threshold: default_anomaly_threshold(),
             },
             tls: TlsConfig {
                 mode: "disabled".to_string(),
@@ -302,6 +371,64 @@ impl Default for Config {
             allowlists: Vec::new(),
             blacklists: Vec::new(),
             redis: RedisConfig::default(),
+            gossip: GossipConfig::default(),
+            api_schemas: Vec::new(),
+            zero_trust: ZeroTrustConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GossipConfig {
+    #[serde(default = "default_gossip_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_gossip_bind")]
+    pub bind_addr: String,
+    #[serde(default)]
+    pub seeds: Vec<String>,
+    /// Pre-shared key for ChaCha20Poly1305 encryption.
+    /// MUST be exactly 32 bytes. If shorter, it will be zero-padded.
+    /// If longer, it will be truncated to 32 bytes.
+    #[serde(default)]
+    pub psk: String,
+    #[serde(default = "default_gossip_node_id")]
+    pub node_id: String,
+}
+
+fn default_gossip_enabled() -> bool { false }
+fn default_gossip_bind() -> String { "0.0.0.0:7946".to_string() }
+fn default_gossip_node_id() -> String { "jarswaf-unknown".to_string() }
+
+impl Default for GossipConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind_addr: default_gossip_bind(),
+            seeds: Vec::new(),
+            psk: String::new(),
+            node_id: default_gossip_node_id(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ZeroTrustConfig {
+    /// Minimum trust score (0.0 to 1.0). Requests below this are blocked.
+    #[serde(default = "default_min_trust_score")]
+    pub min_trust_score: f64,
+    /// Allowed identity token issuers (e.g. "https://auth.jarswaf.local").
+    /// Empty = trust all issuers.
+    #[serde(default)]
+    pub allowed_issuers: Vec<String>,
+}
+
+fn default_min_trust_score() -> f64 { 0.0 }
+
+impl Default for ZeroTrustConfig {
+    fn default() -> Self {
+        Self {
+            min_trust_score: default_min_trust_score(),
+            allowed_issuers: Vec::new(),
         }
     }
 }
@@ -519,7 +646,10 @@ pub struct DlpConfig {
     pub allowlist: Vec<String>,
     /// Custom regex patterns (key = pattern name, value = regex)
     #[serde(default)]
-    pub custom_patterns: std::collections::HashMap<String, String>,
+    pub custom_patterns: ahash::AHashMap<String, String>,
+    /// Max response body size to inspect (default: 2MB)
+    #[serde(default = "default_dlp_response_limit")]
+    pub response_body_limit: usize,
 }
 
 impl Default for DlpConfig {
@@ -533,13 +663,23 @@ impl Default for DlpConfig {
             password_in_body: default_dlp_password(),
             email: default_dlp_email(),
             allowlist: Vec::new(),
-            custom_patterns: std::collections::HashMap::new(),
+            custom_patterns: ahash::AHashMap::new(),
+            response_body_limit: default_dlp_response_limit(),
         }
     }
 }
 
 fn default_dlp_enabled() -> bool {
     false
+}
+fn default_dlp_response_limit() -> usize {
+    2 * 1024 * 1024
+}
+fn default_scoring_mode() -> String {
+    "immediate".to_string()
+}
+fn default_anomaly_threshold() -> u32 {
+    5
 }
 fn default_dlp_action() -> String {
     "log".to_string()
@@ -589,7 +729,7 @@ pub struct SecurityHeadersConfig {
     pub cross_origin_resource_policy: Option<String>,
     /// Custom extra headers (key=value pairs)
     #[serde(default)]
-    pub extra_headers: std::collections::HashMap<String, String>,
+    pub extra_headers: ahash::AHashMap<String, String>,
 }
 
 impl Default for SecurityHeadersConfig {
@@ -603,7 +743,7 @@ impl Default for SecurityHeadersConfig {
             referrer_policy: default_sh_referrer(),
             permissions_policy: default_sh_permissions(),
             cross_origin_resource_policy: default_sh_corp(),
-            extra_headers: std::collections::HashMap::new(),
+            extra_headers: ahash::AHashMap::new(),
         }
     }
 }
@@ -632,3 +772,18 @@ fn default_sh_permissions() -> Option<String> {
 fn default_sh_corp() -> Option<String> {
     Some("same-origin".to_string())
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+pub struct ParameterSchema {
+    pub name: String,
+    pub param_type: String, // "integer", "boolean", "string"
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+pub struct RouteSchema {
+    pub path: String,
+    pub method: String,
+    pub parameters: Vec<ParameterSchema>,
+}
+

@@ -14,6 +14,21 @@ static GEOIP_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> =
         },
     );
 
+static GEOIP_ASN_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> =
+    Lazy::new(
+        || match maxminddb::Reader::open_readfile("GeoLite2-ASN.mmdb") {
+            Ok(reader) => Some(reader),
+            Err(e) => {
+                tracing::warn!(
+                    "GeoIP ASN database not found ({}). ASN-blocking will return None for all IPs.",
+                    e
+                );
+                None
+            }
+        },
+    );
+
+
 pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
     if crate::types::is_local_ip(ip) {
         return "LOCAL".to_string();
@@ -31,6 +46,25 @@ pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
 
     "XX".to_string()
 }
+
+pub fn resolve_ip_asn(ip: &std::net::IpAddr) -> Option<(u32, String)> {
+    if crate::types::is_local_ip(ip) {
+        return None;
+    }
+
+    if let Some(reader) = GEOIP_ASN_READER.as_ref() {
+        if let Ok(lookup_res) = reader.lookup(*ip) {
+            if let Ok(Some(record)) = lookup_res.decode::<maxminddb::geoip2::Asn>() {
+                if let Some(asn) = record.autonomous_system_number {
+                    let org = record.autonomous_system_organization.map(|s| s.to_string()).unwrap_or_default();
+                    return Some((asn, org));
+                }
+            }
+        }
+    }
+    None
+}
+
 
 pub fn match_ip(client_ip: &std::net::IpAddr, pattern: &str) -> bool {
     let pattern = pattern.trim();
@@ -99,3 +133,29 @@ pub fn match_path(path: &str, pattern: &str) -> bool {
         path == pattern
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_ip_asn_missing_db() {
+        // Local IP should return None
+        let local_ip = "127.0.0.1".parse::<std::net::IpAddr>().unwrap();
+        assert!(resolve_ip_asn(&local_ip).is_none());
+
+        // Public IP should also return None safely (since mmdb file is missing) without panic
+        let public_ip = "8.8.8.8".parse::<std::net::IpAddr>().unwrap();
+        assert!(resolve_ip_asn(&public_ip).is_none());
+    }
+
+    #[test]
+    fn test_match_ip() {
+        let ip = "192.168.1.5".parse::<std::net::IpAddr>().unwrap();
+        assert!(match_ip(&ip, "192.168.1.5"));
+        assert!(match_ip(&ip, "192.168.1.0/24"));
+        assert!(!match_ip(&ip, "192.168.2.0/24"));
+        assert!(match_ip(&ip, "*"));
+    }
+}
+

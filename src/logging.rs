@@ -78,6 +78,26 @@ pub fn init_sqlite_db(db_path: &str) -> Result<(), Box<dyn std::error::Error + S
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS reputation_feed (
+            ip TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            added_at TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            admin_token TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT NOT NULL
+        )",
+        [],
+    )?;
+
     // Create index on timestamp for fast queries
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_request_log_timestamp ON request_log (timestamp)",
@@ -170,6 +190,65 @@ pub fn sqlite_get_logs(
     Ok(logs)
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AuditLogEntry {
+    pub timestamp: String,
+    pub admin_token: String,
+    pub action: String,
+    pub details: String,
+}
+
+pub fn write_audit_log(
+    db_path: &str,
+    token: &str,
+    action: &str,
+    details: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    
+    // Partially mask the token for security in DB
+    let masked_token = if token.len() > 8 {
+        format!("{}...{}", &token[..4], &token[token.len()-4..])
+    } else {
+        "***".to_string()
+    };
+
+    conn.execute(
+        "INSERT INTO audit_logs (timestamp, admin_token, action, details) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![timestamp, masked_token, action, details],
+    )?;
+    Ok(())
+}
+
+pub fn sqlite_get_audit_logs(
+    db_path: &str,
+    limit: usize,
+) -> Result<Vec<AuditLogEntry>, Box<dyn std::error::Error + Send + Sync>> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT timestamp, admin_token, action, details 
+         FROM audit_logs 
+         ORDER BY timestamp DESC 
+         LIMIT ?1",
+    )?;
+
+    let log_iter = stmt.query_map([limit], |row| {
+        Ok(AuditLogEntry {
+            timestamp: row.get(0)?,
+            admin_token: row.get(1)?,
+            action: row.get(2)?,
+            details: row.get(3)?,
+        })
+    })?;
+
+    let mut logs = Vec::new();
+    for entry in log_iter.flatten() {
+        logs.push(entry);
+    }
+    Ok(logs)
+}
+
 use std::fs::OpenOptions;
 use std::io::Write;
 
@@ -183,6 +262,15 @@ fn write_to_local_log(entry: &WafLogEntry, log_path: &str) {
         // Write as JSON line for machine-readability
         if let Ok(json) = serde_json::to_string(entry) {
             let _ = writeln!(file, "{}", json);
+        }
+    }
+
+    // Also write compliance log in ECS format
+    let compliance_path = format!("{}.ecs.json", log_path);
+    if let Ok(mut compliance_file) = OpenOptions::new().create(true).append(true).open(&compliance_path) {
+        let ecs_event = crate::compliance::map_to_compliance_event(entry);
+        if let Ok(json) = serde_json::to_string(&ecs_event) {
+            let _ = writeln!(compliance_file, "{}", json);
         }
     }
 }
@@ -393,77 +481,62 @@ async fn push_logs_to_remote(
 }
 
 /// SQLITE mode: Batch insert logs to local SQLite + optional controller forwarding.
-async fn log_worker_sqlite(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConfig) {
-    let client = build_client();
-    let batch_interval = Duration::from_secs(1);
-    let max_batch_size = 1000;
-
-    let mut batch = Vec::new();
-    let mut last_flush = tokio::time::Instant::now();
-
-    tracing::info!(
-        "Log worker started in SQLITE / ClickHouse compatibility mode → {}",
-        cfg.db_path
-    );
-
-    loop {
-        let timeout = batch_interval
-            .checked_sub(last_flush.elapsed())
-            .unwrap_or(Duration::from_millis(10));
-
-        tokio::select! {
-            Some(entry) = rx.recv() => {
-                // Also write to local file for backup
-                write_to_local_log(&entry, &cfg.log_path);
-
-                batch.push(entry);
-                if batch.len() >= max_batch_size {
-                    flush_to_sqlite(&batch, &cfg.db_path, &cfg.controller_url, &client, &cfg.token).await;
-                    batch.clear();
-                    last_flush = tokio::time::Instant::now();
-                }
-            }
-            _ = tokio::time::sleep(timeout) => {
-                if !batch.is_empty() {
-                    flush_to_sqlite(&batch, &cfg.db_path, &cfg.controller_url, &client, &cfg.token).await;
-                    batch.clear();
-                }
-                last_flush = tokio::time::Instant::now();
-            }
-        }
-    }
+/// Holds a persistent connection — never open/close per flush.
+struct SqliteLogWorker {
+    controller_url: Option<String>,
+    client: reqwest::Client,
+    token: Option<String>,
+    /// Shared connection, guarded by std Mutex, wrapped in Arc for spawn_blocking.
+    conn: std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>,
 }
 
-/// Flush logs to SQLite or forward to Controller.
-async fn flush_to_sqlite(
-    batch: &[WafLogEntry],
-    db_path: &str,
-    controller_url: &Option<String>,
-    client: &reqwest::Client,
-    token: &Option<String>,
-) {
-    if batch.is_empty() {
-        return;
+impl SqliteLogWorker {
+    fn new(cfg: &LogWorkerConfig) -> Result<Self, rusqlite::Error> {
+        let conn = rusqlite::Connection::open(&cfg.db_path)?;
+        let _ = conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+        Ok(Self {
+            controller_url: cfg.controller_url.clone(),
+            client: build_client(),
+            token: cfg.token.clone(),
+            conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
+        })
     }
 
-    if let Some(ctrl_url) = controller_url {
-        // Mode Agent: Kirim JSON Array ke Controller
-        let url = format!("{}/api/v1/logs", ctrl_url.trim_end_matches('/'));
-        let mut req = client.post(&url).json(batch);
-        if let Some(ref t) = token {
-            req = req.header("Authorization", format!("Bearer {t}"));
+    async fn flush(&self, batch: &[WafLogEntry]) {
+        if batch.is_empty() {
+            return;
         }
-        if let Err(e) = req.send().await {
-            tracing::error!("Error posting logs to controller: {}", e);
-        }
-    } else {
-        // Mode Controller: Bulk Insert ke SQLite menggunakan Transaction
-        let db_path = db_path.to_string();
-        let batch = batch.to_vec();
         let batch_len = batch.len();
 
+        // Controller-forward mode (Agent → Controller)
+        if let Some(ref ctrl_url) = self.controller_url {
+            let url = format!("{}/api/v1/logs", ctrl_url.trim_end_matches('/'));
+            let req = self.client.post(&url).json(batch);
+            let req = if let Some(ref t) = self.token {
+                req.header("Authorization", format!("Bearer {t}"))
+            } else {
+                req
+            };
+            // Fire-and-forget: error logged, never block proxy
+            tokio::spawn(async move {
+                if let Err(e) = req.send().await {
+                    tracing::error!("Error posting logs to controller: {e}");
+                }
+            });
+            return;
+        }
+
+        // Local SQLite insert inside spawn_blocking — never block async runtime
+        let batch = batch.to_vec();
+        let conn = self.conn.clone();
         let res = tokio::task::spawn_blocking(move || {
-            let mut conn = rusqlite::Connection::open(&db_path)?;
+            let mut conn = match conn.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    tracing::error!("SQLite connection mutex poisoned, recovering");
+                    poisoned.into_inner()
+                }
+            };
             let tx = conn.transaction()?;
             {
                 let mut stmt = tx.prepare(
@@ -471,7 +544,7 @@ async fn flush_to_sqlite(
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
                 )?;
                 for entry in &batch {
-                    stmt.execute([
+                    stmt.execute(rusqlite::params![
                         &entry.timestamp,
                         &entry.client_ip,
                         &entry.method,
@@ -484,17 +557,58 @@ async fn flush_to_sqlite(
             }
             tx.commit()?;
             Ok::<(), rusqlite::Error>(())
-        }).await;
+        })
+        .await;
 
         match res {
-            Ok(Ok(())) => {
-                tracing::debug!("Successfully inserted {} logs into SQLite", batch_len);
+            Ok(Ok(())) => tracing::debug!("Inserted {batch_len} logs into SQLite"),
+            Ok(Err(e)) => tracing::error!("Failed SQLite insert ({batch_len}): {e}"),
+            Err(_) => tracing::error!("Blocking task panicked inserting {batch_len} logs into SQLite"),
+        }
+    }
+}
+
+async fn log_worker_sqlite(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConfig) {
+    let writer = match SqliteLogWorker::new(&cfg) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!("Failed to open SQLite connection, falling back to file-only mode: {e}");
+            return log_worker_file(rx, cfg).await;
+        }
+    };
+
+    let batch_interval = Duration::from_secs(1);
+    let max_batch_size = 1000;
+    let mut batch = Vec::new();
+    let mut last_flush = tokio::time::Instant::now();
+
+    tracing::info!(
+        "Log worker started in SQLITE mode (persistent connection) → {}",
+        cfg.db_path
+    );
+
+    loop {
+        let timeout = batch_interval
+            .checked_sub(last_flush.elapsed())
+            .unwrap_or(Duration::from_millis(10));
+
+        tokio::select! {
+            Some(entry) = rx.recv() => {
+                write_to_local_log(&entry, &cfg.log_path);
+
+                batch.push(entry);
+                if batch.len() >= max_batch_size {
+                    writer.flush(&batch).await;
+                    batch.clear();
+                    last_flush = tokio::time::Instant::now();
+                }
             }
-            Ok(Err(e)) => {
-                tracing::error!("Failed to insert logs to SQLite: {}", e);
-            }
-            Err(e) => {
-                tracing::error!("Blocking task panicked inserting logs to SQLite: {}", e);
+            _ = tokio::time::sleep(timeout) => {
+                if !batch.is_empty() {
+                    writer.flush(&batch).await;
+                    batch.clear();
+                }
+                last_flush = tokio::time::Instant::now();
             }
         }
     }

@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package waf_sync;
+
+service WafSync {
+    // Stream configuration updates from Manager to Agent
+    rpc SyncPolicies (PolicySyncRequest) returns (stream PolicySyncResponse);
+    
+    // Stream telemetry and logs from Agent to Manager
+    rpc StreamTelemetry (stream TelemetryEvent) returns (TelemetryAck);
+}
+
+message PolicySyncRequest {
+    string agent_id = 1;
+    string current_version = 2;
+}
+
+message PolicySyncResponse {
+    string version = 1;
+    // Base64 encoded or JSON ruleset
+    string rules_payload = 2;
+    repeated string blocklist_ips = 3;
+}
+
+message TelemetryEvent {
+    string agent_id = 1;
+    int64 timestamp = 2;
+    string event_type = 3; // "block", "anomaly", "error"
+    string rule_id = 4;
+    string src_ip = 5;
+    string request_path = 6;
+    string details = 7;
+}
+
+message TelemetryAck {
+    bool success = 1;
+}

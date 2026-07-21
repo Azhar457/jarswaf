@@ -24,6 +24,8 @@
   let formMaxBody = "10MB";
   let formRateLimit = "100/m";
   let formIsDefault = false;
+  let formBotChallenge = false;
+  let formWebsocketSecurity = false;
 
   let showDeleteModal = false;
   let vhostToDelete: number | null = null;
@@ -88,6 +90,8 @@
     formMaxBody = "10MB";
     formRateLimit = "100/m";
     formIsDefault = false;
+    formBotChallenge = false;
+    formWebsocketSecurity = false;
     formAllowlists = [];
     formBlacklists = [];
     showForm = true;
@@ -103,6 +107,8 @@
     formMaxBody = vhost.max_body || "10MB";
     formRateLimit = vhost.rate_limit || "100/m";
     formIsDefault = vhost.is_default || false;
+    formBotChallenge = vhost.bot_challenge_enabled || false;
+    formWebsocketSecurity = vhost.websocket_security_enabled || false;
     formAllowlists = vhost.allowlists ? JSON.parse(JSON.stringify(vhost.allowlists)) : [];
     formBlacklists = vhost.blacklists ? JSON.parse(JSON.stringify(vhost.blacklists)) : [];
     showForm = true;
@@ -129,6 +135,8 @@
         max_body: formMaxBody,
         rate_limit: formRateLimit,
         is_default: formIsDefault,
+        bot_challenge_enabled: formBotChallenge,
+        websocket_security_enabled: formWebsocketSecurity,
         allowlists: formAllowlists,
         blacklists: formBlacklists,
       };
@@ -142,6 +150,8 @@
         max_body: formMaxBody,
         rate_limit: formRateLimit,
         is_default: formIsDefault,
+        bot_challenge_enabled: formBotChallenge,
+        websocket_security_enabled: formWebsocketSecurity,
         rules: ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "CMDI-*"],
         custom_rules: [],
         blocked_countries: [],
@@ -190,7 +200,7 @@
   <!-- Header -->
   <div class="flex justify-between items-center gap-4">
     <div>
-      <h1 class="text-2xl font-bold tracking-tight text-white md:text-3xl">Virtual Hosts</h1>
+      <h1 class="text-2xl font-bold tracking-tight text-text-primary md:text-3xl">Virtual Hosts</h1>
       <p class="text-text-secondary text-sm mt-1">Manage upstream reverse proxies, SSL settings, and custom security policies per domain.</p>
     </div>
     {#if showForm}
@@ -216,9 +226,9 @@
 
   {#if showForm}
     <!-- VHost Form Editor -->
-    <Card className="max-w-3xl border-border-muted">
+    <Card className="max-w-3xl border-border-muted p-4 sm:p-6 md:p-8">
       <div class="mb-6 border-b border-border-muted/80 pb-4">
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+        <h2 class="text-lg font-bold text-text-primary flex items-center gap-2">
           <Globe class="text-accent-blue" size={20} />
           <span>{editingIndex !== null ? "Edit Virtual Host" : "Create New Virtual Host"}</span>
         </h2>
@@ -271,19 +281,51 @@
           </div>
         </div>
 
-        <div class="flex items-center gap-2.5 py-1">
-          <input
-            type="checkbox"
-            id="is_default"
-            bind:checked={formIsDefault}
-            class="w-4 h-4 rounded border-border-muted bg-slate-950 text-accent-blue focus:ring-accent-blue cursor-pointer"
-          />
-          <label
-            for="is_default"
-            class="text-sm font-semibold text-text-secondary cursor-pointer select-none"
-          >
-            Set as Default / Fallback VHost (Responds to unmatched HTTP host headers)
-          </label>
+        <div class="flex flex-col gap-2.5 py-1">
+          <div class="flex items-center gap-2.5">
+            <input
+              type="checkbox"
+              id="is_default"
+              bind:checked={formIsDefault}
+              class="w-4 h-4 rounded border-border-muted bg-slate-950 text-accent-blue focus:ring-accent-blue cursor-pointer"
+            />
+            <label
+              for="is_default"
+              class="text-sm font-semibold text-text-secondary cursor-pointer select-none"
+            >
+              Set as Default / Fallback VHost (Responds to unmatched HTTP host headers)
+            </label>
+          </div>
+
+          <div class="flex items-center gap-2.5">
+            <input
+              type="checkbox"
+              id="bot_challenge"
+              bind:checked={formBotChallenge}
+              class="w-4 h-4 rounded border-border-muted bg-slate-950 text-accent-blue focus:ring-accent-blue cursor-pointer"
+            />
+            <label
+              for="bot_challenge"
+              class="text-sm font-semibold text-text-secondary cursor-pointer select-none"
+            >
+              Enable Captive Portal JS Challenge (Proof-of-Work protection against bot traffic)
+            </label>
+          </div>
+
+          <div class="flex items-center gap-2.5">
+            <input
+              type="checkbox"
+              id="websocket_security"
+              bind:checked={formWebsocketSecurity}
+              class="w-4 h-4 rounded border-border-muted bg-slate-950 text-accent-blue focus:ring-accent-blue cursor-pointer"
+            />
+            <label
+              for="websocket_security"
+              class="text-sm font-semibold text-text-secondary cursor-pointer select-none"
+            >
+              Enable WebSocket Security Interceptor (Deep packet message scrubbing & stateful inspection)
+            </label>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -340,7 +382,7 @@
         <div class="space-y-4 border-t border-border-muted pt-6">
           <div class="flex justify-between items-center gap-4">
             <div>
-              <h3 class="text-sm font-bold text-white">VHost Allowlists (Bypasses WAF)</h3>
+              <h3 class="text-sm font-bold text-text-primary">VHost Allowlists (Bypasses WAF)</h3>
               <p class="text-xs text-text-secondary mt-0.5">
                 Explicitly trust clients (by IP or path) to bypass inspection entirely.
               </p>
@@ -438,7 +480,7 @@
         <div class="space-y-4 border-t border-border-muted pt-6 pb-6">
           <div class="flex justify-between items-center gap-4">
             <div>
-              <h3 class="text-sm font-bold text-white">VHost Blacklists (Blocking)</h3>
+              <h3 class="text-sm font-bold text-text-primary">VHost Blacklists (Blocking)</h3>
               <p class="text-xs text-text-secondary mt-0.5">
                 Explicitly block access from specific client IPs or request paths.
               </p>
@@ -623,7 +665,7 @@
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-right">
               <div
-                class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                class="flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
               >
                 <Button
                   variant="ghost"

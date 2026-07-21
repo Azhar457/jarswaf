@@ -1,0 +1,10 @@
+[global]
+port_http = 8082
+port_https = 8444
+mode = "agent"
+manager_url = "http://127.0.0.1:9000"
+grpc_token = "secret123"
+
+[logging]
+mode = "sqlite"
+db_path = "./agent.db"

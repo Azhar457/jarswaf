@@ -1,0 +1,92 @@
+# -- Override the base name
+nameOverride: ""
+# -- Override the full app name
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+proxy:
+  image:
+    repository: jarswaf
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+  ports:
+    http: 80
+    https: 443
+    gossip: 7946
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  env:
+    RUST_LOG: info
+    CONFIG_PATH: /etc/jarswaf/config.toml
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPU: 70
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                    - proxy
+            topologyKey: kubernetes.io/hostname
+
+controller:
+  image:
+    repository: jarswaf-controller
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  env:
+    RUST_LOG: info
+    CONFIG_PATH: /etc/jarswaf/config.toml
+  hpa:
+    enabled: false
+  ingress:
+    enabled: false
+    host: admin.jarswaf.local
+    basicAuth:
+      enabled: false
+      # username: admin
+      # passwordHash: $2y$10$...
+
+gossip:
+  port: 7946
+  bindAddress: 0.0.0.0
+
+config:
+  # Most config lives in the ConfigMap; secrets are separate.
+  rateLimitDefault: 600
+  logDir: /var/log/jarswaf
+  logLevel: security
+
+redis:
+  enabled: false
+  url: redis://redis:6379
+  # password: ""
+
+secrets:
+  gossip:
+    psk: "change-me-gossip-psk-32bytes!"
+  redis:
+    password: ""

@@ -156,23 +156,23 @@
 
     <!-- Glassmorphic Login Card -->
     <div
-      class="max-w-md w-full bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-2xl p-8 shadow-2xl flex flex-col items-center relative z-10 transition-all duration-300"
+      class="max-w-md w-full bg-slate-900/60 backdrop-blur-xl border border-slate-700/30 rounded-2xl p-10 shadow-2xl shadow-blue-500/5 flex flex-col items-center relative z-10 transition-all duration-300"
     >
       <!-- Logo Icon -->
       <div
-        class="h-16 w-16 bg-blue-600/15 border border-blue-500/35 rounded-2xl flex items-center justify-center mb-6 shadow-inner animate-pulse"
+        class="h-16 w-16 bg-blue-600/15 border border-blue-500/35 rounded-2xl flex items-center justify-center mb-8 shadow-inner transition-transform hover:scale-105"
       >
         <Shield class="text-blue-400" size={32} />
       </div>
 
-      <h2 class="text-2xl font-bold text-slate-100 tracking-tight text-center">jarsWAF</h2>
-      <p class="text-sm text-slate-400 mt-2 mb-8 text-center max-w-[280px]">
+      <h2 class="text-3xl font-bold text-slate-100 tracking-tight text-center">jarsWAF</h2>
+      <p class="text-sm text-slate-400 mt-3 mb-10 text-center max-w-[280px]">
         Enter your administration token to access the control panel.
       </p>
 
       <!-- Form -->
-      <form on:submit|preventDefault={verifyAndLogin} class="w-full space-y-5">
-        <div class="space-y-2">
+      <form on:submit|preventDefault={verifyAndLogin} class="w-full space-y-6">
+        <div class="space-y-3">
           <label
             for="token-input"
             class="text-xs font-semibold text-slate-400 uppercase tracking-wider block"
@@ -189,7 +189,7 @@
               type="password"
               placeholder="Enter admin token..."
               bind:value={loginToken}
-              class="w-full bg-slate-950/75 border border-slate-800 focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/60 text-slate-200 placeholder-slate-600 rounded-xl py-3 pl-11 pr-4 text-sm transition-all focus:outline-none"
+              class="w-full bg-slate-950/75 border border-slate-700/50 focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/60 text-slate-200 placeholder-slate-600 rounded-xl py-3.5 pl-12 pr-5 text-sm transition-all focus:outline-none"
             />
           </div>
           {#if loginError}
@@ -202,7 +202,7 @@
 
         <button
           type="submit"
-          class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-blue-900/20 hover:shadow-blue-900/35 transition-all flex items-center justify-center gap-2 group cursor-pointer text-sm border-none"
+          class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold py-3.5 px-5 rounded-xl shadow-lg shadow-blue-900/20 hover:shadow-blue-900/35 transition-all flex items-center justify-center gap-2 group cursor-pointer text-sm border-none"
         >
           <span>Authenticate</span>
           <ArrowRight
@@ -212,7 +212,7 @@
         </button>
       </form>
 
-      <div class="mt-8 flex items-center gap-2 text-xs text-slate-500 font-medium">
+      <div class="mt-10 flex items-center gap-2 text-xs text-slate-500 font-medium">
         <Server size={14} />
         <span>Controller: {controllerUrl}</span>
       </div>

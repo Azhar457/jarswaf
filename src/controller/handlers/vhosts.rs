@@ -100,6 +100,20 @@ pub async fn post_vhosts_handler(
                 state.config_path
             );
             let _ = state.config_tx.send(cfg);
+
+            // Record audit trail
+            let vhost_count = if let Some(tid) = headers.get("X-Tenant-ID").and_then(|h| h.to_str().ok()) {
+                format!("tenant={}", tid)
+            } else {
+                "global".to_string()
+            };
+            let _ = crate::logging::write_audit_log(
+                &state.db_path,
+                "controller",
+                "VHOST_UPDATE",
+                &format!("VHosts updated ({})", vhost_count),
+            );
+
             StatusCode::OK.into_response()
         }
         Err(e) => {

@@ -1,4 +1,6 @@
 certificates = []
+allowlists = []
+blacklists = []
 
 [global]
 port_http = 80
@@ -9,10 +11,28 @@ log_dir = "./logs"
 log_level = "verbose"
 admin_token = "6476d3eb0e7043f7b72272c308fce8bc"
 waf_enabled = true
+webhooks = []
+metrics_push_interval_secs = 60
 
 [tls]
 mode = "local_ca"
 cert_dir = "./certs"
+
+[logging]
+mode = "sqlite"
+log_path = "./logs/jarswaf.log"
+max_log_size_mb = 50
+max_log_files = 5
+push_interval_secs = 300
+push_batch_size = 100
+blocklist_path = "./blocklist.json"
+db_path = "/var/log/jarswaf/jarswaf.db"
+
+[components]
+dashboard = true
+clickhouse = true
+service_discovery = true
+geoip = true
 
 [[rate_limit_policies]]
 name = "Default API/Website Traffic"
@@ -46,6 +66,7 @@ description = "Exempted assets to reduce WAF engine evaluation overhead."
 name = "jarswaf-demo"
 hosts = ["*.jarswafwaf.demo"]
 backend = "127.0.0.1:8080"
+tenant = "default"
 rate_limit_tiers = []
 rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*"]
 blocked_countries = []
@@ -54,6 +75,13 @@ custom_rules = ["CR-825"]
 ssl = "Auto (Local CA)"
 max_body = "10MB"
 rate_limit = "600 req/min"
+is_default = false
+allowlists = []
+blacklists = []
+max_conns_per_ip = 50
+max_concurrent_requests = 100
+bot_challenge_enabled = false
+websocket_security_enabled = false
 
 [vhosts.logging]
 enabled = true
@@ -68,3 +96,7 @@ condition_value = "/wp-admin"
 action = "redirect"
 action_value = "https://www.youtube.com/watch?v=xvFZjo5PgG0"
 enabled = true
+
+[redis]
+enabled = false
+url = "redis://127.0.0.1:6379"

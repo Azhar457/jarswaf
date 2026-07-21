@@ -1,0 +1,14 @@
+apiVersion: v2
+name: jarswaf
+description: jarsWAF - Pure Layer 7 WAF Homelab Edition
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - waf
+  - firewall
+  - security
+  - pingora
+home: https://github.com/azhar457/jarswaf
+sources:
+  - https://github.com/azhar457/jarswaf

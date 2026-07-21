@@ -129,6 +129,34 @@ pub static REQUEST_BODY_SIZE_BYTES: Lazy<HistogramVec> = Lazy::new(|| {
     .unwrap()
 });
 
+/// Gauge for log channel depth — how full the bounded mpsc channel is.
+/// Updated by log worker. When near capacity (10000), system under pressure.
+pub static LOG_CHANNEL_DEPTH: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge!(
+        "jarswaf_log_channel_depth",
+        "Current depth of log message channel (near 10000 = backpressure)"
+    )
+    .unwrap()
+});
+
+/// Gauge for WAF semaphore availability — how many of 4 permits remain.
+pub static WAF_SEMAPHORE_AVAILABLE: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge!(
+        "jarswaf_waf_semaphore_available",
+        "Available WAF rule check permits (0 = all 4 in use, skipping)"
+    )
+    .unwrap()
+});
+
+/// Gauge for circuit breaker tripped backends count.
+pub static CIRCUIT_BREAKER_TRIPPED: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge!(
+        "jarswaf_circuit_breaker_tripped",
+        "Number of backends currently tripped by circuit breaker"
+    )
+    .unwrap()
+});
+
 // ─── Private: real-time blocked-IP gauge maintenance ───────────────────────
 
 use dashmap::DashMap;

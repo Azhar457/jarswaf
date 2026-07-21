@@ -24,20 +24,77 @@ pub struct JarsWafCtx {
     pub websocket_security_enabled: bool,
     pub max_concurrent_requests: usize,
     pub vhost_backend_resolved: Option<String>,
+    pub rate_limit_status: Option<crate::rules::RateLimitStatus>,
 }
 
 pub static ACTIVE_CONNECTIONS: once_cell::sync::Lazy<dashmap::DashMap<std::net::IpAddr, usize>> =
     once_cell::sync::Lazy::new(dashmap::DashMap::new);
 pub static BACKEND_ACTIVE_REQUESTS: once_cell::sync::Lazy<dashmap::DashMap<String, usize>> =
     once_cell::sync::Lazy::new(dashmap::DashMap::new);
+
+/// Circuit breaker: consecutive failure count per backend address.
+/// When count exceeds CIRCUIT_BREAKER_THRESHOLD, backend marked as tripped
+/// and excluded from round-robin until health checker resets it.
+pub static BACKEND_FAILURE_COUNTS: once_cell::sync::Lazy<
+    dashmap::DashMap<String, std::sync::atomic::AtomicUsize>,
+> = once_cell::sync::Lazy::new(dashmap::DashMap::new);
+
+/// Circuit breaker threshold — after N consecutive failures, backend is tripped.
+pub const CIRCUIT_BREAKER_THRESHOLD: usize = 5;
 pub static SESSION_FINGERPRINTS: once_cell::sync::Lazy<dashmap::DashMap<std::net::IpAddr, String>> =
     once_cell::sync::Lazy::new(dashmap::DashMap::new);
-pub static CHALLENGE_SECRET: once_cell::sync::Lazy<String> =
-    once_cell::sync::Lazy::new(|| uuid::Uuid::new_v4().to_string());
+
 
 /// Bounded blocklist — hard cap at 100k entries. Used in proxy and agent.
 /// Entries beyond cap evict oldest first via retain-order.
 pub const BLOCKLIST_MAX_ENTRIES: usize = 100_000;
+
+/// Semaphore limiting concurrent WAF rule checks (regex/AST tokenization).
+/// Prevents N concurrent blocking ops from starving tokio worker threads.
+/// When full, new requests skip WAF inspection gracefully (allow, not crash).
+pub static WAF_SEMAPHORE: once_cell::sync::Lazy<tokio::sync::Semaphore> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Semaphore::new(4));
+
+/// Try-acquire WAF semaphore; if full, log warning and return false (skip).
+macro_rules! try_waf_permit {
+    () => {{
+        match crate::proxy_engine::WAF_SEMAPHORE.try_acquire() {
+            Ok(permit) => permit,
+            Err(_) => {
+                tracing::warn!("WAF semaphore full — skipping rule check, allowing request");
+                return Ok(false);
+            }
+        }
+    }};
+}
+
+/// Start a SIGHUP handler that hot-reloads config without restart.
+/// Falls back to old config on error — never crash on bad config.
+pub fn start_config_hot_reload(config_path: String) {
+    tokio::spawn(async move {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sighup = match signal(SignalKind::hangup()) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Failed to install SIGHUP handler: {e}");
+                return;
+            }
+        };
+        loop {
+            sighup.recv().await;
+            tracing::info!("SIGHUP received — reloading config from {}", config_path);
+            match crate::config::load_config(&config_path) {
+                Ok(new_config) => {
+                    GLOBAL_CONFIG.store(Arc::new(new_config));
+                    tracing::info!("Config hot-reloaded successfully");
+                }
+                Err(e) => {
+                    tracing::error!("Config reload failed, keeping old config: {e}");
+                }
+            }
+        }
+    });
+}
 
 /// Periodic cleanup of unbounded DashMaps to prevent memory leak.
 /// Run every 30 minutes. Retains only active entries younger than threshold.
@@ -72,100 +129,210 @@ pub fn trim_dashmap<K: std::hash::Hash + Eq + Clone, V>(map: &dashmap::DashMap<K
     }
 }
 
-fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> String {
-    format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>Security Check - jarsWAF</title>
-    <style>
-        body {{ font-family: sans-serif; text-align: center; padding: 50px; background-color: #f7f9fa; color: #333; }}
-        .card {{ max-width: 500px; margin: 0 auto; padding: 40px; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
-        h1 {{ color: #d93025; font-size: 24px; margin-bottom: 20px; }}
-        p {{ font-size: 16px; line-height: 1.5; color: #5f6368; }}
-        .spinner {{ border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }}
-        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-    </style>
-</head>
-<body>
-    <div class=\"card\">
-        <h1>Security Check</h1>
-        <p>Please wait while we verify your connection. This will only take a moment...</p>
-        <div class=\"spinner\"></div>
-    </div>
-    <script>
-        async function sha256(message) {{
-            const msgBuffer = new TextEncoder().encode(message);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        }}
 
-        async function solve() {{
-            const ip = \"{client_ip}\";
-            const salt = \"{salt}\";
-            const target_prefix = \"000\";
-            let nonce = 0;
-            while (true) {{
-                const hash = await sha256(ip + salt + nonce);
-                if (hash.startsWith(target_prefix)) {{
-                    const original_path = encodeURIComponent(\"{original_path}\");
-                    window.location.href = `/jarswaf-challenge-verify?sol=\${{nonce}}&r=\${{original_path}}`;
-                    break;
-                }}
-                nonce++;
-            }}
-        }}
-        solve();
-    </script>
-</body>
-</html>"#,
-        client_ip = client_ip,
-        salt = salt,
-        original_path = original_path
-    )
+
+async fn respond_custom_error(
+    session: &mut Session,
+    status_code: u16,
+    title: &str,
+    description: &str,
+    client_ip: &str,
+    rule_id: &str,
+) {
+    Box::pin(respond_custom_error_with_headers(
+        session, status_code, title, description, client_ip, rule_id, None
+    )).await
 }
 
-fn generate_challenge_signature(timestamp: &str, client_ip: &str, secret: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(timestamp.as_bytes());
-    hasher.update(b"|");
-    hasher.update(client_ip.as_bytes());
-    hasher.update(b"|");
-    hasher.update(secret.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
+async fn respond_custom_error_with_headers(
+    session: &mut Session,
+    status_code: u16,
+    title: &str,
+    description: &str,
+    client_ip: &str,
+    rule_id: &str,
+    extra_headers: Option<Vec<(&'static str, String)>>,
+) {
+    let accepts_json = session
+        .req_header()
+        .headers
+        .get("accept")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.contains("application/json"))
+        .unwrap_or(false);
 
-fn is_challenge_cookie_valid(cookie_header: &str, client_ip: &str, secret: &str) -> bool {
-    for cookie in cookie_header.split(';') {
-        let parts: Vec<&str> = cookie.trim().split('=').collect();
-        if parts.len() == 2 && parts[0] == "jarswaf-challenge-token" {
-            let token = parts[1];
-            let token_parts: Vec<&str> = token.split('.').collect();
-            if token_parts.len() == 3 {
-                let timestamp_str = token_parts[0];
-                let ip = token_parts[1];
-                let signature = token_parts[2];
-
-                if ip == client_ip {
-                    let expected_sig = generate_challenge_signature(timestamp_str, ip, secret);
-                    if expected_sig == signature {
-                        if let Ok(ts) = timestamp_str.parse::<i64>() {
-                            let now = chrono::Utc::now().timestamp();
-                            if now >= ts && now - ts < 3600 {
-                                return true;
-                            }
-                        }
+    let (content_type, body) = if accepts_json {
+        let mut map = ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
+        map.insert("error", title);
+        map.insert("message", description);
+        map.insert("client_ip", client_ip);
+        map.insert("rule_id", rule_id);
+        
+        // Add rate limit context if applicable
+        if status_code == 429 {
+            if let Some(headers) = &extra_headers {
+                for (k, v) in headers {
+                    if *k == "X-RateLimit-Limit" {
+                        map.insert("limit", v);
+                    } else if *k == "X-RateLimit-Remaining" {
+                        map.insert("remaining", v);
+                    } else if *k == "X-RateLimit-Reset" {
+                        map.insert("reset_after", v);
                     }
                 }
             }
         }
+
+        let json_body = serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string());
+        ("application/json", json_body)
+    } else {
+        let html = format!(
+            r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>{} - jarsWAF</title>
+    <style>
+        body {{
+            background: #030712;
+            color: #f3f4f6;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }}
+        .card {{
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(244, 63, 94, 0.2);
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 480px;
+            width: 90%;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 0 20px 0 rgba(244, 63, 94, 0.1);
+            text-align: center;
+            animation: fadeIn 0.4s ease-out;
+        }}
+        @keyframes fadeIn {{
+            from {{ opacity: 0; transform: translateY(10px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+        .icon {{
+            width: 64px;
+            height: 64px;
+            background: rgba(244, 63, 94, 0.1);
+            border: 1px solid rgba(244, 63, 94, 0.2);
+            color: #f43f5e;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 32px;
+            font-weight: bold;
+        }}
+        h1 {{
+            font-size: 24px;
+            font-weight: 800;
+            margin: 0 0 8px;
+            color: #f3f4f6;
+            letter-spacing: -0.025em;
+        }}
+        p {{
+            font-size: 14px;
+            color: #9ca3af;
+            line-height: 1.5;
+            margin: 0 0 24px;
+        }}
+        .meta-grid {{
+            background: rgba(3, 7, 18, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #9ca3af;
+            text-align: left;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .meta-row {{
+            display: flex;
+            justify-content: space-between;
+        }}
+        .meta-val {{
+            color: #60a5fa;
+            font-weight: bold;
+        }}
+        .footer {{
+            margin-top: 24px;
+            font-size: 11px;
+            color: #6b7280;
+            font-weight: 500;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">🛡️</div>
+        <h1>Request Blocked</h1>
+        <p>{}</p>
+        <div class="meta-grid">
+            <div class="meta-row">
+                <span>Client IP:</span>
+                <span class="meta-val">{}</span>
+            </div>
+            <div class="meta-row">
+                <span>Status Code:</span>
+                <span class="meta-val">{}</span>
+            </div>
+            <div class="meta-row">
+                <span>Trigger Rule:</span>
+                <span class="meta-val">{}</span>
+            </div>
+        </div>
+        <div class="footer">
+            Powered by jarsWAF Web Application Firewall
+        </div>
+    </div>
+</body>
+</html>"#,
+        title,
+        description,
+        client_ip,
+        status_code,
+        rule_id
+    );
+        ("text/html", html)
+    };
+
+    if let Ok(mut resp) = ResponseHeader::build(status_code, Some(body.len())) {
+        let _ = resp.insert_header("Content-Type", content_type);
+        let _ = resp.insert_header("Server", "jarsWAF");
+        
+        // Inject extra headers
+        if let Some(headers) = extra_headers {
+            for (k, v) in headers {
+                let _ = resp.insert_header(k, v.as_bytes());
+            }
+        } else if status_code == 429 {
+            // Fallback for legacy calls
+            let _ = resp.insert_header("Retry-After", "60");
+            let _ = resp.insert_header("X-RateLimit-Limit", description);
+        }
+
+        if session.write_response_header(Box::new(resp), false).await.is_ok() {
+            let _ = session.write_response_body(Some(Bytes::copy_from_slice(body.as_bytes())), true).await;
+        }
     }
-    false
 }
 
-fn calculate_fingerprint(headers: &std::collections::HashMap<String, String>) -> String {
+
+
+fn calculate_fingerprint(headers: &ahash::AHashMap<String, String>) -> String {
     use sha2::{Digest, Sha256};
     let user_agent = headers.get("user-agent").map(|s| s.as_str()).unwrap_or("");
     let accept = headers.get("accept").map(|s| s.as_str()).unwrap_or("");
@@ -301,7 +468,7 @@ async fn handle_secure_websocket_tunnel(
             let msg = msg_res?;
             match &msg {
                 Message::Text(text) => {
-                    let headers = std::collections::HashMap::new();
+                    let headers = ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
                     let rules = vec![
                         "SQLI-AST".to_string(),
                         "XSS-AST".to_string(),
@@ -398,6 +565,13 @@ pub fn start_health_checker(cancel: tokio_util::sync::CancellationToken) {
                             backend
                                 .healthy
                                 .store(is_up, std::sync::atomic::Ordering::Relaxed);
+
+                            // Reset circuit breaker when backend recovers
+                            if is_up {
+                                if let Some(fc) = BACKEND_FAILURE_COUNTS.get(&addr) {
+                                    fc.value().store(0, std::sync::atomic::Ordering::Relaxed);
+                                }
+                            }
                         }
                     }
                 }
@@ -412,11 +586,17 @@ pub fn start_health_checker(cancel: tokio_util::sync::CancellationToken) {
 
 pub struct JarsWafProxy {
     // For reputation blocklist — DashMap for lock-free concurrent access
-    pub blocklist: Arc<dashmap::DashMap<std::net::IpAddr, ()>>,
+    pub blocklist: Arc<dashmap::DashMap<std::net::IpAddr, std::time::Instant>>,
     // Logging channel
     pub log_tx: tokio::sync::mpsc::Sender<crate::logging::WafLogEntry>,
     // Webhook / SIEM alert endpoints (loaded from config on startup)
     pub webhooks: Vec<crate::config::WebhookConfig>,
+}
+
+impl JarsWafProxy {
+    pub fn record_attack_and_ban(&self, ip: std::net::IpAddr) {
+        crate::rules::record_block(ip);
+    }
 }
 
 #[async_trait]
@@ -437,7 +617,88 @@ impl ProxyHttp for JarsWafProxy {
             websocket_security_enabled: false,
             max_concurrent_requests: 100,
             vhost_backend_resolved: None,
+            rate_limit_status: None,
         }
+    }
+    async fn response_filter(
+        &self,
+        _session: &mut Session,
+        upstream_response: &mut ResponseHeader,
+        ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        if let Some(rl_status) = &ctx.rate_limit_status {
+            if rl_status.allowed {
+                let _ = upstream_response.insert_header("X-RateLimit-Limit", rl_status.limit.to_string());
+                let _ = upstream_response.insert_header("X-RateLimit-Remaining", rl_status.remaining.to_string());
+                let _ = upstream_response.insert_header("X-RateLimit-Reset", rl_status.reset_after_secs.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    fn response_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<Bytes>,
+        end_of_stream: bool,
+        ctx: &mut Self::CTX,
+    ) -> Result<Option<std::time::Duration>> {
+        let dlp_cfg = match &ctx.dlp_config {
+            Some(cfg) if cfg.enabled => cfg,
+            _ => return Ok(None),
+        };
+
+        if let Some(chunk) = body {
+            if ctx.response_body_buffer.len() + chunk.len() <= dlp_cfg.response_body_limit {
+                ctx.response_body_buffer.extend_from_slice(chunk);
+            }
+            *body = Some(Bytes::new());
+        }
+
+        if end_of_stream {
+            let body_str = String::from_utf8_lossy(&ctx.response_body_buffer);
+            let findings = crate::dlp::scan_body(&body_str, dlp_cfg);
+
+            if !findings.is_empty() {
+                for finding in &findings {
+                    let client_ip_str = ctx.client_ip.map_or("Unknown".to_string(), |ip| ip.to_string());
+                    let entry = crate::logging::WafLogEntry {
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        client_ip: client_ip_str,
+                        method: _session.req_header().method.as_str().to_string(),
+                        path: _session.req_header().uri.path().to_string(),
+                        action: dlp_cfg.action.to_uppercase(),
+                        rule_id: finding.rule.to_string(),
+                        reason: format!("DLP finding: {} (sample: {})", finding.description, finding.sample),
+                    };
+                    let _ = self.log_tx.try_send(entry);
+                }
+
+                match dlp_cfg.action.as_str() {
+                    "block" => {
+                        return Err(pingora::Error::create(
+                            pingora::ErrorType::HTTPStatus(502),
+                            pingora::ErrorSource::Downstream,
+                            Some("DLP Blocked".into()),
+                            None,
+                        ));
+                    }
+                    "mask" => {
+                        let masked_body = crate::dlp::mask_body(&body_str, dlp_cfg);
+                        *body = Some(Bytes::from(masked_body));
+                    }
+                    _ => {
+                        *body = Some(Bytes::from(ctx.response_body_buffer.clone()));
+                    }
+                }
+            } else {
+                *body = Some(Bytes::from(ctx.response_body_buffer.clone()));
+            }
+            ctx.response_body_buffer.clear();
+            ctx.response_body_buffer.shrink_to_fit();
+        }
+
+        Ok(None)
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
@@ -465,7 +726,7 @@ impl ProxyHttp for JarsWafProxy {
                 .and_then(|h| h.to_str().ok())
                 .map(|s| s.to_string());
 
-            let mut headers_map = std::collections::HashMap::new();
+            let mut headers_map = ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
             for (name, value) in req_header.headers.iter() {
                 if let Ok(val_str) = value.to_str() {
                     headers_map.insert(name.to_string(), val_str.to_string());
@@ -473,6 +734,27 @@ impl ProxyHttp for JarsWafProxy {
             }
             (req_method, path, query_str, host, headers_map)
         };
+
+        // Health endpoint — respond 200 OK for load balancer probes.
+        // No WAF processing, no logging — lightweight.
+        if req_method == "GET" && path == "/health" {
+            if let Ok(mut resp) = ResponseHeader::build(200, Some(2)) {
+                let _ = resp.insert_header("Content-Type", "application/json");
+                if session
+                    .write_response_header(Box::new(resp), false)
+                    .await
+                    .is_ok()
+                {
+                    let _ = session
+                        .write_response_body(
+                            Some(Bytes::copy_from_slice(b"{}")),
+                            true,
+                        )
+                        .await;
+                    return Ok(true);
+                }
+            }
+        }
 
         // ACME HTTP-01 Challenge Interception
         if path.starts_with("/.well-known/acme-challenge/") {
@@ -505,7 +787,7 @@ impl ProxyHttp for JarsWafProxy {
         let (backend_addr, vhost_cfg) = match crate::vhost::match_vhost(host.as_deref(), &config) {
             Some((b, v)) => (b.to_string(), v.clone()),
             None => {
-                let _ = session.respond_error(400).await;
+                let _ = respond_custom_error(session, 400, "Bad Request", "The requested host header is not configured on this server.", &client_ip.to_string(), "VHOST-MATCH-000").await;
                 return Ok(true);
             }
         };
@@ -532,7 +814,7 @@ impl ProxyHttp for JarsWafProxy {
                     reason: format!("Direct IP access block: {}", clean_host),
                 };
                 let _ = self.log_tx.try_send(entry);
-                let _ = session.respond_error(403).await;
+                let _ = respond_custom_error(session, 403, "Access Denied", &format!("Direct IP access block: {}", clean_host), &client_ip.to_string(), "DIRECT-IP-001").await;
                 return Ok(true);
             }
         }
@@ -557,7 +839,7 @@ impl ProxyHttp for JarsWafProxy {
                 ),
             };
             let _ = self.log_tx.try_send(entry);
-            let _ = session.respond_error(429).await;
+            let _ = respond_custom_error(session, 429, "Too Many Requests", &format!("Slowloris concurrent connection limit exceeded: {}", conn_count), &client_ip.to_string(), "SLOWLORIS-001").await;
             return Ok(true);
         }
 
@@ -589,6 +871,9 @@ impl ProxyHttp for JarsWafProxy {
             if path == "/jarswaf-challenge-verify" {
                 let mut sol_str = None;
                 let mut orig_path = None;
+                let mut mouse_moves = 0;
+                let mut canvas_hash = String::new();
+                let mut webgl_renderer = String::new();
                 for pair in query_str.split('&') {
                     let mut parts = pair.splitn(2, '=');
                     if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
@@ -600,22 +885,41 @@ impl ProxyHttp for JarsWafProxy {
                                     .unwrap_or_else(|_| v.into())
                                     .into_owned(),
                             );
+                        } else if k == "m" {
+                            mouse_moves = v.parse::<i32>().unwrap_or(0);
+                        } else if k == "fp_c" {
+                            canvas_hash = v.to_string();
+                        } else if k == "fp_w" {
+                            webgl_renderer = urlencoding::decode(v)
+                                .unwrap_or_else(|_| v.into())
+                                .into_owned();
                         }
                     }
                 }
+
+                if mouse_moves < 3 || canvas_hash.is_empty() {
+                    let _ = respond_custom_error(session, 403, "Bot Detected", "Advanced Bot Detection: Failed human interaction tests or browser fingerprinting.", &client_ip.to_string(), "BOT-CHALLENGE-002").await;
+                    return Ok(true);
+                }
+
+                if crate::rules::bot_challenge::is_headless_renderer(&webgl_renderer) {
+                    let _ = respond_custom_error(session, 403, "Bot Detected", "Advanced Bot Detection: Detected headless or automated browser.", &client_ip.to_string(), "BOT-CHALLENGE-003").await;
+                    return Ok(true);
+                }
+
                 if let (Some(sol_str), Some(orig_path)) = (sol_str, orig_path) {
                     use sha2::{Digest, Sha256};
-                    let salt = CHALLENGE_SECRET.as_str();
+                    let salt = crate::rules::bot_challenge::CHALLENGE_SECRET.as_str();
                     let check_str = format!("{}{}{}", client_ip, salt, sol_str);
                     let mut hasher = Sha256::new();
                     hasher.update(check_str.as_bytes());
                     let hash_result = format!("{:x}", hasher.finalize());
                     if hash_result.starts_with("000") {
                         let now = chrono::Utc::now().timestamp().to_string();
-                        let signature = generate_challenge_signature(
+                        let signature = crate::rules::bot_challenge::generate_challenge_signature(
                             &now,
                             &client_ip.to_string(),
-                            CHALLENGE_SECRET.as_str(),
+                            crate::rules::bot_challenge::CHALLENGE_SECRET.as_str(),
                         );
                         let token = format!("{}.{}.{}", now, client_ip, signature);
 
@@ -633,15 +937,15 @@ impl ProxyHttp for JarsWafProxy {
                         }
                     }
                 }
-                let _ = session.respond_error(400).await;
+                let _ = respond_custom_error(session, 400, "Bad Request", "Challenge verification failed. Nonce is invalid or signature mismatch.", &client_ip.to_string(), "BOT-CHALLENGE-001").await;
                 return Ok(true);
             }
 
             if path == "/jarswaf-challenge" {
                 let orig_path = query_str.clone();
-                let challenge_html = get_challenge_html(
+                let challenge_html = crate::rules::bot_challenge::get_challenge_html(
                     &client_ip.to_string(),
-                    CHALLENGE_SECRET.as_str(),
+                    crate::rules::bot_challenge::CHALLENGE_SECRET.as_str(),
                     &orig_path,
                 );
                 if let Ok(mut resp) = ResponseHeader::build(200, Some(challenge_html.len())) {
@@ -663,10 +967,10 @@ impl ProxyHttp for JarsWafProxy {
             }
 
             let cookie_header = headers_map.get("cookie").map(|s| s.as_str()).unwrap_or("");
-            let is_challenge_valid = is_challenge_cookie_valid(
+            let is_challenge_valid = crate::rules::bot_challenge::is_challenge_cookie_valid(
                 cookie_header,
                 &client_ip.to_string(),
-                CHALLENGE_SECRET.as_str(),
+                crate::rules::bot_challenge::CHALLENGE_SECRET.as_str(),
             );
 
             let reputation_score = crate::rules::get_reputation_score(client_ip);
@@ -723,8 +1027,63 @@ impl ProxyHttp for JarsWafProxy {
             start_websocket_security_proxy();
         }
 
-        // 1. Check Blocklist (Reputation)
-        let is_blocklisted = self.blocklist.contains_key(&client_ip);
+        // 0.4. Self-Healing Backend Health Check & Active Shielding
+        let all_backends_unhealthy = if let Some(backends) = LOAD_BALANCER.get(&vhost_cfg.name) {
+            backends.iter().all(|b| !b.healthy.load(std::sync::atomic::Ordering::Relaxed))
+        } else {
+            false
+        };
+
+        if all_backends_unhealthy {
+            let cookie_header = headers_map.get("cookie").map(|s| s.as_str()).unwrap_or("");
+            let is_challenge_valid = crate::rules::bot_challenge::is_challenge_cookie_valid(
+                cookie_header,
+                &client_ip.to_string(),
+                crate::rules::bot_challenge::CHALLENGE_SECRET.as_str(),
+            );
+
+            if !is_challenge_valid {
+                let redirect_url = format!(
+                    "{}{}",
+                    path,
+                    if query_str.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!("?{}", query_str)
+                    }
+                );
+                let redirect_path = urlencoding::encode(&redirect_url);
+                if let Ok(mut resp) = ResponseHeader::build(302, Some(0)) {
+                    let _ = resp.insert_header("Location", format!("/jarswaf-challenge?{}", redirect_path));
+                    let _ = session.write_response_header(Box::new(resp), true).await;
+                    return Ok(true);
+                }
+            } else {
+                let entry = crate::logging::WafLogEntry {
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    client_ip: client_ip.to_string(),
+                    method: req_method.clone(),
+                    path: path.clone(),
+                    action: "BLOCK".to_string(),
+                    rule_id: "SELF-HEAL-503".to_string(),
+                    reason: "Backend application offline. WAF Active Shielding is active.".to_string(),
+                };
+                let _ = self.log_tx.try_send(entry);
+                
+                let _ = respond_custom_error(
+                    session,
+                    503,
+                    "Service Unavailable",
+                    "The backend server is offline or experiencing heavy load. jarsWAF has activated Active Shielding mode to protect the server. Please try again in a few moments.",
+                    &client_ip.to_string(),
+                    "SELF-HEAL-503"
+                ).await;
+                return Ok(true);
+            }
+        }
+
+        // 1. Check Blocklist (Persistent/Reputation & Auto-Remediation)
+        let is_blocklisted = self.blocklist.contains_key(&client_ip) || crate::rules::is_ip_temporarily_blocked(client_ip);
         if is_blocklisted {
             let entry = crate::logging::WafLogEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -737,7 +1096,7 @@ impl ProxyHttp for JarsWafProxy {
                     .to_string(),
             };
             let _ = self.log_tx.try_send(entry);
-            let _ = session.respond_error(403).await;
+            let _ = respond_custom_error(session, 403, "Access Denied", "Blocked by jarsWAF Collaborative Threat Intelligence (Reputation)", &client_ip.to_string(), "COLLAB-001").await;
             return Ok(true); // Handled
         }
 
@@ -763,40 +1122,101 @@ impl ProxyHttp for JarsWafProxy {
                 ),
             };
             let _ = self.log_tx.try_send(entry);
-            let _ = session.respond_error(403).await;
+            let _ = respond_custom_error(session, 403, "Access Denied", &format!("Geoblocked ({}): Access from country [{}] is restricted", vhost_cfg.geoblock_type, country), &client_ip.to_string(), "GEO-001").await;
             return Ok(true); // Handled
+        }
+
+        // 2.1. ASN Blocking
+        if !vhost_cfg.blocked_asns.is_empty() {
+            if let Some((asn, org)) = crate::proxy::resolve_ip_asn(&client_ip) {
+                if vhost_cfg.blocked_asns.contains(&asn) {
+                    let entry = crate::logging::WafLogEntry {
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        client_ip: client_ip.to_string(),
+                        method: req_method.clone(),
+                        path: path.clone(),
+                        action: "BLOCK".to_string(),
+                        rule_id: "GEO-ASN-001".to_string(),
+                        reason: format!(
+                            "ASN blocked: Access from ASN [{}] ({}) is restricted",
+                            asn, org
+                        ),
+                    };
+                    let _ = self.log_tx.try_send(entry);
+                    let _ = respond_custom_error(session, 403, "Access Denied", &format!("ASN blocked: Access from ASN [{}] ({}) is restricted", asn, org), &client_ip.to_string(), "GEO-ASN-001").await;
+                    return Ok(true); // Handled
+                }
+            }
         }
 
         let rule_engine = crate::rules::RuleEngine::new(&config);
 
-        // 2.5. Rate Limiting Check
+        // 2.5. Rate Limiting Check (independent of waf_enabled)
+        // Priority: vhost rate_limit_tiers (path-specific) → global rate_limit_policies → vhost rate_limit → global default
         let mut active_limit = None;
-        for policy in &config.rate_limit_policies {
-            let matches = policy.path.split(',').any(|pat| {
-                let pat = pat.trim();
-                if pat == "/*" || pat == "*" {
-                    true
-                } else if let Some(prefix) = pat.strip_suffix("/*") {
-                    path.starts_with(prefix)
-                } else if let Some(ext) = pat.strip_prefix("*.") {
-                    path.ends_with(ext)
-                } else {
-                    path == pat
-                }
-            });
 
+        // 2.5a. VHost `rate_limit_tiers` — per-path policy pada vhost ini
+        for tier in &vhost_cfg.rate_limit_tiers {
+            let matches = if tier.path == "/*" || tier.path == "*" {
+                true
+            } else if let Some(prefix) = tier.path.strip_suffix("/*") {
+                path.starts_with(prefix)
+            } else if let Some(ext) = tier.path.strip_prefix("*.") {
+                path.ends_with(ext)
+            } else {
+                path == tier.path
+            };
             if matches {
-                active_limit = Some(crate::config::parse_rate_limit(&policy.limit));
+                active_limit = Some(tier.limit);
                 break;
             }
         }
 
+        // 2.5b. Global `rate_limit_policies` — hanya jika vhost tier tidak match
+        if active_limit.is_none() {
+            for policy in &config.rate_limit_policies {
+                let matches = policy.path.split(',').any(|pat| {
+                    let pat = pat.trim();
+                    if pat == "/*" || pat == "*" {
+                        true
+                    } else if let Some(prefix) = pat.strip_suffix("/*") {
+                        path.starts_with(prefix)
+                    } else if let Some(ext) = pat.strip_prefix("*.") {
+                        path.ends_with(ext)
+                    } else {
+                        path == pat
+                    }
+                });
+
+                if matches {
+                    active_limit = Some(crate::config::parse_rate_limit(&policy.limit));
+                    break;
+                }
+            }
+        }
+
+        // 2.5c. Fallback ke vhost default rate_limit (string → parsed)
+        if active_limit.is_none() {
+            let parsed = crate::config::parse_rate_limit(&vhost_cfg.rate_limit);
+            if parsed > 0 && parsed < 999_999 {
+                active_limit = Some(parsed);
+            }
+        }
+
+        // Extract user key (Bearer token or API key) for composite rate limit key.
+        let user_key = headers_map
+            .get("authorization")
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .or_else(|| headers_map.get("x-api-key").map(|v| v.as_str()))
+            .or_else(|| headers_map.get("x-user-id").map(|v| v.as_str()));
+
         if let Some(limit) = active_limit {
             if limit > 0 {
-                let allowed = rule_engine
-                    .check_rate_limit(client_ip, limit, &config.redis)
+                let rl_status = rule_engine
+                    .check_rate_limit(client_ip, limit, &config.redis, user_key)
                     .await;
-                if !allowed {
+                ctx.rate_limit_status = Some(rl_status.clone());
+                if !rl_status.allowed {
                     let entry = crate::logging::WafLogEntry {
                         timestamp: chrono::Utc::now().to_rfc3339(),
                         client_ip: client_ip.to_string(),
@@ -807,11 +1227,49 @@ impl ProxyHttp for JarsWafProxy {
                         reason: format!("Rate limit exceeded (Max: {} req/min)", limit),
                     };
                     let _ = self.log_tx.try_send(entry);
-                    let _ = session.respond_error(429).await;
+                    
+                    let extra_headers = vec![
+                        ("X-RateLimit-Limit", rl_status.limit.to_string()),
+                        ("X-RateLimit-Remaining", rl_status.remaining.to_string()),
+                        ("X-RateLimit-Reset", rl_status.reset_after_secs.to_string()),
+                        ("Retry-After", rl_status.reset_after_secs.to_string()),
+                    ];
+                    
+                    let _ = respond_custom_error_with_headers(
+                        session, 429, "Too Many Requests",
+                        &format!("Rate limit exceeded (Max: {} req/min)", limit),
+                        &client_ip.to_string(), "RATELIMIT-001",
+                        Some(extra_headers)
+                    ).await;
                     return Ok(true);
                 }
             }
         }
+
+        // 2.6. API Security (JWT)
+        if path.starts_with("/api/") {
+            if let Err(reason) = crate::rules::api_security::validate_jwt_structure(&session.req_header().headers) {
+                let entry = crate::logging::WafLogEntry {
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    client_ip: client_ip.to_string(),
+                    method: req_method.clone(),
+                    path: path.clone(),
+                    action: "BLOCK".to_string(),
+                    rule_id: "API-JWT-001".to_string(),
+                    reason: reason.to_string(),
+                };
+                let _ = self.log_tx.try_send(entry);
+                let _ = respond_custom_error(session, 401, "Unauthorized", reason, &client_ip.to_string(), "API-JWT-001").await;
+                return Ok(true);
+            }
+        }
+
+        // 3. WAF Rule Engine Check (only when enabled)
+        if !config.global.waf_enabled {
+            return Ok(false);
+        }
+        // Acquire semaphore — skip WAF if concurrent regex work saturates
+        let _permit = try_waf_permit!();
         if let Some((rule_id, reason)) = rule_engine.check_request(
             &path,
             &query_str,
@@ -822,18 +1280,41 @@ impl ProxyHttp for JarsWafProxy {
             &vhost_cfg.rules,
         ) {
             ctx.is_blocked = true;
+            if let Some(ip) = ctx.client_ip {
+                self.record_attack_and_ban(ip);
+            }
             let entry = crate::logging::WafLogEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 client_ip: client_ip.to_string(),
                 method: req_method.clone(),
                 path: path.clone(),
                 action: "BLOCK".to_string(),
-                rule_id,
-                reason,
+                rule_id: rule_id.clone(),
+                reason: reason.clone(),
             };
             let _ = self.log_tx.try_send(entry);
-            let _ = session.respond_error(403).await;
+            
+            if vhost_cfg.deception_mode {
+                tracing::info!("Deception mode triggered for: {}", client_ip);
+                let fake_json = r#"{
+    "status": "success",
+    "data": {
+        "users": [
+            {"id": 1, "username": "admin", "role": "superuser", "last_login": "2023-10-14T08:00:00Z"},
+            {"id": 2, "username": "system", "role": "system", "last_login": "2023-10-14T08:05:00Z"}
+        ],
+        "debug_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fake_token"
+    }
+}"#;
+                let _ = respond_custom_error(session, 200, "OK", fake_json, &client_ip.to_string(), &rule_id).await;
+            } else {
+                let _ = respond_custom_error(session, 403, "Access Denied", &reason, &client_ip.to_string(), &rule_id).await;
+            }
             return Ok(true);
+        }
+
+        if let Some(ip) = ctx.client_ip {
+            crate::SUSPICIOUS_IPS.insert(ip, std::time::Instant::now());
         }
 
         Ok(false)
@@ -844,13 +1325,35 @@ impl ProxyHttp for JarsWafProxy {
         _session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        let vhost_name = ctx.vhost_name.as_ref().unwrap();
+        let vhost_name = match ctx.vhost_name.as_ref() {
+            Some(name) => name,
+            None => {
+                return Err(pingora::Error::create(
+                    pingora::ErrorType::HTTPStatus(502),
+                    pingora::ErrorSource::Downstream,
+                    Some("Missing VHost context".into()),
+                    None,
+                ));
+            }
+        };
 
         let mut selected_backend = None;
         if let Some(backends) = LOAD_BALANCER.get(vhost_name) {
             let healthy_list: Vec<&Backend> = backends
                 .iter()
-                .filter(|b| b.healthy.load(std::sync::atomic::Ordering::Relaxed))
+                .filter(|b| {
+                    if !b.healthy.load(std::sync::atomic::Ordering::Relaxed) {
+                        return false;
+                    }
+                    // Circuit breaker: skip backends with failure count >= threshold
+                    if let Some(fc) = BACKEND_FAILURE_COUNTS.get(&b.addr) {
+                        let count = fc.value().load(std::sync::atomic::Ordering::Relaxed);
+                        if count >= CIRCUIT_BREAKER_THRESHOLD {
+                            return false;
+                        }
+                    }
+                    true
+                })
                 .collect();
 
             if !healthy_list.is_empty() {
@@ -868,7 +1371,17 @@ impl ProxyHttp for JarsWafProxy {
             }
         }
 
-        let backend = selected_backend.unwrap_or_else(|| ctx.vhost_backend.clone().unwrap());
+        let backend = match selected_backend.or_else(|| ctx.vhost_backend.clone()) {
+            Some(b) => b,
+            None => {
+                return Err(pingora::Error::create(
+                    pingora::ErrorType::HTTPStatus(502),
+                    pingora::ErrorSource::Downstream,
+                    Some("No healthy backend found".into()),
+                    None,
+                ));
+            }
+        };
         ctx.vhost_backend_resolved = Some(backend.clone());
 
         // Increment backend concurrent request count (Backpressure protection)
@@ -1045,6 +1558,9 @@ impl ProxyHttp for JarsWafProxy {
         if let Some(chunk) = body {
             if ctx.body_buffer.len() + chunk.len() > ctx.body_limit {
                 ctx.is_blocked = true;
+                if let Some(ip) = ctx.client_ip {
+                    self.record_attack_and_ban(ip);
+                }
                 let client_ip_str = ctx
                     .client_ip
                     .map_or("Unknown".to_string(), |ip| ip.to_string());
@@ -1073,6 +1589,15 @@ impl ProxyHttp for JarsWafProxy {
         }
 
         if end_of_stream && !ctx.body_buffer.is_empty() {
+            let config = GLOBAL_CONFIG.load();
+
+            // Skip WAF body inspection if globally disabled
+            if !config.global.waf_enabled {
+                ctx.body_buffer.clear();
+                ctx.body_buffer.shrink_to_fit();
+                return Ok(());
+            }
+
             let body_str = String::from_utf8_lossy(&ctx.body_buffer);
 
             // Extract req_header fields early to avoid hold-borrow of session
@@ -1087,7 +1612,7 @@ impl ProxyHttp for JarsWafProxy {
                     .and_then(|h| h.to_str().ok())
                     .map(|s| s.to_string());
 
-                let mut headers_map = std::collections::HashMap::new();
+                let mut headers_map = ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
                 for (name, value) in req_header.headers.iter() {
                     if let Ok(val_str) = value.to_str() {
                         headers_map.insert(name.to_string(), val_str.to_string());
@@ -1096,10 +1621,42 @@ impl ProxyHttp for JarsWafProxy {
                 (path, query, method, host, headers_map)
             };
 
-            let config = GLOBAL_CONFIG.load();
-
             if let Some((_, vhost_cfg)) = crate::vhost::match_vhost(host.as_deref(), &config) {
+                // 2.7. API Security (GraphQL)
+                if path.starts_with("/graphql") || path.starts_with("/api/graphql") {
+                    if let Err(reason) = crate::rules::api_security::check_graphql_depth(&ctx.body_buffer, 5) {
+                        let client_ip_str = ctx.client_ip.map_or("Unknown".to_string(), |ip| ip.to_string());
+                        let entry = crate::logging::WafLogEntry {
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                            client_ip: client_ip_str.clone(),
+                            method: session.req_header().method.as_str().to_string(),
+                            path: session.req_header().uri.path().to_string(),
+                            action: "BLOCK".to_string(),
+                            rule_id: "API-GQL-001".to_string(),
+                            reason: reason.to_string(),
+                        };
+                        let _ = self.log_tx.try_send(entry);
+                        return Err(pingora::Error::create(
+                            pingora::ErrorType::HTTPStatus(400),
+                            pingora::ErrorSource::Downstream,
+                            Some("Bad Request".into()),
+                            None,
+                        ));
+                    }
+                }
+
                 let rule_engine = crate::rules::RuleEngine::new(&config);
+
+                // Acquire semaphore — skip body WAF if concurrent regex work saturates
+                let _permit = match crate::proxy_engine::WAF_SEMAPHORE.try_acquire() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        tracing::warn!("WAF semaphore full — skipping body rule check");
+                        ctx.body_buffer.clear();
+                        ctx.body_buffer.shrink_to_fit();
+                        return Ok(());
+                    }
+                };
 
                 if let Some((rule_id, reason)) = rule_engine.check_request(
                     &path,
@@ -1111,6 +1668,10 @@ impl ProxyHttp for JarsWafProxy {
                     &vhost_cfg.rules,
                 ) {
                     ctx.is_blocked = true;
+                    if let Some(ip) = ctx.client_ip {
+                        crate::SUSPICIOUS_IPS.insert(ip, std::time::Instant::now());
+                        self.record_attack_and_ban(ip);
+                    }
                     let client_ip_str = ctx
                         .client_ip
                         .map_or("Unknown".to_string(), |ip| ip.to_string());
@@ -1150,8 +1711,56 @@ impl ProxyHttp for JarsWafProxy {
             _ => 502,
         };
 
-        let _ = session.respond_error(code).await;
+        // Circuit breaker: increment failure count for backend
+        if let Some(ref backend) = _ctx.vhost_backend_resolved {
+            if let Some(entry) = BACKEND_FAILURE_COUNTS.get(backend) {
+                let prev = entry.value().fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if prev + 1 == CIRCUIT_BREAKER_THRESHOLD {
+                    tracing::warn!(
+                        "Circuit breaker tripped for backend {} after {} consecutive failures",
+                        backend,
+                        prev + 1
+                    );
+                }
+            } else {
+                BACKEND_FAILURE_COUNTS.insert(backend.clone(), std::sync::atomic::AtomicUsize::new(1));
+            }
+        }
+
+        let client_ip_str = session.client_addr()
+            .and_then(|addr| addr.as_inet().map(|i| i.ip().to_string()))
+            .unwrap_or_else(|| "Unknown".to_string());
+        let _ = respond_custom_error(session, code, "Gateway Error", "Failed to connect to backend application. It might be offline or starting up.", &client_ip_str, "GATEWAY-ERR-502").await;
 
         code
+    }
+}
+
+pub async fn flush_suspicious_ips_to_blocklist() {
+    use std::time::Instant;
+    let mut ips_to_block = Vec::new();
+    let now = Instant::now();
+    
+    crate::SUSPICIOUS_IPS.retain(|ip, &mut ts| {
+        if now.duration_since(ts).as_secs() < 5 {
+            ips_to_block.push(*ip);
+            false 
+        } else {
+            false 
+        }
+    });
+
+    if ips_to_block.is_empty() {
+        return;
+    }
+
+    let mut xdp = crate::XDP_MANAGER.lock().await;
+    for ip in ips_to_block {
+        if let std::net::IpAddr::V4(ipv4) = ip {
+            tracing::warn!("Blocking suspicious IP due to RASP alert: {}", ipv4);
+            let _ = xdp.block_ip(ipv4);
+        } else {
+            tracing::warn!("RASP IP block skipped for non-IPv4: {}", ip);
+        }
     }
 }

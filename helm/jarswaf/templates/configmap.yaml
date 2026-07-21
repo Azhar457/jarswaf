@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "jarswaf.fullname" . }}-config
+  labels:
+    {{- include "jarswaf.labels" . | nindent 4 }}
+data:
+  config.toml: |
+    [global]
+    port_http = {{ .Values.proxy.ports.http }}
+    port_https = {{ .Values.proxy.ports.https }}
+    max_body_size = 10485760
+    default_rate_limit = {{ .Values.config.rateLimitDefault }}
+    log_dir = "{{ .Values.config.logDir }}"
+    log_level = "{{ .Values.config.logLevel }}"
+    waf_enabled = true
+    webhooks = []
+    metrics_push_interval_secs = 60
+
+    [tls]
+    mode = "local_ca"
+    cert_dir = "/etc/jarswaf/certs"
+
+    [logging]
+    mode = "sqlite"
+    log_path = "{{ .Values.config.logDir }}/jarswaf.log"
+    max_log_size_mb = 50
+    max_log_files = 5
+    push_interval_secs = 300
+    push_batch_size = 100
+    blocklist_path = "/etc/jarswaf/blocklist.json"
+    db_path = "{{ .Values.config.logDir }}/jarswaf.db"
+
+    [components]
+    dashboard = false
+    clickhouse = false
+    service_discovery = false
+    geoip = true
+
+    [[rate_limit_policies]]
+    name = "Default"
+    limit = "600 requests / minute"
+    burst = 100
+    path = "/*"
+    description = "Default threshold."
+
+    [[rate_limit_policies]]
+    name = "Auth"
+    limit = "10 requests / minute"
+    burst = 5
+    path = "/login, /api/auth/*"
+    description = "Brute-force protection."
+
+    {{- if .Values.redis.enabled }}
+    [redis]
+    enabled = true
+    url = "{{ .Values.redis.url }}"
+    {{- else }}
+    [redis]
+    enabled = false
+    url = "redis://127.0.0.1:6379"
+    {{- end }}
+
+    [gossip]
+    enabled = true
+    bind_addr = "{{ .Values.gossip.bindAddress }}:{{ .Values.gossip.port }}"
+    seeds = ["jarswaf-gossip.{{ .Release.Namespace }}.svc.cluster.local"]
+    node_id = "{{ include "jarswaf.fullname" . }}-proxy-${HOSTNAME}"
