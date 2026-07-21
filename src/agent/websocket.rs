@@ -36,7 +36,9 @@ pub async fn start_config_sync_websocket(
 
         if let Some(ref t) = token {
             if let Ok(protocol_val) = t.parse() {
-                request.headers_mut().insert("Sec-WebSocket-Protocol", protocol_val);
+                request
+                    .headers_mut()
+                    .insert("Sec-WebSocket-Protocol", protocol_val);
             }
         }
 
@@ -119,7 +121,10 @@ pub async fn start_config_sync_websocket(
             }
             Err(e) => {
                 error!("Failed to connect to Controller config WebSocket: {e}. Falling back to HTTP Long-polling...");
-                if let Err(poll_err) = run_config_sync_long_poll(&controller_url, token.as_deref(), config_arc.clone()).await {
+                if let Err(poll_err) =
+                    run_config_sync_long_poll(&controller_url, token.as_deref(), config_arc.clone())
+                        .await
+                {
                     error!("Long-polling fallback failed: {poll_err}");
                 }
             }
@@ -137,13 +142,16 @@ async fn run_config_sync_long_poll(
     config_arc: Arc<std::sync::RwLock<config::Config>>,
 ) -> Result<(), String> {
     let client = crate::logging::build_client();
-    let url = format!("{}/api/v1/config/poll", controller_url.trim_end_matches('/'));
-    
+    let url = format!(
+        "{}/api/v1/config/poll",
+        controller_url.trim_end_matches('/')
+    );
+
     let mut req = client.get(&url).timeout(std::time::Duration::from_secs(40));
     if let Some(t) = token {
         req = req.header("Sec-WebSocket-Protocol", t); // Use same auth token scheme or custom header
     }
-    
+
     match req.send().await {
         Ok(res) => {
             if res.status() == reqwest::StatusCode::OK {
@@ -156,8 +164,6 @@ async fn run_config_sync_long_poll(
             }
             Ok(())
         }
-        Err(e) => {
-            Err(format!("HTTP long-polling request failed: {e}"))
-        }
+        Err(e) => Err(format!("HTTP long-polling request failed: {e}")),
     }
 }

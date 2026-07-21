@@ -132,26 +132,47 @@ pub static HEADER_RULES: &[Rule] = &[
 ];
 
 pub fn calculate_ja4_fingerprint(req: &RequestInfo) -> String {
-    let ua = req.headers.get("user-agent").map(|s| s.as_str()).unwrap_or("");
-    
-    let tls_version = if ua.contains("Chrome") || ua.contains("Safari") || ua.contains("Firefox") || ua.contains("curl") || ua.contains("python") {
+    let ua = req
+        .headers
+        .get("user-agent")
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
+    let tls_version = if ua.contains("Chrome")
+        || ua.contains("Safari")
+        || ua.contains("Firefox")
+        || ua.contains("curl")
+        || ua.contains("python")
+    {
         "13"
     } else {
         "12"
     };
-    
+
     let mut hash = 5381u32;
     for c in ua.bytes() {
         hash = hash.wrapping_mul(33).wrapping_add(c as u32);
     }
-    
+
     let ciphers_count = (hash % 15) + 10;
     let extensions_count = (hash % 12) + 8;
-    let part_a = format!("t{}{:02}{:02}h{}", tls_version, ciphers_count, extensions_count, hash % 9);
-    
-    let part_b = format!("{:012x}", (hash.wrapping_mul(16777619)) as u64 & 0xffffffffffff);
-    let part_c = format!("{:012x}", (hash.wrapping_mul(97) ^ 0xabcdef) as u64 & 0xffffffffffff);
-    
+    let part_a = format!(
+        "t{}{:02}{:02}h{}",
+        tls_version,
+        ciphers_count,
+        extensions_count,
+        hash % 9
+    );
+
+    let part_b = format!(
+        "{:012x}",
+        (hash.wrapping_mul(16777619)) as u64 & 0xffffffffffff
+    );
+    let part_c = format!(
+        "{:012x}",
+        (hash.wrapping_mul(97) ^ 0xabcdef) as u64 & 0xffffffffffff
+    );
+
     format!("{}_{}_{}", part_a, part_b, part_c)
 }
 
@@ -169,12 +190,17 @@ fn check_ja4_fingerprint(req: &RequestInfo) -> bool {
             return true;
         }
     }
-    
+
     let ja4 = calculate_ja4_fingerprint(req);
     // Only block if it is a known legacy/bad UA that resolves to t12
-    if ja4.starts_with("t12") && (ua.contains("python") || ua.contains("curl") || ua.contains("wget") || ua.contains("httpclient")) {
+    if ja4.starts_with("t12")
+        && (ua.contains("python")
+            || ua.contains("curl")
+            || ua.contains("wget")
+            || ua.contains("httpclient"))
+    {
         return true;
     }
-    
+
     false
 }

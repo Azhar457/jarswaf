@@ -1,7 +1,7 @@
 use reqwest::Client;
 use std::net::IpAddr;
 use std::time::Duration;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 // List of public threat intel feeds.
 // For the sake of this homelab WAF, we use Tor bulk exit list as a demo.
@@ -15,8 +15,11 @@ pub async fn fetch_threat_intel_ips() -> Vec<IpAddr> {
         .build()
         .unwrap_or_default();
 
-    info!("Fetching threat intelligence feed from {}", TOR_EXIT_NODE_LIST);
-    
+    info!(
+        "Fetching threat intelligence feed from {}",
+        TOR_EXIT_NODE_LIST
+    );
+
     match client.get(TOR_EXIT_NODE_LIST).send().await {
         Ok(response) => {
             if response.status().is_success() {
@@ -34,7 +37,10 @@ pub async fn fetch_threat_intel_ips() -> Vec<IpAddr> {
                     info!("Successfully parsed {} IPs from threat intel feed.", count);
                 }
             } else {
-                warn!("Failed to fetch threat intel feed. Status: {}", response.status());
+                warn!(
+                    "Failed to fetch threat intel feed. Status: {}",
+                    response.status()
+                );
             }
         }
         Err(e) => {

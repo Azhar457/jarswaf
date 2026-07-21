@@ -32,7 +32,7 @@ pub async fn run_redteam(target: &str) {
     for (attack_type, payload) in PAYLOADS {
         let url = format!("{}/?q={}", target, urlencoding::encode(payload));
         let start = Instant::now();
-        
+
         match client.get(&url).send().await {
             Ok(resp) => {
                 let status = resp.status();
@@ -40,10 +40,16 @@ pub async fn run_redteam(target: &str) {
                 total_ms += elapsed;
 
                 if status == 403 {
-                    println!("✅ [{}] BLOCKED ({}ms) | Payload: {}", attack_type, elapsed, payload);
+                    println!(
+                        "✅ [{}] BLOCKED ({}ms) | Payload: {}",
+                        attack_type, elapsed, payload
+                    );
                     blocked += 1;
                 } else {
-                    println!("❌ [{}] BYPASSED (Status {}) | Payload: {}", attack_type, status, payload);
+                    println!(
+                        "❌ [{}] BYPASSED (Status {}) | Payload: {}",
+                        attack_type, status, payload
+                    );
                     bypassed += 1;
                 }
             }
@@ -56,12 +62,15 @@ pub async fn run_redteam(target: &str) {
 
     println!("--------------------------------------------------");
     println!("🧪 Testing API Security (JWT & GraphQL)");
-    
+
     // 1. JWT Test
     let start = Instant::now();
-    match client.get(&format!("{}/api/test", target))
+    match client
+        .get(&format!("{}/api/test", target))
         .header("Authorization", "Bearer invalid_token_without_dots")
-        .send().await {
+        .send()
+        .await
+    {
         Ok(resp) => {
             let status = resp.status();
             let elapsed = start.elapsed().as_millis();
@@ -83,18 +92,27 @@ pub async fn run_redteam(target: &str) {
     // 2. GraphQL Test
     let start = Instant::now();
     let nested_gql = r#"{"query": "{ user { posts { comments { author { id } } } } }"}"#;
-    match client.post(&format!("{}/api/graphql", target))
+    match client
+        .post(&format!("{}/api/graphql", target))
         .body(nested_gql)
-        .send().await {
+        .send()
+        .await
+    {
         Ok(resp) => {
             let status = resp.status();
             let elapsed = start.elapsed().as_millis();
             total_ms += elapsed;
             if status == 400 {
-                println!("✅ [GraphQL] BLOCKED ({}ms) | Depth Limit Exceeded", elapsed);
+                println!(
+                    "✅ [GraphQL] BLOCKED ({}ms) | Depth Limit Exceeded",
+                    elapsed
+                );
                 blocked += 1;
             } else {
-                println!("❌ [GraphQL] BYPASSED (Status {}) | Depth Limit Exceeded", status);
+                println!(
+                    "❌ [GraphQL] BYPASSED (Status {}) | Depth Limit Exceeded",
+                    status
+                );
                 bypassed += 1;
             }
         }

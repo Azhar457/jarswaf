@@ -27,7 +27,7 @@ pub async fn auth_middleware(
                 if token == expected_token {
                     return true;
                 }
-                
+
                 // 2. Stateless Machine ID Binding: <MachineID>.<Hash>
                 if let Some((machine_id, hash)) = token.split_once('.') {
                     use sha2::{Digest, Sha256};

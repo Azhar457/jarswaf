@@ -67,7 +67,11 @@ pub async fn run_controller(port: u16, config_path: String) {
     logging::init_sqlite_db(&db_path).expect("Failed to initialize SQLite DB");
     handlers::start_threat_intel_scraper(db_path.clone());
 
-    let grpc_token = cfg.global.grpc_token.clone().unwrap_or_else(|| "default_token".to_string());
+    let grpc_token = cfg
+        .global
+        .grpc_token
+        .clone()
+        .unwrap_or_else(|| "default_token".to_string());
     tokio::spawn(async move {
         if let Err(e) = crate::grpc::server::run_manager_server(9000, grpc_token).await {
             tracing::error!("gRPC Manager Server error: {}", e);

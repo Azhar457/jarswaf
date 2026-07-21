@@ -31,12 +31,18 @@ pub async fn run_agent_client(config: Arc<Config>) {
 }
 
 #[allow(clippy::result_large_err)]
-async fn connect_and_sync(manager_url: &str, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let channel = Channel::from_shared(manager_url.to_string())?.connect().await?;
+async fn connect_and_sync(
+    manager_url: &str,
+    token: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let channel = Channel::from_shared(manager_url.to_string())?
+        .connect()
+        .await?;
 
     let token_metadata = MetadataValue::try_from(&format!("Bearer {}", token))?;
     let mut client = WafSyncClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
-        req.metadata_mut().insert("authorization", token_metadata.clone());
+        req.metadata_mut()
+            .insert("authorization", token_metadata.clone());
         Ok(req)
     });
 

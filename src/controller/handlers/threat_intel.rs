@@ -27,12 +27,17 @@ pub fn start_threat_intel_scraper(db_path: String) {
             let mut scraped_ips = Vec::new();
 
             // 1. Check Tor Exit Nodes (No key required, highly reliable)
-            if let Ok(resp) = client.get("https://check.torproject.org/torbulkexitlist").send().await {
+            if let Ok(resp) = client
+                .get("https://check.torproject.org/torbulkexitlist")
+                .send()
+                .await
+            {
                 if resp.status().is_success() {
                     if let Ok(text) = resp.text().await {
                         for line in text.lines() {
                             let clean_ip = line.trim();
-                            if !clean_ip.is_empty() && clean_ip.parse::<std::net::IpAddr>().is_ok() {
+                            if !clean_ip.is_empty() && clean_ip.parse::<std::net::IpAddr>().is_ok()
+                            {
                                 scraped_ips.push((clean_ip.to_string(), "Tor Exit Node"));
                             }
                         }
@@ -43,16 +48,21 @@ pub fn start_threat_intel_scraper(db_path: String) {
             // 2. AbuseIPDB API Integration (Key required)
             if let Ok(key) = std::env::var("ABUSEIPDB_API_KEY") {
                 if !key.is_empty() {
-                    let req = client.get("https://api.abuseipdb.com/api/v2/blacklist")
+                    let req = client
+                        .get("https://api.abuseipdb.com/api/v2/blacklist")
                         .header("Key", key)
                         .header("Accept", "application/json");
                     if let Ok(resp) = req.send().await {
                         if resp.status().is_success() {
                             #[derive(serde::Deserialize)]
                             #[allow(non_snake_case)]
-                            struct AbuseIp { ipAddress: String }
+                            struct AbuseIp {
+                                ipAddress: String,
+                            }
                             #[derive(serde::Deserialize)]
-                            struct AbuseData { data: Vec<AbuseIp> }
+                            struct AbuseData {
+                                data: Vec<AbuseIp>,
+                            }
                             if let Ok(data) = resp.json::<AbuseData>().await {
                                 for item in data.data {
                                     scraped_ips.push((item.ipAddress, "AbuseIPDB Blacklist"));
@@ -66,14 +76,20 @@ pub fn start_threat_intel_scraper(db_path: String) {
             // 3. AlienVault OTX Integration (Key required)
             if let Ok(key) = std::env::var("ALIENVAULT_OTX_API_KEY") {
                 if !key.is_empty() {
-                    let req = client.get("https://otx.alienvault.com/api/v1/indicators/export")
+                    let req = client
+                        .get("https://otx.alienvault.com/api/v1/indicators/export")
                         .header("X-OTX-API-KEY", key);
                     if let Ok(resp) = req.send().await {
                         if resp.status().is_success() {
                             #[derive(serde::Deserialize)]
-                            struct OtxItem { indicator: String, r#type: String }
+                            struct OtxItem {
+                                indicator: String,
+                                r#type: String,
+                            }
                             #[derive(serde::Deserialize)]
-                            struct OtxData { results: Vec<OtxItem> }
+                            struct OtxData {
+                                results: Vec<OtxItem>,
+                            }
                             if let Ok(data) = resp.json::<OtxData>().await {
                                 for item in data.results {
                                     if item.r#type == "IPv4" {
@@ -112,7 +128,10 @@ pub fn start_threat_intel_scraper(db_path: String) {
             }).await;
 
             match res {
-                Ok(Ok(count)) => tracing::info!("Threat Intel OSINT scraper finished. Loaded {} threat IPs into SQLite.", count),
+                Ok(Ok(count)) => tracing::info!(
+                    "Threat Intel OSINT scraper finished. Loaded {} threat IPs into SQLite.",
+                    count
+                ),
                 e => tracing::error!("Threat Intel OSINT scraper SQLite save error: {:?}", e),
             }
 
@@ -302,17 +321,18 @@ pub async fn post_agent_block_handler(
     }
 }
 
-pub async fn post_retrain_handler(
-    State(state): State<ControllerState>,
-) -> impl IntoResponse {
+pub async fn post_retrain_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let ml_url = match std::env::var("ML_RETRAIN_URL") {
         Ok(url) if !url.is_empty() => url,
-        _ => return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "ML_RETRAIN_URL environment variable is not configured"
-            })),
-        ).into_response(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "ML_RETRAIN_URL environment variable is not configured"
+                })),
+            )
+                .into_response()
+        }
     };
 
     let db_path = state.db_path.clone();
@@ -360,6 +380,7 @@ pub async fn post_retrain_handler(
         _ => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to fetch logs from database"})),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
