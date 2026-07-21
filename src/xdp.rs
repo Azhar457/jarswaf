@@ -29,11 +29,16 @@ impl XdpManager {
             // Try loading from Docker path first, then fall back to local development build path
             let bpf = match Ebpf::load_file("/app/jarswaf-ebpf") {
                 Ok(b) => Some(b),
-                Err(e1) => match Ebpf::load_file("target/bpfel-unknown-none/release/jarswaf-ebpf") {
-                    Ok(b) => Some(b),
-                    Err(e2) => {
-                        warn!("Failed to load eBPF object. Error 1: {:?}. Error 2: {:?}", e1, e2);
-                        None
+                Err(e1) => {
+                    match Ebpf::load_file("target/bpfel-unknown-none/release/jarswaf-ebpf") {
+                        Ok(b) => Some(b),
+                        Err(e2) => {
+                            warn!(
+                                "Failed to load eBPF object. Error 1: {:?}. Error 2: {:?}",
+                                e1, e2
+                            );
+                            None
+                        }
                     }
                 }
             };
@@ -59,7 +64,9 @@ impl XdpManager {
             };
             let program: &mut Xdp = bpf
                 .program_mut("jarswaf_ebpf")
-                .ok_or_else(|| "eBPF program 'jarswaf_ebpf' not found in loaded object".to_string())?
+                .ok_or_else(|| {
+                    "eBPF program 'jarswaf_ebpf' not found in loaded object".to_string()
+                })?
                 .try_into()
                 .map_err(|e| format!("{}", e))?;
             program.load().map_err(|e| format!("{}", e))?;
@@ -87,12 +94,11 @@ impl XdpManager {
                 Some(b) => b,
                 None => return Ok(()),
             };
-            let mut blocklist: HashMap<_, u32, u8> =
-                HashMap::try_from(
-                    bpf.map_mut("BLOCKLIST")
-                        .ok_or_else(|| "eBPF map 'BLOCKLIST' not found".to_string())?
-                )
-                    .map_err(|e| format!("{}", e))?;
+            let mut blocklist: HashMap<_, u32, u8> = HashMap::try_from(
+                bpf.map_mut("BLOCKLIST")
+                    .ok_or_else(|| "eBPF map 'BLOCKLIST' not found".to_string())?,
+            )
+            .map_err(|e| format!("{}", e))?;
             let ip_u32 = u32::from(_ip).to_be(); // Ensure network byte order matching eBPF expectations
             blocklist
                 .insert(ip_u32, 1, 0)
@@ -114,16 +120,13 @@ impl XdpManager {
                 Some(b) => b,
                 None => return Ok(()),
             };
-            let mut blocklist: HashMap<_, u32, u8> =
-                HashMap::try_from(
-                    bpf.map_mut("BLOCKLIST")
-                        .ok_or_else(|| "eBPF map 'BLOCKLIST' not found".to_string())?
-                )
-                    .map_err(|e| format!("{}", e))?;
+            let mut blocklist: HashMap<_, u32, u8> = HashMap::try_from(
+                bpf.map_mut("BLOCKLIST")
+                    .ok_or_else(|| "eBPF map 'BLOCKLIST' not found".to_string())?,
+            )
+            .map_err(|e| format!("{}", e))?;
             let ip_u32 = u32::from(_ip).to_be();
-            blocklist
-                .remove(&ip_u32)
-                .map_err(|e| format!("{}", e))?;
+            blocklist.remove(&ip_u32).map_err(|e| format!("{}", e))?;
             info!("IP {} removed from XDP blocklist", _ip);
             Ok(())
         }
@@ -134,11 +137,14 @@ impl XdpManager {
         }
     }
 
-    pub fn attach_rasp(&mut self, rasp_tx: Option<tokio::sync::mpsc::Sender<()>>) -> Result<(), String> {
+    pub fn attach_rasp(
+        &mut self,
+        rasp_tx: Option<tokio::sync::mpsc::Sender<()>>,
+    ) -> Result<(), String> {
         #[cfg(target_os = "linux")]
         {
-            use aya::programs::KProbe;
             use aya::maps::perf::PerfEventArray;
+            use aya::programs::KProbe;
 
             let bpf = match self.bpf.as_mut() {
                 Some(b) => b,
@@ -147,33 +153,37 @@ impl XdpManager {
                     return Ok(());
                 }
             };
-            
+
             let program: &mut KProbe = bpf
                 .program_mut("jarswaf_rasp_exec")
                 .ok_or_else(|| "eBPF program 'jarswaf_rasp_exec' not found".to_string())?
                 .try_into()
                 .map_err(|e| format!("{}", e))?;
-                
+
             program.load().map_err(|e| format!("{}", e))?;
-            
-            program.attach("sys_execve", 0)
-                   .or_else(|_| program.attach("__x64_sys_execve", 0))
-                   .map_err(|e| format!("failed to attach the KProbe program: {}", e))?;
-                   
+
+            program
+                .attach("sys_execve", 0)
+                .or_else(|_| program.attach("__x64_sys_execve", 0))
+                .map_err(|e| format!("failed to attach the KProbe program: {}", e))?;
+
             info!("RASP KProbe successfully attached to sys_execve");
-            
-            let map = bpf.take_map("RASP_EVENTS").ok_or_else(|| "eBPF map 'RASP_EVENTS' not found".to_string())?;
-            let perf_array = PerfEventArray::try_from(map).map_err(|e| format!("failed to get RASP_EVENTS map: {}", e))?;
-            
+
+            let map = bpf
+                .take_map("RASP_EVENTS")
+                .ok_or_else(|| "eBPF map 'RASP_EVENTS' not found".to_string())?;
+            let perf_array = PerfEventArray::try_from(map)
+                .map_err(|e| format!("failed to get RASP_EVENTS map: {}", e))?;
+
             if let Some(tx) = rasp_tx {
                 tokio::spawn(async move {
                     crate::rasp::start_rasp_monitor(perf_array, tx).await;
                 });
             }
-            
+
             Ok(())
         }
-        
+
         #[cfg(not(target_os = "linux"))]
         {
             Ok(())

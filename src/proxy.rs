@@ -28,7 +28,6 @@ static GEOIP_ASN_READER: Lazy<Option<maxminddb::Reader<Vec<u8>>>> =
         },
     );
 
-
 pub fn resolve_ip_country(ip: &std::net::IpAddr) -> String {
     if crate::types::is_local_ip(ip) {
         return "LOCAL".to_string();
@@ -56,7 +55,10 @@ pub fn resolve_ip_asn(ip: &std::net::IpAddr) -> Option<(u32, String)> {
         if let Ok(lookup_res) = reader.lookup(*ip) {
             if let Ok(Some(record)) = lookup_res.decode::<maxminddb::geoip2::Asn>() {
                 if let Some(asn) = record.autonomous_system_number {
-                    let org = record.autonomous_system_organization.map(|s| s.to_string()).unwrap_or_default();
+                    let org = record
+                        .autonomous_system_organization
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
                     return Some((asn, org));
                 }
             }
@@ -64,7 +66,6 @@ pub fn resolve_ip_asn(ip: &std::net::IpAddr) -> Option<(u32, String)> {
     }
     None
 }
-
 
 pub fn match_ip(client_ip: &std::net::IpAddr, pattern: &str) -> bool {
     let pattern = pattern.trim();
@@ -158,4 +159,3 @@ mod tests {
         assert!(match_ip(&ip, "*"));
     }
 }
-

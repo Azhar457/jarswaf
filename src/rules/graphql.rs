@@ -9,18 +9,18 @@ pub fn analyze_graphql_complexity(query: &str) -> GraphQLComplexity {
     let mut max_depth: usize = 0;
     let mut current_depth: usize = 0;
     let mut node_count: usize = 0;
-    
+
     let mut in_arguments = false;
     let mut in_string = false;
     let mut in_comment = false;
     let mut current_word = String::new();
-    
+
     let chars: Vec<char> = query.chars().collect();
     let mut i = 0;
-    
+
     while i < chars.len() {
         let c = chars[i];
-        
+
         if in_comment {
             if c == '\n' || c == '\r' {
                 in_comment = false;
@@ -33,9 +33,9 @@ pub fn analyze_graphql_complexity(query: &str) -> GraphQLComplexity {
             i += 1;
             continue;
         }
-        
+
         if c == '"' {
-            if i > 0 && chars[i-1] == '\\' {
+            if i > 0 && chars[i - 1] == '\\' {
                 // Escaped quote
             } else {
                 in_string = !in_string;
@@ -43,12 +43,12 @@ pub fn analyze_graphql_complexity(query: &str) -> GraphQLComplexity {
             i += 1;
             continue;
         }
-        
+
         if in_string {
             i += 1;
             continue;
         }
-        
+
         if c == '(' && !in_string {
             in_arguments = true;
             i += 1;
@@ -59,12 +59,12 @@ pub fn analyze_graphql_complexity(query: &str) -> GraphQLComplexity {
             i += 1;
             continue;
         }
-        
+
         if in_arguments {
             i += 1;
             continue;
         }
-        
+
         if c == '{' {
             current_depth += 1;
             if current_depth > max_depth {
@@ -94,14 +94,14 @@ pub fn analyze_graphql_complexity(query: &str) -> GraphQLComplexity {
                 current_word.clear();
             }
         }
-        
+
         i += 1;
     }
-    
+
     if !current_word.is_empty() && is_field_node(&current_word) {
         node_count += 1;
     }
-    
+
     GraphQLComplexity {
         max_depth,
         node_count,
@@ -110,23 +110,22 @@ pub fn analyze_graphql_complexity(query: &str) -> GraphQLComplexity {
 
 fn is_field_node(word: &str) -> bool {
     let lowercase = word.to_lowercase();
-    !matches!(lowercase.as_str(), "query" | "mutation" | "subscription" | "fragment" | "on" | "true" | "false" | "null")
+    !matches!(
+        lowercase.as_str(),
+        "query" | "mutation" | "subscription" | "fragment" | "on" | "true" | "false" | "null"
+    )
 }
 
-pub fn check_graphql_complexity_limits(
-    path: &str,
-    query_str: &str,
-    body: &str,
-) -> Option<String> {
+pub fn check_graphql_complexity_limits(path: &str, query_str: &str, body: &str) -> Option<String> {
     let mut graphql_query = None;
-    
+
     // 1. Coba ekstrak dari POST JSON body
     if let Ok(json) = serde_json::from_str::<Value>(body) {
         if let Some(q) = json.get("query").and_then(|v| v.as_str()) {
             graphql_query = Some(q.to_string());
         }
     }
-    
+
     // 2. Coba ekstrak dari query string params (?query=...)
     if graphql_query.is_none() {
         for part in query_str.split('&') {
@@ -138,21 +137,24 @@ pub fn check_graphql_complexity_limits(
             }
         }
     }
-    
+
     // 3. Fallback jika path mengarah ke /graphql
     if graphql_query.is_none() && (path.ends_with("/graphql") || path.contains("/graphql/")) {
         let trimmed = body.trim();
-        if trimmed.starts_with('{') || trimmed.starts_with("query") || trimmed.starts_with("mutation") {
+        if trimmed.starts_with('{')
+            || trimmed.starts_with("query")
+            || trimmed.starts_with("mutation")
+        {
             graphql_query = Some(trimmed.to_string());
         }
     }
-    
+
     if let Some(ref q) = graphql_query {
         let complexity = analyze_graphql_complexity(q);
-        
+
         let max_depth_limit = 5;
         let max_nodes_limit = 50;
-        
+
         if complexity.max_depth > max_depth_limit {
             return Some(format!(
                 "GraphQL query depth ({}) exceeds maximum limit ({})",
@@ -166,7 +168,7 @@ pub fn check_graphql_complexity_limits(
             ));
         }
     }
-    
+
     None
 }
 

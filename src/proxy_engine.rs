@@ -44,7 +44,6 @@ pub const CIRCUIT_BREAKER_THRESHOLD: usize = 5;
 pub static SESSION_FINGERPRINTS: once_cell::sync::Lazy<dashmap::DashMap<std::net::IpAddr, String>> =
     once_cell::sync::Lazy::new(dashmap::DashMap::new);
 
-
 /// Bounded blocklist — hard cap at 100k entries. Used in proxy and agent.
 /// Entries beyond cap evict oldest first via retain-order.
 pub const BLOCKLIST_MAX_ENTRIES: usize = 100_000;
@@ -129,8 +128,6 @@ pub fn trim_dashmap<K: std::hash::Hash + Eq + Clone, V>(map: &dashmap::DashMap<K
     }
 }
 
-
-
 async fn respond_custom_error(
     session: &mut Session,
     status_code: u16,
@@ -140,8 +137,15 @@ async fn respond_custom_error(
     rule_id: &str,
 ) {
     Box::pin(respond_custom_error_with_headers(
-        session, status_code, title, description, client_ip, rule_id, None
-    )).await
+        session,
+        status_code,
+        title,
+        description,
+        client_ip,
+        rule_id,
+        None,
+    ))
+    .await
 }
 
 async fn respond_custom_error_with_headers(
@@ -167,7 +171,7 @@ async fn respond_custom_error_with_headers(
         map.insert("message", description);
         map.insert("client_ip", client_ip);
         map.insert("rule_id", rule_id);
-        
+
         // Add rate limit context if applicable
         if status_code == 429 {
             if let Some(headers) = &extra_headers {
@@ -300,19 +304,15 @@ async fn respond_custom_error_with_headers(
     </div>
 </body>
 </html>"#,
-        title,
-        description,
-        client_ip,
-        status_code,
-        rule_id
-    );
+            title, description, client_ip, status_code, rule_id
+        );
         ("text/html", html)
     };
 
     if let Ok(mut resp) = ResponseHeader::build(status_code, Some(body.len())) {
         let _ = resp.insert_header("Content-Type", content_type);
         let _ = resp.insert_header("Server", "jarsWAF");
-        
+
         // Inject extra headers
         if let Some(headers) = extra_headers {
             for (k, v) in headers {
@@ -324,13 +324,17 @@ async fn respond_custom_error_with_headers(
             let _ = resp.insert_header("X-RateLimit-Limit", description);
         }
 
-        if session.write_response_header(Box::new(resp), false).await.is_ok() {
-            let _ = session.write_response_body(Some(Bytes::copy_from_slice(body.as_bytes())), true).await;
+        if session
+            .write_response_header(Box::new(resp), false)
+            .await
+            .is_ok()
+        {
+            let _ = session
+                .write_response_body(Some(Bytes::copy_from_slice(body.as_bytes())), true)
+                .await;
         }
     }
 }
-
-
 
 fn calculate_fingerprint(headers: &ahash::AHashMap<String, String>) -> String {
     use sha2::{Digest, Sha256};
@@ -628,9 +632,12 @@ impl ProxyHttp for JarsWafProxy {
     ) -> Result<()> {
         if let Some(rl_status) = &ctx.rate_limit_status {
             if rl_status.allowed {
-                let _ = upstream_response.insert_header("X-RateLimit-Limit", rl_status.limit.to_string());
-                let _ = upstream_response.insert_header("X-RateLimit-Remaining", rl_status.remaining.to_string());
-                let _ = upstream_response.insert_header("X-RateLimit-Reset", rl_status.reset_after_secs.to_string());
+                let _ = upstream_response
+                    .insert_header("X-RateLimit-Limit", rl_status.limit.to_string());
+                let _ = upstream_response
+                    .insert_header("X-RateLimit-Remaining", rl_status.remaining.to_string());
+                let _ = upstream_response
+                    .insert_header("X-RateLimit-Reset", rl_status.reset_after_secs.to_string());
             }
         }
         Ok(())
@@ -661,7 +668,9 @@ impl ProxyHttp for JarsWafProxy {
 
             if !findings.is_empty() {
                 for finding in &findings {
-                    let client_ip_str = ctx.client_ip.map_or("Unknown".to_string(), |ip| ip.to_string());
+                    let client_ip_str = ctx
+                        .client_ip
+                        .map_or("Unknown".to_string(), |ip| ip.to_string());
                     let entry = crate::logging::WafLogEntry {
                         timestamp: chrono::Utc::now().to_rfc3339(),
                         client_ip: client_ip_str,
@@ -669,7 +678,10 @@ impl ProxyHttp for JarsWafProxy {
                         path: _session.req_header().uri.path().to_string(),
                         action: dlp_cfg.action.to_uppercase(),
                         rule_id: finding.rule.to_string(),
-                        reason: format!("DLP finding: {} (sample: {})", finding.description, finding.sample),
+                        reason: format!(
+                            "DLP finding: {} (sample: {})",
+                            finding.description, finding.sample
+                        ),
                     };
                     let _ = self.log_tx.try_send(entry);
                 }
@@ -746,10 +758,7 @@ impl ProxyHttp for JarsWafProxy {
                     .is_ok()
                 {
                     let _ = session
-                        .write_response_body(
-                            Some(Bytes::copy_from_slice(b"{}")),
-                            true,
-                        )
+                        .write_response_body(Some(Bytes::copy_from_slice(b"{}")), true)
                         .await;
                     return Ok(true);
                 }
@@ -787,7 +796,15 @@ impl ProxyHttp for JarsWafProxy {
         let (backend_addr, vhost_cfg) = match crate::vhost::match_vhost(host.as_deref(), &config) {
             Some((b, v)) => (b.to_string(), v.clone()),
             None => {
-                let _ = respond_custom_error(session, 400, "Bad Request", "The requested host header is not configured on this server.", &client_ip.to_string(), "VHOST-MATCH-000").await;
+                let _ = respond_custom_error(
+                    session,
+                    400,
+                    "Bad Request",
+                    "The requested host header is not configured on this server.",
+                    &client_ip.to_string(),
+                    "VHOST-MATCH-000",
+                )
+                .await;
                 return Ok(true);
             }
         };
@@ -814,7 +831,15 @@ impl ProxyHttp for JarsWafProxy {
                     reason: format!("Direct IP access block: {}", clean_host),
                 };
                 let _ = self.log_tx.try_send(entry);
-                let _ = respond_custom_error(session, 403, "Access Denied", &format!("Direct IP access block: {}", clean_host), &client_ip.to_string(), "DIRECT-IP-001").await;
+                let _ = respond_custom_error(
+                    session,
+                    403,
+                    "Access Denied",
+                    &format!("Direct IP access block: {}", clean_host),
+                    &client_ip.to_string(),
+                    "DIRECT-IP-001",
+                )
+                .await;
                 return Ok(true);
             }
         }
@@ -839,7 +864,18 @@ impl ProxyHttp for JarsWafProxy {
                 ),
             };
             let _ = self.log_tx.try_send(entry);
-            let _ = respond_custom_error(session, 429, "Too Many Requests", &format!("Slowloris concurrent connection limit exceeded: {}", conn_count), &client_ip.to_string(), "SLOWLORIS-001").await;
+            let _ = respond_custom_error(
+                session,
+                429,
+                "Too Many Requests",
+                &format!(
+                    "Slowloris concurrent connection limit exceeded: {}",
+                    conn_count
+                ),
+                &client_ip.to_string(),
+                "SLOWLORIS-001",
+            )
+            .await;
             return Ok(true);
         }
 
@@ -903,7 +939,15 @@ impl ProxyHttp for JarsWafProxy {
                 }
 
                 if crate::rules::bot_challenge::is_headless_renderer(&webgl_renderer) {
-                    let _ = respond_custom_error(session, 403, "Bot Detected", "Advanced Bot Detection: Detected headless or automated browser.", &client_ip.to_string(), "BOT-CHALLENGE-003").await;
+                    let _ = respond_custom_error(
+                        session,
+                        403,
+                        "Bot Detected",
+                        "Advanced Bot Detection: Detected headless or automated browser.",
+                        &client_ip.to_string(),
+                        "BOT-CHALLENGE-003",
+                    )
+                    .await;
                     return Ok(true);
                 }
 
@@ -937,7 +981,15 @@ impl ProxyHttp for JarsWafProxy {
                         }
                     }
                 }
-                let _ = respond_custom_error(session, 400, "Bad Request", "Challenge verification failed. Nonce is invalid or signature mismatch.", &client_ip.to_string(), "BOT-CHALLENGE-001").await;
+                let _ = respond_custom_error(
+                    session,
+                    400,
+                    "Bad Request",
+                    "Challenge verification failed. Nonce is invalid or signature mismatch.",
+                    &client_ip.to_string(),
+                    "BOT-CHALLENGE-001",
+                )
+                .await;
                 return Ok(true);
             }
 
@@ -1029,7 +1081,9 @@ impl ProxyHttp for JarsWafProxy {
 
         // 0.4. Self-Healing Backend Health Check & Active Shielding
         let all_backends_unhealthy = if let Some(backends) = LOAD_BALANCER.get(&vhost_cfg.name) {
-            backends.iter().all(|b| !b.healthy.load(std::sync::atomic::Ordering::Relaxed))
+            backends
+                .iter()
+                .all(|b| !b.healthy.load(std::sync::atomic::Ordering::Relaxed))
         } else {
             false
         };
@@ -1054,7 +1108,8 @@ impl ProxyHttp for JarsWafProxy {
                 );
                 let redirect_path = urlencoding::encode(&redirect_url);
                 if let Ok(mut resp) = ResponseHeader::build(302, Some(0)) {
-                    let _ = resp.insert_header("Location", format!("/jarswaf-challenge?{}", redirect_path));
+                    let _ = resp
+                        .insert_header("Location", format!("/jarswaf-challenge?{}", redirect_path));
                     let _ = session.write_response_header(Box::new(resp), true).await;
                     return Ok(true);
                 }
@@ -1066,10 +1121,11 @@ impl ProxyHttp for JarsWafProxy {
                     path: path.clone(),
                     action: "BLOCK".to_string(),
                     rule_id: "SELF-HEAL-503".to_string(),
-                    reason: "Backend application offline. WAF Active Shielding is active.".to_string(),
+                    reason: "Backend application offline. WAF Active Shielding is active."
+                        .to_string(),
                 };
                 let _ = self.log_tx.try_send(entry);
-                
+
                 let _ = respond_custom_error(
                     session,
                     503,
@@ -1083,7 +1139,8 @@ impl ProxyHttp for JarsWafProxy {
         }
 
         // 1. Check Blocklist (Persistent/Reputation & Auto-Remediation)
-        let is_blocklisted = self.blocklist.contains_key(&client_ip) || crate::rules::is_ip_temporarily_blocked(client_ip);
+        let is_blocklisted = self.blocklist.contains_key(&client_ip)
+            || crate::rules::is_ip_temporarily_blocked(client_ip);
         if is_blocklisted {
             let entry = crate::logging::WafLogEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -1096,7 +1153,15 @@ impl ProxyHttp for JarsWafProxy {
                     .to_string(),
             };
             let _ = self.log_tx.try_send(entry);
-            let _ = respond_custom_error(session, 403, "Access Denied", "Blocked by jarsWAF Collaborative Threat Intelligence (Reputation)", &client_ip.to_string(), "COLLAB-001").await;
+            let _ = respond_custom_error(
+                session,
+                403,
+                "Access Denied",
+                "Blocked by jarsWAF Collaborative Threat Intelligence (Reputation)",
+                &client_ip.to_string(),
+                "COLLAB-001",
+            )
+            .await;
             return Ok(true); // Handled
         }
 
@@ -1122,7 +1187,18 @@ impl ProxyHttp for JarsWafProxy {
                 ),
             };
             let _ = self.log_tx.try_send(entry);
-            let _ = respond_custom_error(session, 403, "Access Denied", &format!("Geoblocked ({}): Access from country [{}] is restricted", vhost_cfg.geoblock_type, country), &client_ip.to_string(), "GEO-001").await;
+            let _ = respond_custom_error(
+                session,
+                403,
+                "Access Denied",
+                &format!(
+                    "Geoblocked ({}): Access from country [{}] is restricted",
+                    vhost_cfg.geoblock_type, country
+                ),
+                &client_ip.to_string(),
+                "GEO-001",
+            )
+            .await;
             return Ok(true); // Handled
         }
 
@@ -1143,7 +1219,18 @@ impl ProxyHttp for JarsWafProxy {
                         ),
                     };
                     let _ = self.log_tx.try_send(entry);
-                    let _ = respond_custom_error(session, 403, "Access Denied", &format!("ASN blocked: Access from ASN [{}] ({}) is restricted", asn, org), &client_ip.to_string(), "GEO-ASN-001").await;
+                    let _ = respond_custom_error(
+                        session,
+                        403,
+                        "Access Denied",
+                        &format!(
+                            "ASN blocked: Access from ASN [{}] ({}) is restricted",
+                            asn, org
+                        ),
+                        &client_ip.to_string(),
+                        "GEO-ASN-001",
+                    )
+                    .await;
                     return Ok(true); // Handled
                 }
             }
@@ -1227,20 +1314,24 @@ impl ProxyHttp for JarsWafProxy {
                         reason: format!("Rate limit exceeded (Max: {} req/min)", limit),
                     };
                     let _ = self.log_tx.try_send(entry);
-                    
+
                     let extra_headers = vec![
                         ("X-RateLimit-Limit", rl_status.limit.to_string()),
                         ("X-RateLimit-Remaining", rl_status.remaining.to_string()),
                         ("X-RateLimit-Reset", rl_status.reset_after_secs.to_string()),
                         ("Retry-After", rl_status.reset_after_secs.to_string()),
                     ];
-                    
+
                     let _ = respond_custom_error_with_headers(
-                        session, 429, "Too Many Requests",
+                        session,
+                        429,
+                        "Too Many Requests",
                         &format!("Rate limit exceeded (Max: {} req/min)", limit),
-                        &client_ip.to_string(), "RATELIMIT-001",
-                        Some(extra_headers)
-                    ).await;
+                        &client_ip.to_string(),
+                        "RATELIMIT-001",
+                        Some(extra_headers),
+                    )
+                    .await;
                     return Ok(true);
                 }
             }
@@ -1248,7 +1339,9 @@ impl ProxyHttp for JarsWafProxy {
 
         // 2.6. API Security (JWT)
         if path.starts_with("/api/") {
-            if let Err(reason) = crate::rules::api_security::validate_jwt_structure(&session.req_header().headers) {
+            if let Err(reason) =
+                crate::rules::api_security::validate_jwt_structure(&session.req_header().headers)
+            {
                 let entry = crate::logging::WafLogEntry {
                     timestamp: chrono::Utc::now().to_rfc3339(),
                     client_ip: client_ip.to_string(),
@@ -1259,7 +1352,15 @@ impl ProxyHttp for JarsWafProxy {
                     reason: reason.to_string(),
                 };
                 let _ = self.log_tx.try_send(entry);
-                let _ = respond_custom_error(session, 401, "Unauthorized", reason, &client_ip.to_string(), "API-JWT-001").await;
+                let _ = respond_custom_error(
+                    session,
+                    401,
+                    "Unauthorized",
+                    reason,
+                    &client_ip.to_string(),
+                    "API-JWT-001",
+                )
+                .await;
                 return Ok(true);
             }
         }
@@ -1293,7 +1394,7 @@ impl ProxyHttp for JarsWafProxy {
                 reason: reason.clone(),
             };
             let _ = self.log_tx.try_send(entry);
-            
+
             if vhost_cfg.deception_mode {
                 tracing::info!("Deception mode triggered for: {}", client_ip);
                 let fake_json = r#"{
@@ -1306,9 +1407,25 @@ impl ProxyHttp for JarsWafProxy {
         "debug_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fake_token"
     }
 }"#;
-                let _ = respond_custom_error(session, 200, "OK", fake_json, &client_ip.to_string(), &rule_id).await;
+                let _ = respond_custom_error(
+                    session,
+                    200,
+                    "OK",
+                    fake_json,
+                    &client_ip.to_string(),
+                    &rule_id,
+                )
+                .await;
             } else {
-                let _ = respond_custom_error(session, 403, "Access Denied", &reason, &client_ip.to_string(), &rule_id).await;
+                let _ = respond_custom_error(
+                    session,
+                    403,
+                    "Access Denied",
+                    &reason,
+                    &client_ip.to_string(),
+                    &rule_id,
+                )
+                .await;
             }
             return Ok(true);
         }
@@ -1612,7 +1729,8 @@ impl ProxyHttp for JarsWafProxy {
                     .and_then(|h| h.to_str().ok())
                     .map(|s| s.to_string());
 
-                let mut headers_map = ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
+                let mut headers_map =
+                    ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
                 for (name, value) in req_header.headers.iter() {
                     if let Ok(val_str) = value.to_str() {
                         headers_map.insert(name.to_string(), val_str.to_string());
@@ -1624,8 +1742,12 @@ impl ProxyHttp for JarsWafProxy {
             if let Some((_, vhost_cfg)) = crate::vhost::match_vhost(host.as_deref(), &config) {
                 // 2.7. API Security (GraphQL)
                 if path.starts_with("/graphql") || path.starts_with("/api/graphql") {
-                    if let Err(reason) = crate::rules::api_security::check_graphql_depth(&ctx.body_buffer, 5) {
-                        let client_ip_str = ctx.client_ip.map_or("Unknown".to_string(), |ip| ip.to_string());
+                    if let Err(reason) =
+                        crate::rules::api_security::check_graphql_depth(&ctx.body_buffer, 5)
+                    {
+                        let client_ip_str = ctx
+                            .client_ip
+                            .map_or("Unknown".to_string(), |ip| ip.to_string());
                         let entry = crate::logging::WafLogEntry {
                             timestamp: chrono::Utc::now().to_rfc3339(),
                             client_ip: client_ip_str.clone(),
@@ -1714,7 +1836,9 @@ impl ProxyHttp for JarsWafProxy {
         // Circuit breaker: increment failure count for backend
         if let Some(ref backend) = _ctx.vhost_backend_resolved {
             if let Some(entry) = BACKEND_FAILURE_COUNTS.get(backend) {
-                let prev = entry.value().fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let prev = entry
+                    .value()
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if prev + 1 == CIRCUIT_BREAKER_THRESHOLD {
                     tracing::warn!(
                         "Circuit breaker tripped for backend {} after {} consecutive failures",
@@ -1723,14 +1847,24 @@ impl ProxyHttp for JarsWafProxy {
                     );
                 }
             } else {
-                BACKEND_FAILURE_COUNTS.insert(backend.clone(), std::sync::atomic::AtomicUsize::new(1));
+                BACKEND_FAILURE_COUNTS
+                    .insert(backend.clone(), std::sync::atomic::AtomicUsize::new(1));
             }
         }
 
-        let client_ip_str = session.client_addr()
+        let client_ip_str = session
+            .client_addr()
             .and_then(|addr| addr.as_inet().map(|i| i.ip().to_string()))
             .unwrap_or_else(|| "Unknown".to_string());
-        let _ = respond_custom_error(session, code, "Gateway Error", "Failed to connect to backend application. It might be offline or starting up.", &client_ip_str, "GATEWAY-ERR-502").await;
+        let _ = respond_custom_error(
+            session,
+            code,
+            "Gateway Error",
+            "Failed to connect to backend application. It might be offline or starting up.",
+            &client_ip_str,
+            "GATEWAY-ERR-502",
+        )
+        .await;
 
         code
     }
@@ -1740,13 +1874,13 @@ pub async fn flush_suspicious_ips_to_blocklist() {
     use std::time::Instant;
     let mut ips_to_block = Vec::new();
     let now = Instant::now();
-    
+
     crate::SUSPICIOUS_IPS.retain(|ip, &mut ts| {
         if now.duration_since(ts).as_secs() < 5 {
             ips_to_block.push(*ip);
-            false 
+            false
         } else {
-            false 
+            false
         }
     });
 

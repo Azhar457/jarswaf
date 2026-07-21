@@ -6,19 +6,19 @@ use serde::{Deserialize, Serialize};
 pub struct ComplianceEvent {
     #[serde(rename = "@timestamp")]
     pub timestamp: String,
-    
+
     pub event: EventMeta,
     pub source: SourceMeta,
     pub http: HttpMeta,
     pub rule: RuleMeta,
-    
+
     /// List of compliance tags, e.g., ["PCI-DSS-Req-10", "HIPAA-Audit"]
     pub compliance_tags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EventMeta {
-    pub action: String, // "allowed", "blocked", "rate_limited"
+    pub action: String,   // "allowed", "blocked", "rate_limited"
     pub category: String, // "web", "network", "api"
     pub reason: String,
 }

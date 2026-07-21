@@ -158,35 +158,45 @@ pub fn mask_body(body: &str, cfg: &crate::config::DlpConfig) -> String {
     }
 
     if cfg.jwt_token {
-        result = JWT_REGEX.replace_all(&result, "[REDACTED-JWT]").into_owned();
+        result = JWT_REGEX
+            .replace_all(&result, "[REDACTED-JWT]")
+            .into_owned();
     }
 
     if cfg.cloud_secrets {
-        result = CLOUD_SECRETS_REGEX.replace_all(&result, "[REDACTED-SECRET]").into_owned();
+        result = CLOUD_SECRETS_REGEX
+            .replace_all(&result, "[REDACTED-SECRET]")
+            .into_owned();
     }
 
     if cfg.password_in_body {
-        result = PASSWORD_REGEX.replace_all(&result, |caps: &regex::Captures| {
-            let matched = &caps[0];
-            if let Some(pos) = matched.find(':').or_else(|| matched.find('=')) {
-                let key_part = &matched[..=pos];
-                format!("{} \"[REDACTED-PASSWORD]\"", key_part)
-            } else {
-                "[REDACTED-PASSWORD]".to_string()
-            }
-        }).into_owned();
+        result = PASSWORD_REGEX
+            .replace_all(&result, |caps: &regex::Captures| {
+                let matched = &caps[0];
+                if let Some(pos) = matched.find(':').or_else(|| matched.find('=')) {
+                    let key_part = &matched[..=pos];
+                    format!("{} \"[REDACTED-PASSWORD]\"", key_part)
+                } else {
+                    "[REDACTED-PASSWORD]".to_string()
+                }
+            })
+            .into_owned();
     }
 
     if cfg.email {
-        result = EMAIL_REGEX.replace_all(&result, "[REDACTED-EMAIL]").into_owned();
+        result = EMAIL_REGEX
+            .replace_all(&result, "[REDACTED-EMAIL]")
+            .into_owned();
     }
 
     // Custom patterns
     for (name, pattern) in &cfg.custom_patterns {
         if let Ok(re) = Regex::new(pattern) {
-            result = re.replace_all(&result, |_: &regex::Captures| {
-                format!("[REDACTED-CUSTOM-{}]", name)
-            }).into_owned();
+            result = re
+                .replace_all(&result, |_: &regex::Captures| {
+                    format!("[REDACTED-CUSTOM-{}]", name)
+                })
+                .into_owned();
         }
     }
 
@@ -216,12 +226,12 @@ mod tests {
     #[test]
     fn test_scan_and_mask_dlp() {
         let mut cfg = test_dlp_config();
-        
+
         let cc_body = "My visa is 4111 1111 1111 1111.";
         let findings = scan_body(cc_body, &cfg);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule, "DLP-CC");
-        
+
         let masked = mask_body(cc_body, &cfg);
         assert_eq!(masked, "My visa is [REDACTED-CC].");
 
@@ -235,4 +245,3 @@ mod tests {
         assert_eq!(masked_allowlist, email_body);
     }
 }
-
