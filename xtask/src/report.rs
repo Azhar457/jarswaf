@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct ComplianceEvent {
     #[serde(rename = "@timestamp")]
@@ -23,6 +24,7 @@ struct SourceMeta {
     ip: String,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct RuleMeta {
     id: String,
