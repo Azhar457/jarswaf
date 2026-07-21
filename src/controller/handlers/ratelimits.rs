@@ -112,7 +112,10 @@ pub async fn post_ratelimits_handler(
                 &state.db_path,
                 "controller",
                 "RATELIMIT_UPDATE",
-                &format!("{} rate limit policies applied", cfg.rate_limit_policies.len()),
+                &format!(
+                    "{} rate limit policies applied",
+                    cfg.rate_limit_policies.len()
+                ),
             );
 
             StatusCode::OK.into_response()

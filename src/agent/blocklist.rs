@@ -40,7 +40,11 @@ pub async fn start_blocklist_sync(
                             logging::save_blocklist_to_file(&blocklist_file_path, &new_blocklist);
                             blocklist.clear();
                             for ip in &new_blocklist {
-                                blocklist.insert(*ip, std::time::Instant::now() + std::time::Duration::from_secs(31536000)); // Default 1 year for reputation sync
+                                blocklist.insert(
+                                    *ip,
+                                    std::time::Instant::now()
+                                        + std::time::Duration::from_secs(31536000),
+                                ); // Default 1 year for reputation sync
                             }
                             // Enforce max entries to cap memory usage
                             if blocklist.len() > proxy_engine::BLOCKLIST_MAX_ENTRIES {
@@ -100,7 +104,10 @@ pub async fn start_blocklist_sync(
                 logging::save_blocklist_to_file(&blocklist_file_path_clone, &ips);
                 blocklist_clone.clear();
                 for ip in &ips {
-                    blocklist_clone.insert(*ip, std::time::Instant::now() + std::time::Duration::from_secs(31536000));
+                    blocklist_clone.insert(
+                        *ip,
+                        std::time::Instant::now() + std::time::Duration::from_secs(31536000),
+                    );
                 }
             }
         } else {
@@ -108,7 +115,10 @@ pub async fn start_blocklist_sync(
             let loaded = logging::load_blocklist_from_file(&blocklist_file_path);
             blocklist.clear();
             for ip in &loaded {
-                blocklist.insert(*ip, std::time::Instant::now() + std::time::Duration::from_secs(31536000));
+                blocklist.insert(
+                    *ip,
+                    std::time::Instant::now() + std::time::Duration::from_secs(31536000),
+                );
             }
         }
 

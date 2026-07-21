@@ -1,12 +1,12 @@
 use crate::config::GossipConfig;
 use async_trait::async_trait;
 use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit, Nonce};
+use rand::{thread_rng, RngCore};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
-use rand::{RngCore, thread_rng};
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ impl GossipNode {
         psk_bytes[..psk_len].copy_from_slice(&self.config.psk.as_bytes()[..psk_len]);
         let key = Key::from(psk_bytes);
         let cipher = ChaCha20Poly1305::new(&key);
-        
+
         let mut nonce_bytes = [0u8; 12];
         thread_rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from(nonce_bytes);
@@ -194,7 +194,8 @@ impl GossipNode {
                     let mut nonce_bytes = [0u8; 12];
                     nonce_bytes.copy_from_slice(&buf[4..4 + NONCE_LEN]);
                     let nonce = Nonce::from(nonce_bytes);
-                    let ciphertext_len = u16::from_le_bytes([buf[4 + NONCE_LEN], buf[4 + NONCE_LEN + 1]]) as usize;
+                    let ciphertext_len =
+                        u16::from_le_bytes([buf[4 + NONCE_LEN], buf[4 + NONCE_LEN + 1]]) as usize;
                     let expected_total = header_len + ciphertext_len;
                     if n < expected_total {
                         debug!("Gossip: truncated payload from {src}");
@@ -213,7 +214,9 @@ impl GossipNode {
                                 Err(e) => debug!("Gossip: invalid payload from {src}: {e}"),
                             }
                         }
-                        Err(_) => debug!("Gossip: decryption failed from {src} (possible forgery or wrong key)"),
+                        Err(_) => debug!(
+                            "Gossip: decryption failed from {src} (possible forgery or wrong key)"
+                        ),
                     }
                 }
                 Err(e) => {

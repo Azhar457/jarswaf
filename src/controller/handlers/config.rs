@@ -73,7 +73,10 @@ pub async fn post_config_handler(
         &state.db_path,
         "controller",
         "CONFIG_UPDATE",
-        &format!("waf_enabled={}, logging={}, log_limit={}MB", payload.waf_enabled, payload.logging_enabled, payload.log_limit_mb),
+        &format!(
+            "waf_enabled={}, logging={}, log_limit={}MB",
+            payload.waf_enabled, payload.logging_enabled, payload.log_limit_mb
+        ),
     );
     info!("Config updated via API — audit logged");
 
@@ -235,17 +238,11 @@ echo "✅ jarsWAF Agent installation script configuration completed."
     )
 }
 
-pub async fn get_config_poll_handler(
-    State(state): State<ControllerState>,
-) -> impl IntoResponse {
+pub async fn get_config_poll_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let mut rx = state.config_tx.subscribe();
-    
+
     match tokio::time::timeout(tokio::time::Duration::from_secs(30), rx.recv()).await {
-        Ok(Ok(cfg)) => {
-            (StatusCode::OK, Json(cfg)).into_response()
-        }
-        _ => {
-            StatusCode::NOT_MODIFIED.into_response()
-        }
+        Ok(Ok(cfg)) => (StatusCode::OK, Json(cfg)).into_response(),
+        _ => StatusCode::NOT_MODIFIED.into_response(),
     }
 }

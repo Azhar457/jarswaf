@@ -3,7 +3,10 @@ use tracing::warn;
 
 /// Checks for WAF evasion techniques such as HTTP Request Smuggling and Path Traversal Bypass.
 /// Returns `Some((reason, detail))` if evasion is detected, otherwise `None`.
-pub fn check_evasion(path: &str, headers: &AHashMap<String, String>) -> Option<(&'static str, String)> {
+pub fn check_evasion(
+    path: &str,
+    headers: &AHashMap<String, String>,
+) -> Option<(&'static str, String)> {
     // 1. HTTP Request Smuggling Checks
     if check_smuggling(headers) {
         return Some((
@@ -53,13 +56,14 @@ fn check_encoding_bypass(raw_url: &str) -> bool {
     // Double encoded dot %252e, double encoded slash %252f, %255c
     // Unicode traversal: %c0%af, %c1%9c, %u2215, %u002f
     let lower_url = raw_url.to_lowercase();
-    
+
     if lower_url.contains("%252e") || lower_url.contains("%252f") || lower_url.contains("%255c") {
         warn!("Evasion detected: Double URL encoding");
         return true;
     }
 
-    if lower_url.contains("%c0%af") || lower_url.contains("%c1%9c") || lower_url.contains("%u2215") {
+    if lower_url.contains("%c0%af") || lower_url.contains("%c1%9c") || lower_url.contains("%u2215")
+    {
         warn!("Evasion detected: Unicode overlong encoding for path traversal");
         return true;
     }
@@ -82,7 +86,7 @@ mod tests {
         let mut headers = AHashMap::new();
         headers.insert("content-length".to_string(), "100".to_string());
         headers.insert("transfer-encoding".to_string(), "chunked".to_string());
-        
+
         assert!(check_evasion("/", &headers).is_some());
     }
 
@@ -92,4 +96,3 @@ mod tests {
         assert!(check_evasion("/?path=%252e%252e%252fetc%252fpasswd", &headers).is_some());
     }
 }
-

@@ -1,6 +1,6 @@
 use anyhow::Context;
-use std::process::Command;
 use std::env;
+use std::process::Command;
 
 mod redteam;
 mod report;
@@ -13,12 +13,21 @@ async fn main() -> anyhow::Result<()> {
     match command {
         "ebpf" => build_ebpf()?,
         "redteam" => {
-            let target = args.get(2).map(|s| s.as_str()).unwrap_or("http://127.0.0.1:8080");
+            let target = args
+                .get(2)
+                .map(|s| s.as_str())
+                .unwrap_or("http://127.0.0.1:8080");
             redteam::run_redteam(target).await;
         }
         "generate-report" => {
-            let log_path = args.get(2).map(|s| s.as_str()).unwrap_or("jarswaf.log.ecs.json");
-            let output_path = args.get(3).map(|s| s.as_str()).unwrap_or("compliance_report.md");
+            let log_path = args
+                .get(2)
+                .map(|s| s.as_str())
+                .unwrap_or("jarswaf.log.ecs.json");
+            let output_path = args
+                .get(3)
+                .map(|s| s.as_str())
+                .unwrap_or("compliance_report.md");
             report::generate_report(log_path, output_path);
         }
         _ => {

@@ -206,10 +206,10 @@ pub fn write_audit_log(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let conn = rusqlite::Connection::open(db_path)?;
     let timestamp = chrono::Utc::now().to_rfc3339();
-    
+
     // Partially mask the token for security in DB
     let masked_token = if token.len() > 8 {
-        format!("{}...{}", &token[..4], &token[token.len()-4..])
+        format!("{}...{}", &token[..4], &token[token.len() - 4..])
     } else {
         "***".to_string()
     };
@@ -267,7 +267,11 @@ fn write_to_local_log(entry: &WafLogEntry, log_path: &str) {
 
     // Also write compliance log in ECS format
     let compliance_path = format!("{}.ecs.json", log_path);
-    if let Ok(mut compliance_file) = OpenOptions::new().create(true).append(true).open(&compliance_path) {
+    if let Ok(mut compliance_file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&compliance_path)
+    {
         let ecs_event = crate::compliance::map_to_compliance_event(entry);
         if let Ok(json) = serde_json::to_string(&ecs_event) {
             let _ = writeln!(compliance_file, "{}", json);
@@ -563,7 +567,9 @@ impl SqliteLogWorker {
         match res {
             Ok(Ok(())) => tracing::debug!("Inserted {batch_len} logs into SQLite"),
             Ok(Err(e)) => tracing::error!("Failed SQLite insert ({batch_len}): {e}"),
-            Err(_) => tracing::error!("Blocking task panicked inserting {batch_len} logs into SQLite"),
+            Err(_) => {
+                tracing::error!("Blocking task panicked inserting {batch_len} logs into SQLite")
+            }
         }
     }
 }
@@ -572,7 +578,9 @@ async fn log_worker_sqlite(mut rx: Receiver<WafLogEntry>, cfg: LogWorkerConfig) 
     let writer = match SqliteLogWorker::new(&cfg) {
         Ok(w) => w,
         Err(e) => {
-            tracing::error!("Failed to open SQLite connection, falling back to file-only mode: {e}");
+            tracing::error!(
+                "Failed to open SQLite connection, falling back to file-only mode: {e}"
+            );
             return log_worker_file(rx, cfg).await;
         }
     };

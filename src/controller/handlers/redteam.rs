@@ -1,21 +1,21 @@
 use axum::{extract::State, response::IntoResponse, Json};
 use serde_json::json;
 
+use crate::config;
 use crate::controller::ControllerState;
 use crate::rules::redteam::run_red_team_suite;
 use crate::rules::RuleEngine;
-use crate::config;
 
 pub async fn redteam_lab(State(state): State<ControllerState>) -> impl IntoResponse {
     let cfg = config::load_config(&state.config_path).unwrap_or_default();
-    
+
     // Instantiate a temporary RuleEngine with current config to run tests
     let engine = RuleEngine::new(&cfg);
-    
+
     // Run tests with all rules enabled
     let enabled_rules = vec!["*".to_string()];
     let report = run_red_team_suite(&engine, &enabled_rules);
-    
+
     let mut results = Vec::new();
     for r in report.results {
         results.push(json!({
@@ -28,7 +28,7 @@ pub async fn redteam_lab(State(state): State<ControllerState>) -> impl IntoRespo
             "correct": r.correct,
         }));
     }
-    
+
     let summary = json!({
         "total": report.total,
         "passed": report.passed,

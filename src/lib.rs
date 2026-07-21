@@ -1,28 +1,28 @@
 pub mod agent;
+pub mod compliance;
 pub mod config;
 pub mod controller;
 pub mod dlp;
+pub mod gossip;
+pub mod grpc;
 pub mod logging;
 pub mod metrics;
 pub mod proxy;
 pub mod proxy_engine;
+pub mod rasp;
 pub mod rules;
 pub mod tls;
 pub mod types;
 pub mod vhost;
+pub mod wasm;
 pub mod webhook;
 pub mod xdp;
-pub mod gossip;
-pub mod wasm;
-pub mod compliance;
-pub mod rasp;
-pub mod grpc;
 
-use once_cell::sync::Lazy;
-use std::sync::Arc;
-use std::net::IpAddr;
-use std::time::Instant;
 use dashmap::DashMap;
+use once_cell::sync::Lazy;
+use std::net::IpAddr;
+use std::sync::Arc;
+use std::time::Instant;
 
 pub use types::is_local_ip;
 

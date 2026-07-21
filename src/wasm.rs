@@ -75,12 +75,7 @@ impl WasmPluginEngine {
 
     /// Run all loaded plugins against a request.
     /// Returns `Some((rule_id, message))` on the first plugin that blocks.
-    pub fn inspect_request(
-        &self,
-        path: &str,
-        query: &str,
-        body: &str,
-    ) -> Option<(String, String)> {
+    pub fn inspect_request(&self, path: &str, query: &str, body: &str) -> Option<(String, String)> {
         for plugin in &self.plugins {
             match self.run_plugin(plugin, path, query, body) {
                 Ok(true) => {
@@ -102,13 +97,7 @@ impl WasmPluginEngine {
     }
 
     /// Execute a single plugin. Returns `true` if the request should be blocked.
-    fn run_plugin(
-        &self,
-        plugin: &WasmPlugin,
-        path: &str,
-        query: &str,
-        body: &str,
-    ) -> Result<bool> {
+    fn run_plugin(&self, plugin: &WasmPlugin, path: &str, query: &str, body: &str) -> Result<bool> {
         let mut store = Store::new(&self.engine, ());
         let instance = Instance::new(&mut store, &plugin.module, &[])?;
 
@@ -278,7 +267,9 @@ mod tests {
         let module = Module::new(&engine, PASS_ALL_WAT).expect("WAT compile failed");
         let wasm_engine = WasmPluginEngine::from_module(engine, "pass-all", module);
 
-        assert!(wasm_engine.inspect_request("/anything", "q=1", "body").is_none());
+        assert!(wasm_engine
+            .inspect_request("/anything", "q=1", "body")
+            .is_none());
         assert!(wasm_engine.inspect_request("/wp-admin", "", "").is_none());
     }
 }

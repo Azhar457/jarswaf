@@ -69,7 +69,6 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![("content-type", "application/json")],
             expect_blocked: true,
         },
-
         // ─── A03:2021 — Injection (XSS) ─────────────────────────────
         AttackPayload {
             id: "XSS-001",
@@ -104,7 +103,6 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![],
             expect_blocked: true,
         },
-
         // ─── A03:2021 — Injection (Command) ─────────────────────────
         AttackPayload {
             id: "CMDI-001",
@@ -128,7 +126,6 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![],
             expect_blocked: true,
         },
-
         // ─── A01:2021 — Broken Access Control (Path Traversal) ──────
         AttackPayload {
             id: "LFI-001",
@@ -152,7 +149,6 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![],
             expect_blocked: true,
         },
-
         // ─── A05:2021 — Security Misconfiguration (SSRF) ────────────
         AttackPayload {
             id: "SSRF-001",
@@ -165,7 +161,6 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![],
             expect_blocked: true,
         },
-
         // ─── A08:2021 — Software and Data Integrity (XXE) ───────────
         AttackPayload {
             id: "XXE-001",
@@ -178,7 +173,6 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![("content-type", "application/xml")],
             expect_blocked: true,
         },
-
         // ─── A04:2021 — Insecure Design (SSTI) ──────────────────────
         AttackPayload {
             id: "SSTI-001",
@@ -191,7 +185,6 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![],
             expect_blocked: true,
         },
-
         // ─── A07:2021 — Identification and Auth (Bot Detection) ─────
         AttackPayload {
             id: "BOT-001",
@@ -215,7 +208,6 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![("user-agent", "curl/7.88.1")],
             expect_blocked: true,
         },
-
         // ─── Clean traffic (should pass) ─────────────────────────────
         AttackPayload {
             id: "CLEAN-001",
@@ -354,11 +346,7 @@ mod tests {
         let report = run_red_team_suite(&engine, &enabled);
 
         // Most attack payloads should be caught
-        let attack_results: Vec<_> = report
-            .results
-            .iter()
-            .filter(|r| r.expected_block)
-            .collect();
+        let attack_results: Vec<_> = report.results.iter().filter(|r| r.expected_block).collect();
         let caught = attack_results.iter().filter(|r| r.correct).count();
 
         // At minimum, 50% of attacks should be caught by default rules

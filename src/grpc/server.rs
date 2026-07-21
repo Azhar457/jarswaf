@@ -11,7 +11,8 @@ pub struct WafManagerService {
 
 #[tonic::async_trait]
 impl WafSync for WafManagerService {
-    type SyncPoliciesStream = Pin<Box<dyn Stream<Item = Result<PolicySyncResponse, Status>> + Send + Sync + 'static>>;
+    type SyncPoliciesStream =
+        Pin<Box<dyn Stream<Item = Result<PolicySyncResponse, Status>> + Send + Sync + 'static>>;
 
     async fn sync_policies(
         &self,
@@ -34,7 +35,9 @@ impl WafSync for WafManagerService {
         }
 
         // Return the receiver stream
-        Ok(Response::new(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx))))
+        Ok(Response::new(Box::pin(
+            tokio_stream::wrappers::ReceiverStream::new(rx),
+        )))
     }
 
     async fn stream_telemetry(
@@ -44,14 +47,20 @@ impl WafSync for WafManagerService {
         let mut stream = request.into_inner();
 
         while let Some(event) = stream.message().await? {
-            info!("Received telemetry from {}: {} - {}", event.agent_id, event.event_type, event.details);
+            info!(
+                "Received telemetry from {}: {} - {}",
+                event.agent_id, event.event_type, event.details
+            );
         }
 
         Ok(Response::new(TelemetryAck { success: true }))
     }
 }
 
-pub async fn run_manager_server(port: u16, token: String) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_manager_server(
+    port: u16,
+    token: String,
+) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{}", port).parse()?;
     let service = WafManagerService { auth_token: token };
 

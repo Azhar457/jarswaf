@@ -34,7 +34,7 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
         if let Err(e) = xdp.attach_rasp(Some(rasp_tx)) {
             tracing::error!("Failed to attach RASP eBPF: {}", e);
         }
-        
+
         tokio::spawn(async move {
             while rasp_rx.recv().await.is_some() {
                 tracing::warn!("RASP Alert received! Flushing suspicious IPs to blocklist!");
@@ -43,13 +43,12 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
         });
     }
 
-
     // Initialize Gossip Protocol
     if cfg.gossip.enabled {
         info!("Starting Gossip protocol on {}", cfg.gossip.bind_addr);
         let mut gossip = crate::gossip::GossipNode::new(cfg.gossip.clone());
         gossip.set_handler(Arc::new(rules::WafGossipHandler));
-        
+
         if let Err(e) = gossip.start().await {
             tracing::error!("Failed to start Gossip node: {}", e);
         } else {
@@ -143,7 +142,10 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
             );
             let mut xdp = crate::XDP_MANAGER.lock().await;
             for ip in loaded {
-                blocklist.insert(ip, std::time::Instant::now() + std::time::Duration::from_secs(31536000));
+                blocklist.insert(
+                    ip,
+                    std::time::Instant::now() + std::time::Duration::from_secs(31536000),
+                );
                 if let std::net::IpAddr::V4(ipv4) = ip {
                     let _ = xdp.block_ip(ipv4);
                 }
@@ -153,7 +155,7 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
     };
 
     let blocklist = Arc::new(initial_blocklist);
-    
+
     // Spawn background sweeper for expired blocklist entries
     let sweeper_blocklist = blocklist.clone();
     tokio::spawn(async move {
@@ -161,7 +163,7 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
         loop {
             interval.tick().await;
             let now = std::time::Instant::now();
-            
+
             // Clean up blocklist
             let mut expired_ips = Vec::new();
             for entry in sweeper_blocklist.iter() {
@@ -276,20 +278,26 @@ pub async fn run_agent(config_path: &str, controller: Option<String>, token: Opt
         // Fetch immediately on startup
         let ips = rules::threat_intel::fetch_threat_intel_ips().await;
         for ip in ips {
-            threat_blocklist.insert(ip, std::time::Instant::now() + std::time::Duration::from_secs(86400));
+            threat_blocklist.insert(
+                ip,
+                std::time::Instant::now() + std::time::Duration::from_secs(86400),
+            );
             if let std::net::IpAddr::V4(ipv4) = ip {
                 let mut xdp = crate::XDP_MANAGER.lock().await;
                 let _ = xdp.block_ip(ipv4);
             }
         }
-        
+
         // Then fetch periodically every 24 hours
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(86400));
         loop {
             interval.tick().await;
             let ips = rules::threat_intel::fetch_threat_intel_ips().await;
             for ip in ips {
-                threat_blocklist.insert(ip, std::time::Instant::now() + std::time::Duration::from_secs(86400));
+                threat_blocklist.insert(
+                    ip,
+                    std::time::Instant::now() + std::time::Duration::from_secs(86400),
+                );
                 if let std::net::IpAddr::V4(ipv4) = ip {
                     let mut xdp = crate::XDP_MANAGER.lock().await;
                     let _ = xdp.block_ip(ipv4);

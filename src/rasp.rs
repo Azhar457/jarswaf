@@ -14,7 +14,10 @@ pub struct ExecveEvent {
 }
 
 #[cfg(target_os = "linux")]
-pub async fn start_rasp_monitor(mut perf_array: PerfEventArray<aya::maps::MapData>, tx: tokio::sync::mpsc::Sender<()>) {
+pub async fn start_rasp_monitor(
+    mut perf_array: PerfEventArray<aya::maps::MapData>,
+    tx: tokio::sync::mpsc::Sender<()>,
+) {
     let cpus = match online_cpus() {
         Ok(c) => c,
         Err(e) => {
@@ -31,7 +34,7 @@ pub async fn start_rasp_monitor(mut perf_array: PerfEventArray<aya::maps::MapDat
                 continue;
             }
         };
-        
+
         let thread_tx = tx.clone();
         std::thread::spawn(move || {
             loop {
@@ -54,7 +57,7 @@ fn parse_execve_event(buf: &[u8]) -> Option<ExecveEvent> {
     if buf.len() < std::mem::size_of::<ExecveEvent>() {
         return None;
     }
-    
+
     // Unsafe pointer read because it's coming from kernel perf buffer
     let event = unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const ExecveEvent) };
     Some(event)
@@ -62,11 +65,14 @@ fn parse_execve_event(buf: &[u8]) -> Option<ExecveEvent> {
 
 pub fn analyze_rasp_event(event: &ExecveEvent, tx: &tokio::sync::mpsc::Sender<()>) {
     let raw_cmd = &event.command;
-    let end = raw_cmd.iter().position(|&c| c == 0).unwrap_or(raw_cmd.len());
+    let end = raw_cmd
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(raw_cmd.len());
     let cmd = String::from_utf8_lossy(&raw_cmd[..end]).to_string();
-    
-    let is_malicious = cmd.contains("nc -e") 
-        || cmd.contains("/bin/sh") 
+
+    let is_malicious = cmd.contains("nc -e")
+        || cmd.contains("/bin/sh")
         || cmd.contains("bash -i")
         || cmd.contains("wget ")
         || cmd.contains("curl ");

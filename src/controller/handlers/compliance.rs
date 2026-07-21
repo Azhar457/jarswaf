@@ -13,11 +13,12 @@ pub struct ComplianceReport {
 pub async fn get_compliance_report_handler(
     State(state): State<ControllerState>,
 ) -> impl IntoResponse {
-    let stats = crate::logging::sqlite_get_stats(&state.db_path, 24).unwrap_or(crate::logging::Stats {
-        total_requests: 0,
-        blocked: 0,
-        rate_limited: 0,
-    });
+    let stats =
+        crate::logging::sqlite_get_stats(&state.db_path, 24).unwrap_or(crate::logging::Stats {
+            total_requests: 0,
+            blocked: 0,
+            rate_limited: 0,
+        });
 
     let audit_logs = crate::logging::sqlite_get_audit_logs(&state.db_path, 100).unwrap_or_default();
 

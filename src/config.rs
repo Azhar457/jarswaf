@@ -395,9 +395,15 @@ pub struct GossipConfig {
     pub node_id: String,
 }
 
-fn default_gossip_enabled() -> bool { false }
-fn default_gossip_bind() -> String { "0.0.0.0:7946".to_string() }
-fn default_gossip_node_id() -> String { "jarswaf-unknown".to_string() }
+fn default_gossip_enabled() -> bool {
+    false
+}
+fn default_gossip_bind() -> String {
+    "0.0.0.0:7946".to_string()
+}
+fn default_gossip_node_id() -> String {
+    "jarswaf-unknown".to_string()
+}
 
 impl Default for GossipConfig {
     fn default() -> Self {
@@ -422,7 +428,9 @@ pub struct ZeroTrustConfig {
     pub allowed_issuers: Vec<String>,
 }
 
-fn default_min_trust_score() -> f64 { 0.0 }
+fn default_min_trust_score() -> f64 {
+    0.0
+}
 
 impl Default for ZeroTrustConfig {
     fn default() -> Self {
@@ -786,4 +794,3 @@ pub struct RouteSchema {
     pub method: String,
     pub parameters: Vec<ParameterSchema>,
 }
-

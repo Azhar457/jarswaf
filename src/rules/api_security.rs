@@ -12,7 +12,7 @@ pub fn validate_jwt_structure(headers: &HeaderMap) -> Result<(), &'static str> {
                 if parts.len() != 3 {
                     return Err("Invalid JWT structure detected");
                 }
-                
+
                 // We can also decode the header/payload to ensure it's valid base64url,
                 // but for a lightweight check, just the structure is a good start.
             }
@@ -28,7 +28,7 @@ pub fn check_graphql_depth(body: &[u8], max_depth: usize) -> Result<(), &'static
         if let Some(query) = json.get("query").and_then(|q| q.as_str()) {
             let mut current_depth = 0;
             let mut max_observed = 0;
-            
+
             for c in query.chars() {
                 if c == '{' {
                     current_depth += 1;

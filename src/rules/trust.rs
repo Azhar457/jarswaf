@@ -32,7 +32,7 @@ impl Default for TrustSignals {
         Self {
             identity_verified: false,
             issuer_trusted: false,
-            geo_match: true,       // default pass if geo not configured
+            geo_match: true,          // default pass if geo not configured
             fingerprint_stable: true, // default pass if fingerprint not tracked
             reputation_clean: true,
             tls_verified: false,
@@ -54,7 +54,7 @@ struct TrustWeights {
 impl Default for TrustWeights {
     fn default() -> Self {
         Self {
-            identity: 30.0,   // identity is the heaviest signal
+            identity: 30.0, // identity is the heaviest signal
             issuer: 15.0,
             geo: 10.0,
             fingerprint: 15.0,
@@ -104,7 +104,10 @@ pub fn check_identity_token(
     headers: &AHashMap<String, String>,
     allowed_issuers: &[String],
 ) -> (bool, bool) {
-    let auth = match headers.get("authorization").or_else(|| headers.get("x-identity-token")) {
+    let auth = match headers
+        .get("authorization")
+        .or_else(|| headers.get("x-identity-token"))
+    {
         Some(v) => v,
         None => return (false, false),
     };
@@ -182,8 +185,7 @@ pub fn check_zero_trust(
     allowed_issuers: &[String],
     min_trust_score: f64,
 ) -> Option<String> {
-    let (identity_verified, issuer_trusted) =
-        check_identity_token(headers, allowed_issuers);
+    let (identity_verified, issuer_trusted) = check_identity_token(headers, allowed_issuers);
 
     let signals = TrustSignals {
         identity_verified,
@@ -275,7 +277,9 @@ fn extract_json_number(json: &str, key: &str) -> Option<i64> {
     let rest = rest.trim_start();
 
     // Parse number
-    let end = rest.find(|c: char| !c.is_ascii_digit() && c != '-').unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '-')
+        .unwrap_or(rest.len());
     rest[..end].parse::<i64>().ok()
 }
 
@@ -330,7 +334,11 @@ mod tests {
             i += 3;
         }
         // Make URL-safe
-        result.replace('+', "-").replace('/', "_").trim_end_matches('=').to_string()
+        result
+            .replace('+', "-")
+            .replace('/', "_")
+            .trim_end_matches('=')
+            .to_string()
     }
 
     #[test]
@@ -366,10 +374,10 @@ mod tests {
         let signals = TrustSignals {
             identity_verified: false,
             issuer_trusted: false,
-            geo_match: true,       // +10
+            geo_match: true,          // +10
             fingerprint_stable: true, // +15
-            reputation_clean: true,  // +20
-            tls_verified: true,     // +10
+            reputation_clean: true,   // +20
+            tls_verified: true,       // +10
         };
         // 55/100 = 0.55
         let score = calculate_trust_score(&signals);
@@ -383,7 +391,10 @@ mod tests {
             .unwrap()
             .as_secs()
             + 3600;
-        let payload = format!(r#"{{"sub":"user1","iss":"https://auth.jarswaf.local","exp":{}}}"#, future_exp);
+        let payload = format!(
+            r#"{{"sub":"user1","iss":"https://auth.jarswaf.local","exp":{}}}"#,
+            future_exp
+        );
         let token = make_jwt(&payload);
 
         let mut headers = AHashMap::new();
@@ -415,7 +426,10 @@ mod tests {
             .unwrap()
             .as_secs()
             + 3600;
-        let payload = format!(r#"{{"sub":"user1","iss":"https://evil.com","exp":{}}}"#, future_exp);
+        let payload = format!(
+            r#"{{"sub":"user1","iss":"https://evil.com","exp":{}}}"#,
+            future_exp
+        );
         let token = make_jwt(&payload);
 
         let mut headers = AHashMap::new();
@@ -423,7 +437,7 @@ mod tests {
 
         let issuers = vec!["https://auth.jarswaf.local".to_string()];
         let (id_ok, iss_ok) = check_identity_token(&headers, &issuers);
-        assert!(id_ok);   // structure valid
+        assert!(id_ok); // structure valid
         assert!(!iss_ok); // issuer not in allowed list
     }
 
@@ -457,7 +471,10 @@ mod tests {
             .unwrap()
             .as_secs()
             + 3600;
-        let payload = format!(r#"{{"sub":"admin","iss":"https://auth.local","exp":{}}}"#, future_exp);
+        let payload = format!(
+            r#"{{"sub":"admin","iss":"https://auth.local","exp":{}}}"#,
+            future_exp
+        );
         let token = make_jwt(&payload);
 
         let mut headers = AHashMap::new();
@@ -465,7 +482,10 @@ mod tests {
 
         let result = check_zero_trust(
             &headers,
-            true, true, true, true,
+            true,
+            true,
+            true,
+            true,
             &[], // no issuers configured = trust all
             0.50,
         );

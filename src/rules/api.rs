@@ -1,7 +1,7 @@
+use crate::config::RouteSchema;
 use ahash::AHashMap;
 use chrono::Utc;
 use serde_json::Value;
-use crate::config::RouteSchema;
 
 /// Validate query parameters against configured OpenAPI-style route schemas.
 ///
@@ -16,9 +16,9 @@ pub fn check_openapi_schema_validation(
     schemas: &[RouteSchema],
 ) -> Option<String> {
     // Find matching schema for this path+method
-    let schema = schemas.iter().find(|s| {
-        path_matches(&s.path, path) && s.method.eq_ignore_ascii_case(method)
-    })?;
+    let schema = schemas
+        .iter()
+        .find(|s| path_matches(&s.path, path) && s.method.eq_ignore_ascii_case(method))?;
 
     // Parse query string into key-value pairs
     let params: AHashMap<&str, &str> = query
@@ -75,9 +75,10 @@ fn path_matches(pattern: &str, actual: &str) -> bool {
         return false;
     }
 
-    pat_parts.iter().zip(act_parts.iter()).all(|(p, a)| {
-        p.starts_with('{') && p.ends_with('}') || p == a
-    })
+    pat_parts
+        .iter()
+        .zip(act_parts.iter())
+        .all(|(p, a)| p.starts_with('{') && p.ends_with('}') || p == a)
 }
 
 pub fn check_jwt_token(headers: &AHashMap<String, String>) -> Option<String> {
@@ -164,7 +165,7 @@ mod tests {
         // A valid JWT structure but expired: payload has {"exp": 1516239022}
         let expired_jwt = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJleHAiOjE1MTYyMzkwMjJ9.signature";
         headers.insert("Authorization".to_string(), expired_jwt.to_string());
-        
+
         let result = check_jwt_token(&headers);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Expired JWT"));
@@ -173,8 +174,11 @@ mod tests {
     #[test]
     fn test_jwt_validation_malformed() {
         let mut headers = AHashMap::new();
-        headers.insert("Authorization".to_string(), "Bearer invalid.token".to_string());
-        
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer invalid.token".to_string(),
+        );
+
         let result = check_jwt_token(&headers);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Malformed JWT"));
@@ -186,7 +190,7 @@ mod tests {
         // A valid JWT structure that expires in 2038: {"exp": 2147483647}
         let valid_jwt = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJleHAiOjIxNDc0ODM2NDd9.signature";
         headers.insert("Authorization".to_string(), valid_jwt.to_string());
-        
+
         let result = check_jwt_token(&headers);
         assert!(result.is_none());
     }
@@ -220,9 +224,12 @@ mod tests {
     fn test_openapi_missing_required_param() {
         let schemas = test_schemas();
         // Missing required 'page' parameter
-        let result = check_openapi_schema_validation("/api/v1/users", "active=true", "GET", &schemas);
+        let result =
+            check_openapi_schema_validation("/api/v1/users", "active=true", "GET", &schemas);
         assert!(result.is_some());
-        assert!(result.unwrap().contains("missing required parameter 'page'"));
+        assert!(result
+            .unwrap()
+            .contains("missing required parameter 'page'"));
     }
 
     #[test]
@@ -238,7 +245,12 @@ mod tests {
     fn test_openapi_boolean_type_mismatch() {
         let schemas = test_schemas();
         // 'active' must be boolean but got 'maybe'
-        let result = check_openapi_schema_validation("/api/v1/users", "page=1&active=maybe", "GET", &schemas);
+        let result = check_openapi_schema_validation(
+            "/api/v1/users",
+            "page=1&active=maybe",
+            "GET",
+            &schemas,
+        );
         assert!(result.is_some());
         assert!(result.unwrap().contains("must be boolean"));
     }
@@ -246,7 +258,12 @@ mod tests {
     #[test]
     fn test_openapi_valid_request() {
         let schemas = test_schemas();
-        let result = check_openapi_schema_validation("/api/v1/users", "page=1&active=true&search=john", "GET", &schemas);
+        let result = check_openapi_schema_validation(
+            "/api/v1/users",
+            "page=1&active=true&search=john",
+            "GET",
+            &schemas,
+        );
         assert!(result.is_none());
     }
 
@@ -254,14 +271,18 @@ mod tests {
     fn test_openapi_no_schema_match_passes() {
         let schemas = test_schemas();
         // Path not in schemas -> returns None (no schema = no validation)
-        let result = check_openapi_schema_validation("/api/v1/posts", "anything=here", "GET", &schemas);
+        let result =
+            check_openapi_schema_validation("/api/v1/posts", "anything=here", "GET", &schemas);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_path_matches_with_template() {
         assert!(path_matches("/api/v1/users/{id}", "/api/v1/users/42"));
-        assert!(!path_matches("/api/v1/users/{id}", "/api/v1/users/42/posts"));
+        assert!(!path_matches(
+            "/api/v1/users/{id}",
+            "/api/v1/users/42/posts"
+        ));
         assert!(path_matches("/api/v1/users", "/api/v1/users"));
     }
 }

@@ -40,7 +40,7 @@ pub fn generate_report(log_path: &str, output_path: &str) {
     };
 
     let reader = BufReader::new(file);
-    
+
     let mut total_events = 0;
     let mut blocked_events = 0;
     let mut compliance_counts: HashMap<String, usize> = HashMap::new();
@@ -56,9 +56,9 @@ pub fn generate_report(log_path: &str, output_path: &str) {
                 if event.event.action == "blocked" {
                     blocked_events += 1;
                 }
-                
+
                 *top_ips.entry(event.source.ip).or_insert(0) += 1;
-                
+
                 for tag in event.compliance_tags {
                     *compliance_counts.entry(tag).or_insert(0) += 1;
                 }
@@ -68,8 +68,11 @@ pub fn generate_report(log_path: &str, output_path: &str) {
 
     let mut report = String::new();
     report.push_str("# JARSWAF PCI-DSS Compliance Report\n\n");
-    report.push_str(&format!("**Generated At:** {}\n\n", chrono::Utc::now().to_rfc3339()));
-    
+    report.push_str(&format!(
+        "**Generated At:** {}\n\n",
+        chrono::Utc::now().to_rfc3339()
+    ));
+
     report.push_str("## 1. Executive Summary\n");
     report.push_str(&format!("- **Total Analyzed Events:** {}\n", total_events));
     report.push_str(&format!("- **Blocked Threats:** {}\n", blocked_events));
@@ -104,7 +107,10 @@ pub fn generate_report(log_path: &str, output_path: &str) {
             if let Err(e) = f.write_all(report.as_bytes()) {
                 println!("Failed to write report: {}", e);
             } else {
-                println!("✅ Compliance report generated successfully at: {}", output_path);
+                println!(
+                    "✅ Compliance report generated successfully at: {}",
+                    output_path
+                );
             }
         }
         Err(e) => println!("Failed to create output file: {}", e),
