@@ -1,0 +1,9 @@
+[global]
+port_http = 8081
+port_https = 8443
+mode = "manager"
+grpc_token = "secret123"
+
+[logging]
+mode = "sqlite"
+db_path = "./manager.db"

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "jarswaf.fullname" . }}-controller
+  labels:
+    {{- include "jarswaf.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "jarswaf.controllerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jarswaf.controllerSelectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: controller
+          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.controller.port }}
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: "{{ .Values.controller.env.RUST_LOG }}"
+            - name: CONFIG_PATH
+              value: "{{ .Values.controller.env.CONFIG_PATH }}"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.controller.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.controller.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/jarswaf
+              readOnly: true
+            - name: data
+              mountPath: /var/log/jarswaf
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "jarswaf.fullname" . }}-config
+        - name: data
+          emptyDir: {}

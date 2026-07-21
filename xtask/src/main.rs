@@ -1,7 +1,35 @@
 use anyhow::Context;
 use std::process::Command;
+use std::env;
 
-fn main() -> anyhow::Result<()> {
+mod redteam;
+mod report;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = env::args().collect();
+    let command = args.get(1).map(|s| s.as_str()).unwrap_or("ebpf");
+
+    match command {
+        "ebpf" => build_ebpf()?,
+        "redteam" => {
+            let target = args.get(2).map(|s| s.as_str()).unwrap_or("http://127.0.0.1:8080");
+            redteam::run_redteam(target).await;
+        }
+        "generate-report" => {
+            let log_path = args.get(2).map(|s| s.as_str()).unwrap_or("jarswaf.log.ecs.json");
+            let output_path = args.get(3).map(|s| s.as_str()).unwrap_or("compliance_report.md");
+            report::generate_report(log_path, output_path);
+        }
+        _ => {
+            println!("Unknown command. Use 'ebpf', 'redteam', or 'generate-report'.");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn build_ebpf() -> anyhow::Result<()> {
     println!("Building eBPF program...");
 
     let mut workspace_root = std::path::PathBuf::from(

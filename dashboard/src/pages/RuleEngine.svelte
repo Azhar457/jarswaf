@@ -433,7 +433,7 @@
   <!-- Header -->
   <div class="flex justify-between items-center gap-4">
     <div>
-      <h1 class="text-2xl font-bold tracking-tight text-white md:text-3xl">Security Engine</h1>
+      <h1 class="text-2xl font-bold tracking-tight text-text-primary md:text-3xl">Security Engine</h1>
       <p class="text-text-secondary text-sm mt-1">
         Configure WAF Core Rule Sets (CRS) and custom detection rules per Virtual Host.
       </p>
@@ -444,7 +444,7 @@
       <span class="text-xs font-bold text-text-secondary uppercase tracking-wider hidden sm:inline">Active Host</span>
       <select
         bind:value={selectedVhostIndex}
-        class="bg-slate-950/50 border border-border-muted rounded-xl px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
+        class="bg-bg-input border border-border-default rounded-xl px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
       >
         {#each $vhostsList as vhost, idx}
           <option value={idx} class="bg-bg-secondary">{vhost.name} ({vhost.hosts[0] || "*"})</option>
@@ -458,7 +458,7 @@
     <div class="lg:col-span-2 space-y-6">
       <!-- WAF Modules Grid -->
       <div class="space-y-4">
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+        <h2 class="text-lg font-bold text-text-primary flex items-center gap-2">
           <Shield size={18} class="text-accent-blue" />
           <span>Core Rule Sets (CRS)</span>
         </h2>
@@ -467,17 +467,17 @@
           {#each presetGroups as group}
             {@const isEnabled = $vhostsList[selectedVhostIndex]?.rules?.includes(group.rule_pattern) || false}
             <Card
-              className="flex items-center p-5 border-border-muted transition-all duration-200"
+              className="flex items-center p-6 border-border-default transition-all duration-200"
               interactive={true}
             >
               <div
-                class="p-3 bg-slate-950/60 border border-border-muted/80 rounded-2xl text-text-muted hover:text-accent-blue transition-colors shadow-inner mr-4 shrink-0"
+                class="p-3 bg-bg-input border border-border-default/80 rounded-2xl text-text-muted hover:text-accent-blue transition-colors shadow-inner mr-5 shrink-0"
               >
                 <svelte:component this={group.icon} size={20} />
               </div>
               <div class="flex-1 min-w-0 pr-4">
                 <div class="flex items-center gap-2">
-                  <h3 class="font-bold text-white text-sm truncate">{group.name}</h3>
+                  <h3 class="font-bold text-text-primary text-sm truncate">{group.name}</h3>
                   <span class={`text-[9px] font-extrabold px-1.5 py-0.5 rounded tracking-wider ${group.severity === "CRITICAL" ? "bg-red-500/10 text-red-500 border border-red-500/20" : group.severity === "HIGH" ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "bg-blue-500/10 text-blue-500 border border-blue-500/20"}`}>
                     {group.severity}
                   </span>
@@ -512,7 +512,7 @@
       <!-- Custom Rules Table -->
       <div class="space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+          <h2 class="text-lg font-bold text-text-primary flex items-center gap-2">
             <Terminal size={18} class="text-accent-blue" />
             <span>VHost Custom Rules</span>
           </h2>
@@ -602,11 +602,11 @@
     </div>
 
     <!-- Right Panel: Rule Builder Form & Sandbox -->
-    <div class="space-y-6">
+    <div class="flex flex-col gap-8">
       {#if showForm}
-        <Card className="flex flex-col gap-4 border-accent-blue/30 shadow-glow-blue/5">
+        <Card className="flex flex-col gap-5 border-accent-blue/30 shadow-glow-blue/5 p-6 md:p-8">
           <div class="flex items-center justify-between border-b border-border-muted/80 pb-3">
-            <h3 class="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+            <h3 class="font-bold text-text-primary flex items-center gap-2 text-sm uppercase tracking-wider">
               <Terminal size={16} class="text-accent-blue" />
               <span>{editingRuleId ? "Edit Custom Rule" : "New Custom Rule"}</span>
             </h3>
@@ -632,7 +632,7 @@
                 <select
                   id="custom_rule_field"
                   bind:value={conditionFieldType}
-                  class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
+                  class="w-full bg-bg-input border border-border-default rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
                 >
                   <option value="path" class="bg-bg-secondary">URL Path</option>
                   <option value="query" class="bg-bg-secondary">Query Param</option>
@@ -648,7 +648,7 @@
                 <select
                   id="custom_rule_op"
                   bind:value={operator}
-                  class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
+                  class="w-full bg-bg-input border border-border-default rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all"
                 >
                   <option value="contains" class="bg-bg-secondary">Contains</option>
                   <option value="equals" class="bg-bg-secondary">Equals exactly</option>
@@ -684,7 +684,7 @@
               <select
                 id="custom_rule_action"
                 bind:value={action}
-                class="w-full bg-slate-950/50 border border-border-muted rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all font-bold"
+                class="w-full bg-bg-input border border-border-default rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue transition-all font-bold"
               >
                 <option value="block" class="bg-bg-secondary">Block (403)</option>
                 <option value="redirect" class="bg-bg-secondary">Redirect (302)</option>
@@ -723,9 +723,9 @@
       {/if}
 
       <!-- Sandbox -->
-      <Card className="flex flex-col gap-4">
+      <Card className="flex flex-col gap-4 p-6 md:p-8">
         <div class="flex items-center justify-between border-b border-border-muted pb-3">
-          <h3 class="font-bold text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+          <h3 class="font-bold text-text-primary flex items-center gap-2 text-sm uppercase tracking-wider">
             <Play size={16} class="text-success" />
             <span>Sandbox Simulator</span>
           </h3>
@@ -737,13 +737,13 @@
         <div class="relative">
           <textarea
             bind:value={testPayload}
-            class="w-full bg-slate-950/50 border border-border-muted rounded-xl p-3 text-xs font-mono text-text-primary focus:outline-none focus:ring-2 focus:ring-success/50 focus:border-success h-28 resize-none transition-colors"
+            class="w-full bg-bg-input border border-border-default rounded-xl p-4 pb-12 text-xs font-mono text-text-primary focus:outline-none focus:ring-2 focus:ring-success/50 focus:border-success h-28 resize-none transition-colors"
             placeholder="Paste malicious request payload here..."
           ></textarea>
           <Button
             on:click={runSimulation}
             variant="secondary"
-            className="absolute bottom-3 right-3 p-2 rounded-lg border border-border-muted shadow-md text-success hover:bg-slate-900/65"
+            className="absolute bottom-3 right-3 p-2.5 rounded-lg border border-border-default shadow-md text-success hover:bg-surface-hover/30"
           >
             <Play size={14} />
           </Button>

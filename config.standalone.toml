@@ -1,7 +1,9 @@
 certificates = []
+allowlists = []
+blacklists = []
 
 [global]
-port_http = 8080
+port_http = 8000
 port_https = 8443
 max_body_size = 10485760
 default_rate_limit = 600
@@ -9,6 +11,8 @@ log_dir = "./logs"
 log_level = "verbose"
 admin_token = "6476d3eb0e7043f7b72272c308fce8bc"
 waf_enabled = true
+webhooks = []
+metrics_push_interval_secs = 60
 
 [tls]
 mode = "disabled"
@@ -19,23 +23,76 @@ mode = "file"
 log_path = "./logs/jarswaf.log"
 max_log_size_mb = 50
 max_log_files = 5
+push_interval_secs = 300
+push_batch_size = 100
 blocklist_path = "./blocklist.json"
 db_path = "./logs/jarswaf.db"
 
 [components]
 dashboard = false
+clickhouse = false
 service_discovery = false
 geoip = false
-clickhouse = false
+
+[[rate_limit_policies]]
+name = "Default API/Website Traffic"
+limit = "600 requests / minute"
+burst = 100
+path = "/*"
+description = "Default threshold protecting backend sites from general automated scans."
+
+[[rate_limit_policies]]
+name = "Authentication Endpoints"
+limit = "10 requests / minute"
+burst = 5
+path = "/login, /api/auth/*"
+description = "Aggressive brute-force protection preventing credentials guessing."
+
+[[rate_limit_policies]]
+name = "WebDAV / Cloud File Storage"
+limit = "2000 requests / minute"
+burst = 200
+path = "/remote.php/dav/*, /api/upload/*"
+description = "Permissive tier optimized for photo synching and Nextcloud/Immich desktop clients."
+
+[[rate_limit_policies]]
+name = "Static Assets & Media"
+limit = "Unlimited"
+burst = 0
+path = "/static/*, *.css, *.js, *.png"
+description = "Exempted assets to reduce WAF engine evaluation overhead."
 
 [[vhosts]]
-name = "jarswaf-demo"
-hosts = ["*.jarswafwaf.demo", "localhost"]
+name = "dev-waf"
+hosts = ["dev-waf.local", "localhost"]
 backend = "127.0.0.1:8081"
-rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*"]
+tenant = "default"
+rate_limit_tiers = []
+rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "BOT-*", "CMDI-*"]
 blocked_countries = []
 geoblock_type = "Blocklist"
-custom_rules = []
-ssl = "disabled"
-max_body = "10MB"
-rate_limit = "600 req/min"
+custom_rules = ["CR-707"]
+ssl = "None"
+max_body = "100MB"
+rate_limit = "Unlimited"
+is_default = false
+allowlists = []
+blacklists = []
+max_conns_per_ip = 50
+max_concurrent_requests = 100
+bot_challenge_enabled = false
+websocket_security_enabled = false
+
+[[custom_rules]]
+id = "CR-707"
+name = "Block WP"
+condition_type = "path"
+operator = "contains"
+condition_value = "/wp-admin"
+action = "block"
+action_value = ""
+enabled = true
+
+[redis]
+enabled = false
+url = "redis://127.0.0.1:6379"

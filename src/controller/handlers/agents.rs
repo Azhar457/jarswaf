@@ -9,6 +9,8 @@ pub struct AgentRegisterRequest {
     pub ip: String,
     pub port: u16,
     pub os: String,
+    pub region: Option<String>,
+    pub cloud_provider: Option<String>,
 }
 
 pub async fn register_agent_handler(
@@ -31,6 +33,9 @@ pub async fn register_agent_handler(
         status: "online".to_string(),
         network_interfaces: vec![],
         discovered_services: vec![],
+        region: payload.region.clone(),
+        cloud_provider: payload.cloud_provider.clone(),
+        active_connections: Some(0),
         last_seen: std::time::Instant::now(),
     };
 
@@ -62,6 +67,9 @@ pub async fn receive_metrics_handler(
         status: "online".to_string(),
         network_interfaces: payload.network_interfaces.clone(),
         discovered_services: payload.discovered_services.clone(),
+        region: payload.region.clone(),
+        cloud_provider: payload.cloud_provider.clone(),
+        active_connections: payload.active_connections,
         last_seen: std::time::Instant::now(),
     };
 
@@ -88,4 +96,30 @@ pub async fn get_agents_handler(State(state): State<ControllerState>) -> impl In
     }
     agents.sort_by(|a, b| a.hostname.cmp(&b.hostname));
     (StatusCode::OK, Json(agents))
+}
+
+#[derive(serde::Deserialize)]
+pub struct AgentSyncRequest {
+    pub hostname: String,
+    pub region: Option<String>,
+}
+
+pub async fn sync_agent_handler(
+    State(state): State<ControllerState>,
+    Json(_payload): Json<AgentSyncRequest>,
+) -> impl IntoResponse {
+    // Basic sync: returns the full config.
+    // Future enhancement: filter VHosts based on payload.region
+    let config = {
+        let lock = state.config_lock.lock().await;
+        let c = std::fs::read_to_string(&state.config_path).unwrap_or_default();
+        drop(lock);
+        c
+    };
+
+    if let Ok(parsed) = toml::from_str::<crate::config::Config>(&config) {
+        (StatusCode::OK, Json(parsed)).into_response()
+    } else {
+        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse config").into_response()
+    }
 }

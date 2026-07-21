@@ -123,11 +123,11 @@
       if (fitAddon) fitAddon.fit();
     }, 50);
 
-    // Write Windows CMD welcome banner
-    term.writeln("jarsWAF [Version 1.0.0]");
-    term.writeln("(c) jarsWAF Security Corporation. All rights reserved.");
+    // Write Linux terminal welcome banner
+    term.writeln("jarsWAF Console Engine [Version 1.0.0]");
+    term.writeln("Initializing connection to secure logging socket...");
     term.writeln("");
-    term.writeln("C:\\jarswaf> jarswaf --stream --verbose");
+    term.writeln("jars@jarswaf:~/jarswaf$ jarswaf --stream --verbose");
     term.writeln(
       "\x1b[32m[SYSTEM]\x1b[0m jarsWAF Engine connected. Streaming real-time proxy events...",
     );
@@ -173,7 +173,7 @@
 <div class="space-y-6 h-full flex flex-col min-h-0">
   <div class="flex justify-between items-center shrink-0 gap-4">
     <div>
-      <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2 md:text-3xl">
+      <h1 class="text-2xl font-bold tracking-tight text-text-primary flex items-center gap-2 md:text-3xl">
         <TerminalIcon class="text-accent-blue" /> Live Security Terminal
       </h1>
       <p class="text-text-secondary text-sm mt-1">Real-time stream of all incoming request payloads, inspection actions, and firewall events.</p>

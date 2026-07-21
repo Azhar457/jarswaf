@@ -36,7 +36,15 @@ pub async fn post_custom_rules_handler(
                 "Custom rules configuration updated successfully in {}",
                 state.config_path
             );
-            let _ = state.config_tx.send(cfg);
+            let _ = state.config_tx.send(cfg.clone());
+
+            let _ = crate::logging::write_audit_log(
+                &state.db_path,
+                "controller",
+                "RULES_UPDATE",
+                &format!("{} custom rules applied", cfg.custom_rules.len()),
+            );
+
             StatusCode::OK.into_response()
         }
         Err(e) => {

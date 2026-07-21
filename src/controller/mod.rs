@@ -65,6 +65,14 @@ pub async fn run_controller(port: u16, config_path: String) {
     let cfg = config::load_config(&config_path).expect("Failed to load config");
     let db_path = cfg.logging.db_path.clone();
     logging::init_sqlite_db(&db_path).expect("Failed to initialize SQLite DB");
+    handlers::start_threat_intel_scraper(db_path.clone());
+
+    let grpc_token = cfg.global.grpc_token.clone().unwrap_or_else(|| "default_token".to_string());
+    tokio::spawn(async move {
+        if let Err(e) = crate::grpc::server::run_manager_server(9000, grpc_token).await {
+            tracing::error!("gRPC Manager Server error: {}", e);
+        }
+    });
 
     // Initialize broadcast channel for live logs
     let (tx, _rx) = broadcast::channel(10000);
@@ -114,6 +122,7 @@ pub async fn run_controller(port: u16, config_path: String) {
             "/api/v1/agents/metrics",
             post(handlers::receive_metrics_handler),
         )
+        .route("/api/v1/agents/sync", post(handlers::sync_agent_handler))
         .route("/api/v1/agents", get(handlers::get_agents_handler))
         .route(
             "/api/v1/rate-limits",
@@ -130,9 +139,14 @@ pub async fn run_controller(port: u16, config_path: String) {
             get(handlers::get_config_handler).post(handlers::post_config_handler),
         )
         .route(
+            "/api/v1/config/poll",
+            get(handlers::get_config_poll_handler),
+        )
+        .route(
             "/api/v1/config/history",
             get(handlers::get_config_history_handler),
         )
+        .route("/api/v1/redteam", get(handlers::redteam_lab))
         .route(
             "/api/v1/config/rollback",
             post(handlers::post_config_rollback_handler),
@@ -165,6 +179,22 @@ pub async fn run_controller(port: u16, config_path: String) {
         .route(
             "/api/v1/agent/block",
             post(handlers::post_agent_block_handler),
+        )
+        .route(
+            "/api/v1/learning/retrain",
+            post(handlers::post_retrain_handler),
+        )
+        .route(
+            "/api/v1/rasp/telemetry",
+            post(handlers::receive_rasp_telemetry_handler),
+        )
+        .route(
+            "/api/v1/rasp/block",
+            post(handlers::receive_rasp_block_handler),
+        )
+        .route(
+            "/api/v1/compliance/report",
+            get(handlers::get_compliance_report_handler),
         )
         .route(
             "/api/v1/ssl/certificates",

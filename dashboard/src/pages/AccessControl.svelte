@@ -247,7 +247,7 @@
   <!-- Header -->
   <div class="flex justify-between items-center gap-4">
     <div>
-      <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2 md:text-3xl">
+      <h1 class="text-2xl font-bold tracking-tight text-text-primary flex items-center gap-2 md:text-3xl">
         <ShieldCheck class="text-accent-blue" /> Access Control (ACL)
       </h1>
       <p class="text-text-secondary text-sm mt-1">
@@ -296,9 +296,9 @@
 
   {#if showForm}
     <!-- Rule Form Editor -->
-    <Card className="max-w-3xl border-border-muted">
+    <Card className="max-w-3xl border-border-muted p-4 sm:p-6 md:p-8">
       <div class="mb-6 border-b border-border-muted pb-4">
-        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+        <h2 class="text-lg font-bold text-text-primary flex items-center gap-2">
           {#if ruleType === "allowlist"}
             <ShieldCheck class="text-success" size={20} />
           {:else}
@@ -468,7 +468,7 @@
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right">
                 <div
-                  class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                  class="flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                 >
                   <Button
                     variant="ghost"
@@ -542,7 +542,7 @@
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-right">
                 <div
-                  class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                  class="flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                 >
                   <Button
                     variant="ghost"

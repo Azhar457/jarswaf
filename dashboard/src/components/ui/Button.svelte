@@ -6,10 +6,10 @@
   export let title: string | undefined = undefined;
 
   const variantStyles = {
-    primary: "bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-lg shadow-blue-950/20 focus:ring-blue-500/50",
-    secondary: "bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700/80 focus:ring-slate-500/50",
-    danger: "bg-red-600 hover:bg-red-500 active:bg-red-700 text-white shadow-lg shadow-red-950/20 focus:ring-red-500/50",
-    ghost: "bg-transparent hover:bg-slate-800/50 active:bg-slate-800 text-slate-300 focus:ring-slate-500/50",
+    primary: "bg-accent-blue hover:bg-accent-blue-hover active:bg-blue-700 text-white shadow-lg shadow-accent-blue-glow focus:ring-accent-blue/50",
+    secondary: "bg-slate-800 hover:bg-surface-hover active:bg-surface-card text-slate-200 border border-border-default focus:ring-slate-500/50",
+    danger: "bg-error hover:bg-red-500 active:bg-red-700 text-white shadow-lg shadow-glow-error focus:ring-error/50",
+    ghost: "bg-transparent hover:bg-surface-hover/30 active:bg-surface-hover text-text-secondary focus:ring-slate-500/50",
   };
 </script>
 

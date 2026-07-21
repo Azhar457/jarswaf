@@ -25,11 +25,11 @@
   $: isLoading = $connectionStatus === "connecting";
 </script>
 
-<div class="space-y-6 max-h-full overflow-y-auto pr-1">
+<div class="space-y-6 max-h-full overflow-y-auto pr-2">
   <!-- Header -->
   <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
     <div>
-      <h1 class="text-2xl font-bold tracking-tight text-white md:text-3xl">SOC Dashboard</h1>
+      <h1 class="text-2xl font-bold tracking-tight text-text-primary md:text-3xl">SOC Dashboard</h1>
       <p class="text-text-secondary text-sm mt-1">Real-time threat monitoring, analytics, and service discovery node metrics.</p>
     </div>
     
@@ -47,11 +47,11 @@
     {#if isLoading}
       {#each Array(4) as _}
         <Card className="flex items-center p-6 h-28 animate-pulse">
-          <div class="flex-1 space-y-3">
+          <div class="flex-1 space-y-4">
             <div class="h-4 bg-slate-800 rounded w-24"></div>
             <div class="h-6 bg-slate-800 rounded w-16"></div>
           </div>
-          <div class="p-3 bg-slate-900/40 rounded-2xl w-12 h-12"></div>
+          <div class="p-4 bg-slate-900/40 rounded-2xl w-12 h-12"></div>
         </Card>
       {/each}
     {:else}
@@ -104,7 +104,7 @@
             <div class="h-8 bg-slate-900/30 rounded w-full"></div>
           </div>
         {:else if $agents.length === 0}
-          <div class="p-12 text-center text-text-muted flex flex-col items-center justify-center gap-3 select-none">
+          <div class="p-12 text-center text-text-muted flex flex-col items-center justify-center gap-4 select-none">
             <Server size={40} class="text-text-muted/40 animate-bounce" />
             <div>
               <p class="font-bold text-text-primary text-sm">No Active Agent Nodes Connected</p>

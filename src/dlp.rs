@@ -137,3 +137,102 @@ fn mask(s: &str, show: usize) -> String {
     let suffix = &digits[digits.len() - 4..];
     format!("{}…{}", prefix, suffix)
 }
+
+/// Mask all sensitive patterns in `body` with `[REDACTED]`.
+pub fn mask_body(body: &str, cfg: &crate::config::DlpConfig) -> String {
+    if !cfg.enabled || body.len() > cfg.response_body_limit {
+        return body.to_string();
+    }
+
+    // Quick allow-list check: if body contains any allowlisted string → skip
+    for item in &cfg.allowlist {
+        if body.contains(item) {
+            return body.to_string();
+        }
+    }
+
+    let mut result = body.to_string();
+
+    if cfg.credit_card {
+        result = CC_REGEX.replace_all(&result, "[REDACTED-CC]").into_owned();
+    }
+
+    if cfg.jwt_token {
+        result = JWT_REGEX.replace_all(&result, "[REDACTED-JWT]").into_owned();
+    }
+
+    if cfg.cloud_secrets {
+        result = CLOUD_SECRETS_REGEX.replace_all(&result, "[REDACTED-SECRET]").into_owned();
+    }
+
+    if cfg.password_in_body {
+        result = PASSWORD_REGEX.replace_all(&result, |caps: &regex::Captures| {
+            let matched = &caps[0];
+            if let Some(pos) = matched.find(':').or_else(|| matched.find('=')) {
+                let key_part = &matched[..=pos];
+                format!("{} \"[REDACTED-PASSWORD]\"", key_part)
+            } else {
+                "[REDACTED-PASSWORD]".to_string()
+            }
+        }).into_owned();
+    }
+
+    if cfg.email {
+        result = EMAIL_REGEX.replace_all(&result, "[REDACTED-EMAIL]").into_owned();
+    }
+
+    // Custom patterns
+    for (name, pattern) in &cfg.custom_patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            result = re.replace_all(&result, |_: &regex::Captures| {
+                format!("[REDACTED-CUSTOM-{}]", name)
+            }).into_owned();
+        }
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DlpConfig;
+
+    fn test_dlp_config() -> DlpConfig {
+        DlpConfig {
+            enabled: true,
+            action: "log".to_string(),
+            credit_card: true,
+            jwt_token: true,
+            cloud_secrets: true,
+            password_in_body: true,
+            email: true,
+            allowlist: vec![],
+            custom_patterns: ahash::AHashMap::new(),
+            response_body_limit: 1024 * 1024,
+        }
+    }
+
+    #[test]
+    fn test_scan_and_mask_dlp() {
+        let mut cfg = test_dlp_config();
+        
+        let cc_body = "My visa is 4111 1111 1111 1111.";
+        let findings = scan_body(cc_body, &cfg);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule, "DLP-CC");
+        
+        let masked = mask_body(cc_body, &cfg);
+        assert_eq!(masked, "My visa is [REDACTED-CC].");
+
+        let email_body = "Send info to test@example.com please.";
+        let masked_email = mask_body(email_body, &cfg);
+        assert_eq!(masked_email, "Send info to [REDACTED-EMAIL] please.");
+
+        // Test allowlist bypass
+        cfg.allowlist.push("test@example.com".to_string());
+        let masked_allowlist = mask_body(email_body, &cfg);
+        assert_eq!(masked_allowlist, email_body);
+    }
+}
+

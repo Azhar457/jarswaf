@@ -35,6 +35,16 @@ pub async fn receive_logs_handler(
         new_total += 1;
         if log.action == "BLOCK" {
             new_blocked += 1;
+            // Auto-trigger ML retraining webhook if configured
+            if let Ok(ml_url) = std::env::var("ML_RETRAIN_URL") {
+                if !ml_url.is_empty() {
+                    let client = crate::logging::build_client();
+                    let payload = log.clone();
+                    tokio::spawn(async move {
+                        let _ = client.post(&ml_url).json(&payload).send().await;
+                    });
+                }
+            }
         } else if log.action == "RATE_LIMIT" {
             new_rate_limited += 1;
         }

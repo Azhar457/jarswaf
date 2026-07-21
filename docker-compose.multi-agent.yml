@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # Agent 1: Exposed on host port 9000
+  jarswaf-agent-1:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: jarswaf_agent_1
+    ports:
+      - "9000:9000"
+    environment:
+      - RUST_LOG=info
+    cap_add:
+      - CAP_BPF
+      - CAP_NET_ADMIN
+      - CAP_SYS_ADMIN
+      - CAP_SYS_RESOURCE
+    volumes:
+      - ./config.toml:/app/config.toml
+      - /sys/fs/bpf:/sys/fs/bpf:rw
+    restart: unless-stopped
+
+  # Agent 2: Exposed on host port 9001 to avoid collision
+  jarswaf-agent-2:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: jarswaf_agent_2
+    ports:
+      - "9001:9000" # Mapped to 9001 on the host
+    environment:
+      - RUST_LOG=info
+    cap_add:
+      - CAP_BPF
+      - CAP_NET_ADMIN
+      - CAP_SYS_ADMIN
+      - CAP_SYS_RESOURCE
+    volumes:
+      # Use a separate config file if needed, e.g. different backend mappings
+      - ./config.agent2.toml:/app/config.toml 
+      - /sys/fs/bpf:/sys/fs/bpf:rw
+    restart: unless-stopped

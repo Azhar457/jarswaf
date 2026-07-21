@@ -12,7 +12,7 @@ pub async fn start_config_sync_websocket(
     controller_url: String,
     token: Option<String>,
     config_arc: Arc<std::sync::RwLock<config::Config>>,
-    blocklist: Option<Arc<dashmap::DashMap<std::net::IpAddr, ()>>>,
+    blocklist: Option<Arc<dashmap::DashMap<std::net::IpAddr, std::time::Instant>>>,
 ) {
     let mut backoff = MIN_BACKOFF;
 
@@ -23,22 +23,22 @@ pub async fn start_config_sync_websocket(
 
         info!("Connecting to Controller config WebSocket at {}...", ws_url);
 
-        let mut request =
-            tokio_tungstenite::tungstenite::handshake::client::Request::builder().uri(&ws_url);
-
-        if let Some(ref t) = token {
-            request = request.header("Sec-WebSocket-Protocol", t);
-        }
-
-        let request = match request.body(()) {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = match ws_url.into_client_request() {
             Ok(req) => req,
             Err(e) => {
-                error!("Failed to build WebSocket handshake request: {:?}", e);
+                error!("Failed to build WebSocket client request: {:?}", e);
                 tokio::time::sleep(tokio::time::Duration::from_secs(backoff)).await;
                 backoff = (backoff * 2).min(MAX_BACKOFF);
                 continue;
             }
         };
+
+        if let Some(ref t) = token {
+            if let Ok(protocol_val) = t.parse() {
+                request.headers_mut().insert("Sec-WebSocket-Protocol", protocol_val);
+            }
+        }
 
         match tokio_tungstenite::connect_async(request).await {
             Ok((mut ws_stream, _)) => {
@@ -69,7 +69,7 @@ pub async fn start_config_sync_websocket(
                                                     let ip_str = data.get("ip").and_then(|i| i.as_str()).unwrap_or("");
                                                     if let Ok(ip) = ip_str.parse::<std::net::IpAddr>() {
                                                         match action {
-                                                            "block" => { blocklist_ref.insert(ip, ()); info!("Real-time block: {ip} added via Controller push"); }
+                                                            "block" => { blocklist_ref.insert(ip, std::time::Instant::now() + std::time::Duration::from_secs(31536000)); info!("Real-time block: {ip} added via Controller push"); }
                                                             "unblock" => { blocklist_ref.remove(&ip); info!("Real-time unblock: {ip} removed via Controller push"); }
                                                             "sync" => { blocklist_ref.clear(); info!("Blocklist synced (cleared for full reload)"); }
                                                             _ => {}
@@ -118,12 +118,46 @@ pub async fn start_config_sync_websocket(
                 }
             }
             Err(e) => {
-                error!("Failed to connect to Controller config WebSocket: {e}. Retrying in {backoff}s...");
+                error!("Failed to connect to Controller config WebSocket: {e}. Falling back to HTTP Long-polling...");
+                if let Err(poll_err) = run_config_sync_long_poll(&controller_url, token.as_deref(), config_arc.clone()).await {
+                    error!("Long-polling fallback failed: {poll_err}");
+                }
             }
         }
 
         // Exponential backoff before reconnect
         tokio::time::sleep(tokio::time::Duration::from_secs(backoff)).await;
         backoff = (backoff * 2).min(MAX_BACKOFF);
+    }
+}
+
+async fn run_config_sync_long_poll(
+    controller_url: &str,
+    token: Option<&str>,
+    config_arc: Arc<std::sync::RwLock<config::Config>>,
+) -> Result<(), String> {
+    let client = crate::logging::build_client();
+    let url = format!("{}/api/v1/config/poll", controller_url.trim_end_matches('/'));
+    
+    let mut req = client.get(&url).timeout(std::time::Duration::from_secs(40));
+    if let Some(t) = token {
+        req = req.header("Sec-WebSocket-Protocol", t); // Use same auth token scheme or custom header
+    }
+    
+    match req.send().await {
+        Ok(res) => {
+            if res.status() == reqwest::StatusCode::OK {
+                if let Ok(new_cfg) = res.json::<config::Config>().await {
+                    if let Ok(mut lock) = config_arc.write() {
+                        *lock = new_cfg;
+                        info!("Dynamic configuration updated via Controller HTTP Long-polling");
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(e) => {
+            Err(format!("HTTP long-polling request failed: {e}"))
+        }
     }
 }

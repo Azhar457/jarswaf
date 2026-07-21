@@ -106,7 +106,15 @@ pub async fn post_ratelimits_handler(
                 "Rate limiting policies updated successfully in {}",
                 state.config_path
             );
-            let _ = state.config_tx.send(cfg);
+            let _ = state.config_tx.send(cfg.clone());
+
+            let _ = crate::logging::write_audit_log(
+                &state.db_path,
+                "controller",
+                "RATELIMIT_UPDATE",
+                &format!("{} rate limit policies applied", cfg.rate_limit_policies.len()),
+            );
+
             StatusCode::OK.into_response()
         }
         Err(e) => {

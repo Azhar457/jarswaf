@@ -8,8 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Default WAF Target configuration
 # If your WAF runs on a different port or address, you can change this
-TARGET_URL = "http://localhost"
-HOST_HEADER = "dev.azharmtq.my.id"
+TARGET_URL = "http://127.0.0.1:8080"
+HOST_HEADER = "test.jarswafwaf.demo"
 
 # Payload groups to simulate different events
 PAYLOADS = {
@@ -46,13 +46,14 @@ stats = {
     "success": 0,      # Status 200/300
     "blocked": 0,      # Status 403 (WAF rule blocks)
     "rate_limited": 0, # Status 429 (Rate limiting blocks)
-    "errors": 0        # Connection errors
+    "errors": 0,       # Connection errors
+    "latencies": []    # Request latencies in ms
 }
 
 lock = threading.Lock()
 stop_testing = False
 
-def send_request(url, type_name):
+def send_request(url, traffic_type, scenario="normal"):
     global stop_testing
     if stop_testing:
         return
@@ -61,35 +62,47 @@ def send_request(url, type_name):
     req.add_header("Host", HOST_HEADER)
     req.add_header("User-Agent", "jarsWAF-Stress-Tester/1.0")
     
+    if scenario == "normal":
+        # Random headers
+        for i in range(10):
+            req.add_header(f"X-Random-Header-{random.randint(1, 1000)}", f"Value-{random.randint(1, 1000)}")
+    elif scenario == "worst-case":
+        # Identical/Predictable headers to test hash collision resistance (HashDoS simulation)
+        for i in range(50):
+            req.add_header(f"X-Collision-Header-{i}", f"Collision-Value-{i}")
+    elif scenario == "control":
+        pass # No extra headers, baseline testing
+    
+    start_time = time.time()
     try:
         with urllib.request.urlopen(req, timeout=3.0) as response:
             status = response.getcode()
+            lat = (time.time() - start_time) * 1000
             with lock:
                 stats["sent"] += 1
+                stats["latencies"].append(lat)
                 if status == 200 or status == 302:
                     stats["success"] += 1
     except urllib.error.HTTPError as e:
         status = e.code
+        lat = (time.time() - start_time) * 1000
         with lock:
             stats["sent"] += 1
+            stats["latencies"].append(lat)
             if status == 403:
                 stats["blocked"] += 1
             elif status == 429:
                 stats["rate_limited"] += 1
+            elif status in (404, 405):
+                stats["success"] += 1  # WAF passed request
             else:
                 stats["errors"] += 1
     except Exception as e:
         with lock:
             stats["errors"] += 1
 
-def worker_thread():
+def worker_thread(scenario):
     while not stop_testing:
-        # Choose a random traffic type:
-        # 50% Normal traffic
-        # 12.5% SQL Injection
-        # 12.5% XSS
-        # 12.5% LFI
-        # 12.5% Rate Limit Triggers
         r = random.random()
         if r < 0.50:
             traffic_type = "normal"
@@ -105,10 +118,10 @@ def worker_thread():
         path = random.choice(PAYLOADS[traffic_type])
         url = f"{TARGET_URL.rstrip('/')}{path}"
         
-        send_request(url, traffic_type)
+        send_request(url, traffic_type, scenario)
         
-        # Micro sleep to control throughput
-        time.sleep(random.uniform(0.01, 0.1))
+        # Reduced sleep for higher load
+        time.sleep(random.uniform(0.001, 0.01))
 
 def print_stats():
     while not stop_testing:
@@ -118,27 +131,42 @@ def print_stats():
             sys.stdout.flush()
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description='jarsWAF Stress Tester')
+    parser.add_argument('--scenario', type=str, choices=['normal', 'worst-case', 'control'], default='normal', help='Scenario to run')
+    args = parser.parse_args()
+
     print("=========================================================")
     print("         jarsWAF Real-Time Stress Tester               ")
     print("=========================================================")
     print(f"Target URL : {TARGET_URL}")
     print(f"Host Header: {HOST_HEADER}")
+    print(f"Scenario   : {args.scenario}")
     print("Press Ctrl+C to stop the test.")
     print("---------------------------------------------------------")
     
-    # Run the stats printer thread
     printer = threading.Thread(target=print_stats, daemon=True)
     printer.start()
     
-    # Use a ThreadPoolExecutor to simulate 16 concurrent users
     concurrency = 16
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         try:
             for _ in range(concurrency):
-                executor.submit(worker_thread)
+                executor.submit(worker_thread, args.scenario)
+            
+            # Run test until we hit 10000 requests
             while True:
                 time.sleep(0.5)
+                with lock:
+                    if stats["sent"] >= 10000:
+                        stop_testing = True
+                        break
         except KeyboardInterrupt:
-            print("\nStopping stress test...")
             stop_testing = True
-            print("Done!")
+    
+    print(f"\nDone! Processed {stats['sent']} requests in scenario '{args.scenario}'")
+    if stats["latencies"]:
+        sorted_lats = sorted(stats["latencies"])
+        p95_idx = int(len(sorted_lats) * 0.95)
+        p95 = sorted_lats[p95_idx]
+        print(f"P95 Latency: {p95:.2f} ms")

@@ -152,7 +152,6 @@ src/
 | 8123 | ClickHouse HTTP | Wajib |
 | 80 | HTTP Proxy (Agent) | Produksi |
 | 443 | HTTPS Proxy (Agent) | Produksi |
-| 5173 | Vite Dev Server | Development |
 
 ---
 
@@ -161,7 +160,6 @@ src/
 ```bash
 ./manager.sh deps         # Install semua dependensi
 ./manager.sh build        # Build release + Svelte
-./manager.sh dev          # Mode development (hot reload)
 ./manager.sh install      # Deploy Docker production
 ./manager.sh agent-deploy # Deploy Agent-only
 ./manager.sh logs         # Stream log
@@ -169,7 +167,7 @@ src/
 ./manager.sh uninstall    # Hapus total
 ```
 
----
+
 
 ## Roadmap
 

@@ -57,6 +57,9 @@ pub async fn start_metrics_collector(controller_url: String, token: Option<Strin
                 srvs.dedup_by(|a, b| a.port == b.port);
                 srvs
             },
+            region: None, // Can be populated from ENV later
+            cloud_provider: None,
+            active_connections: None,
         };
 
         let url = format!(

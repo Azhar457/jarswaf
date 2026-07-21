@@ -59,6 +59,23 @@ sha2 = "0.10"
 redis = { version = "0.25.3", features = ["tokio-comp"] }
 prometheus = { version = "0.13", features = ["process"] }
 quick_cache = "0.7"
+bincode = "1"
+chacha20poly1305 = "0.11.0"
+rand = "0.8.5"
+wasmtime = "29"
+anyhow = "1"
+tract-onnx = "0.21.7"
+
+# gRPC & Redis (Phase 10)
+tonic = "0.11"
+prost = "0.12"
+ahash = { version = "0.8.12", features = ["serde"] }
+
+
+
+[build-dependencies]
+tonic-build = "0.11"
+protoc-bin-vendored = "3.0.0"
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27", features = ["user"] } # for privilege dropping
 

@@ -2,41 +2,6 @@ use super::{Action, Phase, RequestInfo, Rule, Severity};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-// SQL Injection Regexes
-static SQLI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)('\s*OR\s*1\s*=\s*1|'\s*OR\s*'\w+'\s*=\s*'\w+|UNION\s+SELECT|INSERT\s+INTO|DELETE\s+FROM|DROP\s+TABLE|EXEC\s*\(|BENCHMARK\s*\(|WAITFOR\s+DELAY|SELECT\s+.*\s+FROM|1\s*=\s*1|1\s*OR\s*1)"#).unwrap()
-});
-
-static SQLI_002_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(SLEEP\s*\(\s*\d+\)|BENCHMARK\s*\(\s*\d+|WAITFOR\s+DELAY\s+'|pg_sleep\s*\(|dbms_pipe.receive_message|dbms_lock.sleep|GENERATE_SERIES|pg_ls_dir|pg_read_file|xp_cmdshell|sp_executesql|sqlcmd)"#).unwrap()
-});
-
-static SQLI_003_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(UNION\s+SELECT|UNION\s+ALL\s+SELECT|UNION\s+DISTINCT\s+SELECT|SELECT\s+NULL\s*,\s*NULL|SELECT\s+\d+\s*,\s*\d+|SELECT\s+CONCAT|SELECT\s+GROUP_CONCAT)"#).unwrap()
-});
-
-static SQLI_004_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(/\*|\*/|--\s|#\s|;%00|')\s*OR\s*('|')\s*AND\s*('|')\s*=\s*('|')\s*LIKE\s*'"#)
-        .unwrap()
-});
-
-// XSS Regexes
-static XSS_001_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)<script[^>]*>[\s\S]*?</script>|<script\s*>|<script[^>]*src\s*=|javascript:\s*|<iframe[^>]*>[\s\S]*?</iframe>|<object[^>]*>[\s\S]*?</object>|<embed[^>]*>"#).unwrap()
-});
-
-static XSS_002_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)\s(on\w+)\s*=\s*["']?[^"'>]*["']?\s*(alert|prompt|confirm|eval|document\.write|window\.location|this\.style|expression\s*\()"#).unwrap()
-});
-
-static XSS_003_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(location\.hash|location\.href|document\.URL|document\.documentURI|document\.write|document\.writeln|innerHTML|outerHTML|insertAdjacentHTML|eval\s*\(|setTimeout\s*\(|setInterval\s*\(|Function\s*\(|new\s+Function|window\[\s*["']eval["']\s*\])"#).unwrap()
-});
-
-static XSS_004_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)<svg\s*><\s*style\s*>[\s\S]*?</\s*style\s*>|<math\s*><\s*style\s*>[\s\S]*?</\s*style\s*>|<table\s*><\s*style\s*>[\s\S]*?</\s*style\s*>"#).unwrap()
-});
-
 // SSTI Regexes
 static SSTI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(\{\{\s*[^}]+\s*\}\}|\$\{\s*[^}]+\s*\}|<%=\s*[^%]+\s*%>|\{\%\s*[^%]+\s*\%\}|\$\{.*\}|#\{.*\})"#).unwrap()
@@ -76,38 +41,6 @@ static UPLOAD_002_REGEX: Lazy<Regex> = Lazy::new(|| {
 // Check functions
 fn matches_payload(req: &RequestInfo, regex: &Regex) -> bool {
     regex.is_match(req.body) || regex.is_match(req.query) || regex.is_match(req.path)
-}
-
-fn check_sqli_001(req: &RequestInfo) -> bool {
-    matches_payload(req, &SQLI_001_REGEX)
-}
-
-fn check_sqli_002(req: &RequestInfo) -> bool {
-    matches_payload(req, &SQLI_002_REGEX)
-}
-
-fn check_sqli_003(req: &RequestInfo) -> bool {
-    matches_payload(req, &SQLI_003_REGEX)
-}
-
-fn check_sqli_004(req: &RequestInfo) -> bool {
-    matches_payload(req, &SQLI_004_REGEX)
-}
-
-fn check_xss_001(req: &RequestInfo) -> bool {
-    matches_payload(req, &XSS_001_REGEX)
-}
-
-fn check_xss_002(req: &RequestInfo) -> bool {
-    matches_payload(req, &XSS_002_REGEX)
-}
-
-fn check_xss_003(req: &RequestInfo) -> bool {
-    matches_payload(req, &XSS_003_REGEX)
-}
-
-fn check_xss_004(req: &RequestInfo) -> bool {
-    matches_payload(req, &XSS_004_REGEX)
 }
 
 fn check_ssti_001(req: &RequestInfo) -> bool {
@@ -202,78 +135,6 @@ fn check_smuggle_002(req: &RequestInfo) -> bool {
 }
 
 pub static BODY_RULES: &[Rule] = &[
-    Rule {
-        id: "SQLI-001",
-        name: "SQL Injection (Basic)",
-        phase: Phase::Body,
-        action: Action::Block,
-        severity: Severity::Critical,
-        description: "Classic SQL injection pattern",
-        check: check_sqli_001,
-    },
-    Rule {
-        id: "SQLI-002",
-        name: "SQL Injection (Blind/Time-based)",
-        phase: Phase::Body,
-        action: Action::Block,
-        severity: Severity::Critical,
-        description: "Time-based blind SQL injection",
-        check: check_sqli_002,
-    },
-    Rule {
-        id: "SQLI-003",
-        name: "SQL Injection (Union Select)",
-        phase: Phase::Body,
-        action: Action::Block,
-        severity: Severity::Critical,
-        description: "UNION-based SQL injection",
-        check: check_sqli_003,
-    },
-    Rule {
-        id: "SQLI-004",
-        name: "SQL Injection (Comment)",
-        phase: Phase::Body,
-        action: Action::Block,
-        severity: Severity::High,
-        description: "SQL injection using comment or concatenation",
-        check: check_sqli_004,
-    },
-    Rule {
-        id: "XSS-001",
-        name: "XSS - Script Tag (Basic)",
-        phase: Phase::Body,
-        action: Action::Block,
-        severity: Severity::High,
-        description: "Script tag or active content injection",
-        check: check_xss_001,
-    },
-    Rule {
-        id: "XSS-002",
-        name: "XSS - Event Handler (Basic)",
-        phase: Phase::Body,
-        action: Action::Block,
-        severity: Severity::High,
-        description: "HTML event handler with JavaScript execution",
-        check: check_xss_002,
-    },
-    Rule {
-        id: "XSS-003",
-        name: "XSS - DOM-based (Advanced)",
-        phase: Phase::Body,
-        action: Action::Block,
-        severity: Severity::Medium,
-        description: "DOM-based XSS sink detection",
-        check: check_xss_003,
-    },
-    Rule {
-        id: "XSS-004",
-        name: "XSS - Mutation/mXSS (Advanced)",
-        phase: Phase::Body,
-        action: Action::Block,
-        severity: Severity::Medium,
-        description: "Mutation XSS via style tag in SVG/Math",
-        check: check_xss_004,
-    },
     Rule {
         id: "SSTI-001",
         name: "Server-Side Template Injection (Basic)",

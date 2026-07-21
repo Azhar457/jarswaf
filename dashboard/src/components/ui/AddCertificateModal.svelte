@@ -47,8 +47,8 @@
       class="bg-bg-secondary border border-border-muted rounded-2xl shadow-premium w-full max-w-md overflow-hidden"
       on:click|stopPropagation
     >
-      <div class="flex items-center justify-between p-5 border-b border-border-muted/80 bg-slate-900/20">
-        <h3 class="text-lg font-bold text-white">Add SSL Certificate</h3>
+      <div class="flex items-center justify-between p-6 border-b border-border-muted/80 bg-slate-900/20">
+        <h3 class="text-lg font-bold text-text-primary">Add SSL Certificate</h3>
         <Button
           variant="ghost"
           on:click={close}
@@ -98,7 +98,7 @@
       </div>
 
       <div
-        class="flex items-center justify-end gap-3 p-5 border-t border-border-muted bg-slate-900/20"
+        class="flex items-center justify-end gap-4 p-6 border-t border-border-muted bg-slate-900/20"
       >
         <Button
           variant="ghost"

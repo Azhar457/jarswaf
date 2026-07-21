@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "jarswaf.fullname" . }}-proxy
+  labels:
+    {{- include "jarswaf.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.proxy.hpa.enabled }}
+  replicas: {{ .Values.proxy.replicas }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "jarswaf.proxySelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "jarswaf.proxySelectorLabels" . | nindent 8 }}
+    spec:
+      affinity:
+        {{- toYaml .Values.proxy.affinity | nindent 8 }}
+      containers:
+        - name: proxy
+          image: "{{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}"
+          imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.proxy.ports.http }}
+              protocol: TCP
+            - name: https
+              containerPort: {{ .Values.proxy.ports.https }}
+              protocol: TCP
+            - name: gossip
+              containerPort: {{ .Values.gossip.port }}
+              protocol: UDP
+          env:
+            - name: RUST_LOG
+              value: "{{ .Values.proxy.env.RUST_LOG }}"
+            - name: CONFIG_PATH
+              value: "{{ .Values.proxy.env.CONFIG_PATH }}"
+            - name: GOSSIP_PSK
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jarswaf.fullname" . }}-secrets
+                  key: gossip-psk
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.proxy.ports.http }}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.proxy.ports.http }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.proxy.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/jarswaf
+              readOnly: true
+            - name: certs
+              mountPath: /etc/jarswaf/certs
+            - name: logs
+              mountPath: {{ .Values.config.logDir }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "jarswaf.fullname" . }}-config
+        - name: certs
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}

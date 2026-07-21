@@ -21,6 +21,9 @@ pub struct AgentMetrics {
     pub uptime: u64,
     pub network_interfaces: Vec<String>,
     pub discovered_services: Vec<DiscoveredService>,
+    pub region: Option<String>,
+    pub cloud_provider: Option<String>,
+    pub active_connections: Option<u32>,
 }
 
 /// Information about a registered agent, maintained by the Controller.
@@ -36,6 +39,9 @@ pub struct AgentInfo {
     pub status: String,
     pub network_interfaces: Vec<String>,
     pub discovered_services: Vec<DiscoveredService>,
+    pub region: Option<String>,
+    pub cloud_provider: Option<String>,
+    pub active_connections: Option<u32>,
     #[serde(skip)]
     pub last_seen: std::time::Instant,
 }
