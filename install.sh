@@ -60,8 +60,8 @@ echo -e "${CYAN}${BOLD}🔍 Fetching latest release...${NC}"
 LATEST=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
 
 if [ -z "$LATEST" ]; then
-    echo -e "${YELLOW}⚠️  Could not fetch latest release tag. Using default: v0.2.0${NC}"
-    LATEST="v0.2.1"
+    echo -e "${YELLOW}⚠️  Could not fetch latest release tag. Using default: v0.2.2${NC}"
+    LATEST="v0.2.2"
 fi
 
 echo -e "${GREEN}✅ Latest release: ${BOLD}${LATEST}${NC}"
