@@ -67,7 +67,7 @@ fi
 echo -e "${GREEN}✅ Latest release: ${BOLD}${LATEST}${NC}"
 
 # ── Download Binary ──────────────────────────────────────────────
-DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/jarswaf-linux-${ARCH}-musl.tar.gz"
+DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/jarswaf-v${LATEST#v}-musl.tar.gz"
 TMP_TAR="/tmp/jarswaf-linux-${ARCH}.tar.gz"
 
 echo -e "${CYAN}${BOLD}⬇️  Downloading jarsWAF ${LATEST} (linux-${ARCH})...${NC}"
