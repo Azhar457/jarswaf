@@ -73,9 +73,9 @@ jarsWAF mendukung **3 mode deployment** tergantung skala dan kebutuhan:
 
 ```mermaid
 flowchart LR
-    C[Clients<br/>(Internet)] --> A[jarsWAF Agent<br/>Pingora Proxy :80/443<br/>+ WAF Engine]
-    A --> B[Backend<br/>(App Anda)]
-    A --> L[(Log file<br/>/ SQLite)]
+    C["Clients (Internet)"] --> A["jarsWAF Agent<br>Pingora :80/443"]
+    A --> B["Backend (App Anda)"]
+    A --> L["(Log: File / SQLite)"]
 ```
 
 **Cocok untuk:** VPS minim (1 core, 512 MB RAM), proteksi satu aplikasi tanpa dashboard.
@@ -95,10 +95,10 @@ Logging: file JSON lokal atau SQLite lokal. **Zero dependencies.**
 
 ```mermaid
 flowchart TD
-    subgraph Satu_Server[Satu Server]
-        C[Clients<br/>(Internet)] --> A[jarsWAF Agent<br/>Pingora :80]
-        A --> B[Backend<br/>(App Anda)]
-        A --> API[Controller API :8080<br/>+ Dashboard Svelte<br/>+ Database]
+    subgraph Satu["Satu Server"]
+        C["Clients (Internet)"] --> A["jarsWAF Agent<br>Pingora :80"]
+        A --> B["Backend (App Anda)"]
+        A --> API["Controller :8080<br>+ Dashboard<br>+ Database"]
     end
 ```
 
@@ -120,16 +120,16 @@ docker compose up -d --build
 
 ```mermaid
 flowchart LR
-    subgraph Host_A[Server A — Controller]
-        API[Controller API :8080<br/>+ Dashboard<br/>+ Database]
+    subgraph Host_A["Server A — Controller"]
+        API["Controller :8080<br>+ Dashboard<br>+ Database"]
     end
 
-    subgraph Host_B[Server B — VM / Cloud]
-        B[jarsWAF Agent<br/>Pingora :80<br/>+ WAF Engine] --> Backend_B[Backend B]
+    subgraph Host_B["Server B — VM / Cloud"]
+        B["jarsWAF Agent<br>Pingora :80"] --> Backend_B["Backend B"]
     end
 
-    subgraph Host_C[Server C — VM / Cloud]
-        C[jarsWAF Agent<br/>Pingora :80<br/>+ WAF Engine] --> Backend_C[Backend C]
+    subgraph Host_C["Server C — VM / Cloud"]
+        C["jarsWAF Agent<br>Pingora :80"] --> Backend_C["Backend C"]
     end
 
     B -- HTTP Push Logs --> API
