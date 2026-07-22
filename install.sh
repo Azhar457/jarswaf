@@ -61,13 +61,13 @@ LATEST=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '
 
 if [ -z "$LATEST" ]; then
     echo -e "${YELLOW}⚠️  Could not fetch latest release tag. Using default: v0.2.0${NC}"
-    LATEST="v0.2.0"
+    LATEST="v0.2.1"
 fi
 
 echo -e "${GREEN}✅ Latest release: ${BOLD}${LATEST}${NC}"
 
 # ── Download Binary ──────────────────────────────────────────────
-DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/jarswaf-linux-${ARCH}.tar.gz"
+DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/jarswaf-linux-${ARCH}-musl.tar.gz"
 TMP_TAR="/tmp/jarswaf-linux-${ARCH}.tar.gz"
 
 echo -e "${CYAN}${BOLD}⬇️  Downloading jarsWAF ${LATEST} (linux-${ARCH})...${NC}"
