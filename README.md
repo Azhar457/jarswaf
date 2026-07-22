@@ -71,14 +71,11 @@ jarsWAF mendukung **3 mode deployment** tergantung skala dan kebutuhan:
 
 ### Opsi A: Agent Only (Standalone)
 
-```
-┌──────────────┐     ┌─────────────────┐     ┌──────────────┐
-│   Clients    │────▶│  jarsWAF Agent  │────▶│   Backend    │
-│  (Internet)  │     │  (Pingora Proxy)│     │   (App Anda) │
-└──────────────┘     │ port 80/443     │     └──────────────┘
-                     │ + WAF Engine    │
-                     │ + Log ke file   │
-                     └─────────────────┘
+```mermaid
+flowchart LR
+    C[Clients<br/>(Internet)] --> A[jarsWAF Agent<br/>Pingora Proxy :80/443<br/>+ WAF Engine]
+    A --> B[Backend<br/>(App Anda)]
+    A --> L[(Log file<br/>/ SQLite)]
 ```
 
 **Cocok untuk:** VPS minim (1 core, 512 MB RAM), proteksi satu aplikasi tanpa dashboard.
@@ -96,22 +93,13 @@ Logging: file JSON lokal atau SQLite lokal. **Zero dependencies.**
 
 ### Opsi B: Controller + Agent di Satu Mesin (All-in-One)
 
-```
-┌──────────────────────────────────────────────────┐
-│                   Satu Server                     │
-│                                                    │
-│  ┌──────────┐   ┌──────────────┐   ┌────────────┐│
-│  │  Clients  │──▶│jarsWAF Agent│──▶│  Backend   ││
-│  │(Internet) │   │(Pingora:80) │   │ (App Anda) ││
-│  └──────────┘   └──────┬───────┘   └────────────┘│
-│                        │                          │
-│                        ▼                          │
-│  ┌──────────────────────────┐                    │
-│  │  Controller API :8080     │                    │
-│  │  + Dashboard Svelte       │                    │
-│  │  + Database (SQLite/CH)   │                    │
-│  └──────────────────────────┘                    │
-└──────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Satu_Server[Satu Server]
+        C[Clients<br/>(Internet)] --> A[jarsWAF Agent<br/>Pingora :80]
+        A --> B[Backend<br/>(App Anda)]
+        A --> API[Controller API :8080<br/>+ Dashboard Svelte<br/>+ Database]
+    end
 ```
 
 **Cocok untuk:** Server produksi tunggal (4 GB+ RAM), mau lihat dashboard real-time.
@@ -130,27 +118,22 @@ docker compose up -d --build
 
 ### Opsi C: Controller + Agent di Mesin Berbeda (Distributed)
 
-```
-┌─────────────────┐       ┌──────────────────────┐
-│  Server A        │       │   Server B (VM/Cloud) │
-│  (Controller)    │       │   (Agent)              │
-│                   │       │                        │
-│  ┌─────────────┐ │ HTTP  │  ┌──────────────────┐ │
-│  │ Controller  │◀┤◀──────│──│  jarsWAF Agent   │ │
-│  │ API :8080   │ │ Push  │  │  (Pingora:80)    │─┼──▶ Backend
-│  │ + Dashboard │ │ Logs  │  │  + WAF Engine    │ │
-│  │ + Database  │ │       │  └──────────────────┘ │
-│  └─────────────┘ │       └──────────────────────┘
-└─────────────────┘
-                   │ HTTP   ┌──────────────────────┐
-                   │ Push   │   Server C (VM/Cloud) │
-                   │ Logs   │   (Agent)              │
-                   ├────────┤  ┌──────────────────┐ │
-                   │        │  │  jarsWAF Agent   │ │
-                   └────────▶  │  (Pingora:80)    │─┼──▶ Backend
-                              │  + WAF Engine    │ │
-                              └──────────────────┘ │
-                              └──────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Host_A[Server A — Controller]
+        API[Controller API :8080<br/>+ Dashboard<br/>+ Database]
+    end
+
+    subgraph Host_B[Server B — VM / Cloud]
+        B[jarsWAF Agent<br/>Pingora :80<br/>+ WAF Engine] --> Backend_B[Backend B]
+    end
+
+    subgraph Host_C[Server C — VM / Cloud]
+        C[jarsWAF Agent<br/>Pingora :80<br/>+ WAF Engine] --> Backend_C[Backend C]
+    end
+
+    B -- HTTP Push Logs --> API
+    C -- HTTP Push Logs --> API
 ```
 
 **Cocok untuk:** Skala besar, multi-cloud, agent tersebar di berbagai VM/region.
