@@ -15,6 +15,11 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
+    // Init ring crypto provider BEFORE any rustls usage
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install ring crypto provider");
+
     // Init tracing with OpenTelemetry-compatible structured JSON format
     tracing_subscriber::fmt()
         .json()
