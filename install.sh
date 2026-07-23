@@ -3,36 +3,29 @@
 #  jarsWAF — Zero-Shot Installer (Binary Download)
 # ================================================================
 #  Usage:
-#    bash -c "$(curl -fsSLk https://raw.githubusercontent.com/Azhar457/jarswaf/main/install.sh)"
+#    sudo bash -c "$(curl -fsSLk https://raw.githubusercontent.com/Azhar457/jarswaf/main/install.sh)"
 #
 #  What this does:
 #    1. Detects OS/arch
-#    2. Downloads the latest jarsWAF release binary
-#    3. Creates /opt/jarswaf with config, certs, and service file
-#    4. Starts jarsWAF via systemd (or background process)
+#    2. Downloads latest release tarball (agent + controller + jarswaf CLI)
+#    3. Installs to /opt/jarswaf/
+#    4. Creates default config
+#    5. Installs CLI wrapper to /usr/local/bin/jarswaf
+#    6. Starts agent via systemd (optional)
 #
 #  No Docker needed. No Rust toolchain. Just curl + binary.
 # ================================================================
 
-set -e
+set -euo pipefail
 
 # ── Colors ───────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-BOLD='\033[1m'
-DIM='\033[2m'
-NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; MAGENTA='\033[0;35m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 
 # ── Config ───────────────────────────────────────────────────────
 REPO="Azhar457/jarswaf"
 INSTALL_DIR="/opt/jarswaf"
-BINARY_NAME="agent"
-SERVICE_NAME="jarswaf"
-CONFIG_URL="https://raw.githubusercontent.com/${REPO}/main/config.standalone.toml"
+CLI_LINK="/usr/local/bin/jarswaf"
 
 # ── Sanity Check ─────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
@@ -41,7 +34,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 if ! command -v curl &>/dev/null; then
-    apt-get update -qq && apt-get install -y -qq curl || yum install -y -q curl
+    echo -e "${CYAN}📦 Installing curl...${NC}"
+    apt-get update -qq && apt-get install -y -qq curl 2>/dev/null || yum install -y -q curl 2>/dev/null || {
+        echo -e "${RED}❌ curl required. Install it manually.${NC}"; exit 1
+    }
 fi
 
 # ── Detect Arch ──────────────────────────────────────────────────
@@ -55,59 +51,47 @@ case "$ARCH" in
         ;;
 esac
 
-# ── Fetch Latest Release Info ────────────────────────────────────
+# ── Fetch Latest Release ─────────────────────────────────────────
 echo -e "${CYAN}${BOLD}🔍 Fetching latest release...${NC}"
 LATEST=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
-
 if [ -z "$LATEST" ]; then
-    echo -e "${YELLOW}⚠️  Could not fetch latest release tag. Using default: v0.2.2${NC}"
+    echo -e "${YELLOW}⚠️  Using default: v0.2.2${NC}"
     LATEST="v0.2.2"
 fi
-
 echo -e "${GREEN}✅ Latest release: ${BOLD}${LATEST}${NC}"
 
-# ── Download Binary ──────────────────────────────────────────────
+# ── Download & Extract ───────────────────────────────────────────
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/jarswaf-v${LATEST#v}-musl.tar.gz"
 TMP_TAR="/tmp/jarswaf-linux-${ARCH}.tar.gz"
 
-echo -e "${CYAN}${BOLD}⬇️  Downloading jarsWAF ${LATEST} (linux-${ARCH})...${NC}"
+echo -e "${CYAN}${BOLD}⬇️  Downloading ${LATEST} (linux-${ARCH})...${NC}"
 curl -fsSLk -o "$TMP_TAR" "$DOWNLOAD_URL"
 
-# ── Verify & Extract ─────────────────────────────────────────────
 echo -e "${CYAN}${BOLD}📦 Extracting...${NC}"
-
-# Create install directory
 mkdir -p "$INSTALL_DIR"
-
-# Extract binary
-tar -xzf "$TMP_TAR" -C "$INSTALL_DIR" 2>/dev/null || {
-    # If tar.gz extraction fails, try direct binary download
-    echo -e "${YELLOW}⚠️  Binary archive extraction failed, trying direct binary...${NC}"
-    curl -fsSLk -o "${INSTALL_DIR}/${BINARY_NAME}" \
-        "https://github.com/${REPO}/releases/download/${LATEST}/jarswaf-linux-${ARCH}"
-}
-
-chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+tar -xzf "$TMP_TAR" -C "$INSTALL_DIR"
+chmod 755 "${INSTALL_DIR}/agent" "${INSTALL_DIR}/jarswaf" 2>/dev/null
 rm -f "$TMP_TAR"
+
+# ── Install CLI Wrapper ──────────────────────────────────────────
+echo -e "${CYAN}${BOLD}🔧 Installing CLI: ${CLI_LINK}${NC}"
+ln -sf "${INSTALL_DIR}/jarswaf" "${CLI_LINK}"
+chmod 755 "${CLI_LINK}"
 
 # ── Create Default Config ────────────────────────────────────────
 if [ ! -f "${INSTALL_DIR}/config.toml" ]; then
     echo -e "${CYAN}${BOLD}⚙️  Creating default config...${NC}"
 
-    # Ask for Controller URL (or leave empty for standalone)
-    read -r -p "Enter Controller URL (press Enter for standalone mode): " CONTROLLER_URL
-
-    # Download config template from repo
-    if curl -fsSLk -o "${INSTALL_DIR}/config.toml" "$CONFIG_URL" 2>/dev/null; then
-        :  # config downloaded successfully
-    else
-        cat > "${INSTALL_DIR}/config.toml" << 'CONFIGEOF'
+    # Try download from repo, fallback to inline
+    if ! curl -fsSLk -o "${INSTALL_DIR}/config.toml" \
+        "https://raw.githubusercontent.com/${REPO}/main/config.standalone.toml" 2>/dev/null; then
+        cat > "${INSTALL_DIR}/config.toml" << 'TOML'
 certificates = []
 allowlists = []
 blacklists = []
 
 [global]
-port_http = 8080
+port_http = 8000
 port_https = 8443
 max_body_size = 10485760
 default_rate_limit = 600
@@ -133,28 +117,24 @@ db_path = "/opt/jarswaf/logs/jarswaf.db"
 [[vhosts]]
 name = "default"
 hosts = ["*"]
-backend = "http://127.0.0.1:3000"
-rules = []
-CONFIGEOF
-
-    # If controller URL provided, add it
-    if [ -n "$CONTROLLER_URL" ]; then
-        echo -e "\n[controller]\nurl = \"${CONTROLLER_URL}\"\npush_interval = 30" >> "${INSTALL_DIR}/config.toml"
-        echo -e "${GREEN}✅ Agent will report to Controller: ${CONTROLLER_URL}${NC}"
+backend = "http://localhost:3000"
+rules = ["SQLI-*", "XSS-*", "LFI-*", "BOT-*"]
+TOML
     fi
+
+    echo -e "${GREEN}✅ Config created${NC}"
 fi
 
 # ── Create Systemd Service ───────────────────────────────────────
 echo -e "${CYAN}${BOLD}🚀 Installing systemd service...${NC}"
-
-cat > "/etc/systemd/system/${SERVICE_NAME}.service" << SERVICE
+cat > "/etc/systemd/system/jarswaf.service" << SERVICE
 [Unit]
 Description=jarsWAF — Web Application Firewall
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${INSTALL_DIR}/${BINARY_NAME} --config ${INSTALL_DIR}/config.toml
+ExecStart=${INSTALL_DIR}/agent --config ${INSTALL_DIR}/config.toml
 WorkingDirectory=${INSTALL_DIR}
 Restart=always
 RestartSec=5
@@ -165,18 +145,30 @@ WantedBy=multi-user.target
 SERVICE
 
 systemctl daemon-reload
-systemctl enable "${SERVICE_NAME}"
-systemctl start "${SERVICE_NAME}"
+systemctl enable jarswaf 2>/dev/null || true
 
-# ── Verify ───────────────────────────────────────────────────────
-sleep 2
-if systemctl is-active --quiet "${SERVICE_NAME}"; then
-    echo -e "${GREEN}${BOLD}✅ jarsWAF is running!${NC}"
-    echo -e "${GREEN}📋 Service: ${SERVICE_NAME}"
-    echo -e "${GREEN}📂 Install: ${INSTALL_DIR}"
-    echo -e "${GREEN}🔧 Config:  ${INSTALL_DIR}/config.toml"
-    echo -e "${GREEN}📝 Log:     $(systemctl status ${SERVICE_NAME} | grep -oP '\/\S+\.log')"
+# ── Ask to Start ─────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}🎯 jarsWAF ${LATEST} installed!${NC}"
+echo -e "  ${CYAN}📂 Binary:${NC}    ${INSTALL_DIR}/agent"
+echo -e "  ${CYAN}🛠️  CLI:${NC}      ${CLI_LINK} (or: jarswaf)"
+echo -e "  ${CYAN}⚙️  Config:${NC}    ${INSTALL_DIR}/config.toml"
+echo ""
+echo -ne "${BOLD}▶  Start jarsWAF now? (Y/n): ${NC}"
+read -r answer
+if [[ "$answer" != "n" && "$answer" != "N" ]]; then
+    systemctl start jarswaf
+    sleep 2
+    if systemctl is-active --quiet jarswaf; then
+        echo -e "${GREEN}${BOLD}✅ jarsWAF is running!${NC}"
+    else
+        # Fallback: direct start
+        mkdir -p "${INSTALL_DIR}/logs"
+        nohup "${INSTALL_DIR}/agent" --config "${INSTALL_DIR}/config.toml" \
+            > "${INSTALL_DIR}/agent.log" 2>&1 &
+        echo -e "${YELLOW}⚠️  systemd start failed, started via nohup (PID $!)${NC}"
+        echo -e "${YELLOW}   Check: journalctl -u jarswaf --no-pager -n 30${NC}"
+    fi
 else
-    echo -e "${RED}${BOLD}❌ jarsWAF failed to start!${NC}"
-    echo -e "${YELLOW}Check logs: journalctl -u ${SERVICE_NAME} --no-pager -n 50${NC}"
+    echo -e "${CYAN}→ Start manually: sudo jarswaf start${NC}"
 fi
