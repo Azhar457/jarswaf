@@ -1434,6 +1434,18 @@ impl ProxyHttp for JarsWafProxy {
             crate::SUSPICIOUS_IPS.insert(ip, std::time::Instant::now());
         }
 
+        // Log PASS — all header-level WAF checks passed
+        let pass_entry = crate::logging::WafLogEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            client_ip: client_ip.to_string(),
+            method: req_method.clone(),
+            path: path.clone(),
+            action: "PASS".to_string(),
+            rule_id: "WAF-HEADER-PASS".to_string(),
+            reason: "All header-level WAF rules passed".to_string(),
+        };
+        let _ = self.log_tx.try_send(pass_entry);
+
         Ok(false)
     }
 
@@ -1817,6 +1829,21 @@ impl ProxyHttp for JarsWafProxy {
             }
             ctx.body_buffer.clear();
             ctx.body_buffer.shrink_to_fit();
+
+            // Log DEEP-PASS — all body/rule engine checks passed
+            let client_ip_str = ctx
+                .client_ip
+                .map_or("Unknown".to_string(), |ip| ip.to_string());
+            let pass_entry = crate::logging::WafLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                client_ip: client_ip_str,
+                method: method.clone(),
+                path: path.clone(),
+                action: "PASS".to_string(),
+                rule_id: "WAF-BODY-PASS".to_string(),
+                reason: "Body-level deep inspection: SQLi/XSS/LFI parsed, AST clean, GraphQL depth OK, DLP clean".to_string(),
+            };
+            let _ = self.log_tx.try_send(pass_entry);
         }
 
         Ok(())
