@@ -10,6 +10,10 @@ struct Cli {
     /// Path to config file (default: config.toml)
     #[arg(short, long, default_value = "config.toml")]
     config: String,
+
+    /// Path to custom rules directory (default: rules/)
+    #[arg(short = 'r', long, default_value = "rules")]
+    rules_dir: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -81,7 +85,7 @@ async fn main() {
 
     match run_mode {
         Commands::Agent { controller, token } => {
-            jarswaf::agent::run_agent(&cli.config, controller, token).await;
+            jarswaf::agent::run_agent(&cli.config, controller, token, &cli.rules_dir).await;
         }
         Commands::Controller { port } => {
             jarswaf::controller::run_controller(port, cli.config).await;

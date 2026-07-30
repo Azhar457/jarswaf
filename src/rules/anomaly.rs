@@ -174,5 +174,17 @@ fn run_heuristic_inference(payload: &str) -> f32 {
         score += 0.8;
     }
 
+    // URL-encoded SQLi: quotes wrapping OR/AND operators (Heuristic 2.1)
+    // Examples: 1' OR '1'='1, admin' AND '1'='1, 1'||'1'='1
+    if payload.contains("' or ")
+        || payload.contains("' and ")
+        || payload.contains("'||'")
+        || payload.contains("'&&'")
+        || payload.contains("'='")
+        || payload.contains("'= '")
+    {
+        score += 0.9;
+    }
+
     score.clamp(0.0, 1.0)
 }

@@ -47,9 +47,14 @@ fn build_ebpf() -> anyhow::Result<()> {
     workspace_root.pop(); // Go up to workspace root
     let ebpf_cargo_toml = workspace_root.join("jarswaf-ebpf").join("Cargo.toml");
 
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let status = Command::new(cargo)
-        .args(&[
+    // Force nightly channel because -Z build-std=core requires it.
+    // The CARGO env var set by `cargo run` points to a toolchain-specific binary,
+    // so +nightly flag won't work. Call rustup directly instead.
+    let status = Command::new("rustup")
+        .args([
+            "run",
+            "nightly",
+            "cargo",
             "build",
             "--release",
             "--manifest-path",

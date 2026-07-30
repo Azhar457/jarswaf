@@ -16,6 +16,11 @@ use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
+/// GET /health — liveness probe for orchestrators & k8s
+pub async fn health_handler() -> &'static str {
+    "OK"
+}
+
 /// Command types pushed from Controller → Agent via WebSocket
 #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
 pub struct BlockCommand {
@@ -218,6 +223,7 @@ pub async fn run_controller(port: u16, config_path: String) {
         ));
 
     let app = Router::new()
+        .route("/health", get(health_handler))
         .route("/install.sh", get(handlers::serve_install_script))
         .route("/metrics", get(handlers::get_metrics_handler))
         .merge(api_routes)

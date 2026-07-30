@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::rule_engine::phase::PhasePipeline;
 use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::prelude::*;
@@ -51,16 +52,23 @@ pub const BLOCKLIST_MAX_ENTRIES: usize = 100_000;
 /// Semaphore limiting concurrent WAF rule checks (regex/AST tokenization).
 /// Prevents N concurrent blocking ops from starving tokio worker threads.
 /// When full, new requests skip WAF inspection gracefully (allow, not crash).
+/// Semaphore limiting concurrent WAF rule checks (regex/AST tokenization).
+/// Prevents N concurrent blocking ops from starving tokio worker threads.
 pub static WAF_SEMAPHORE: once_cell::sync::Lazy<tokio::sync::Semaphore> =
-    once_cell::sync::Lazy::new(|| tokio::sync::Semaphore::new(4));
+    once_cell::sync::Lazy::new(|| tokio::sync::Semaphore::new(64));
 
-/// Try-acquire WAF semaphore; if full, log warning and return false (skip).
+/// Try-acquire WAF semaphore with a short timeout to prevent silent bypass under burst traffic.
 macro_rules! try_waf_permit {
     () => {{
-        match crate::proxy_engine::WAF_SEMAPHORE.try_acquire() {
-            Ok(permit) => permit,
-            Err(_) => {
-                tracing::warn!("WAF semaphore full — skipping rule check, allowing request");
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            crate::proxy_engine::WAF_SEMAPHORE.acquire(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            _ => {
+                tracing::warn!("WAF semaphore timeout — skipping rule check, allowing request");
                 return Ok(false);
             }
         }
@@ -595,6 +603,8 @@ pub struct JarsWafProxy {
     pub log_tx: tokio::sync::mpsc::Sender<crate::logging::WafLogEntry>,
     // Webhook / SIEM alert endpoints (loaded from config on startup)
     pub webhooks: Vec<crate::config::WebhookConfig>,
+    // Phase-based WAF inspection pipeline
+    pub phase_pipeline: PhasePipeline,
 }
 
 impl JarsWafProxy {
@@ -817,31 +827,50 @@ impl ProxyHttp for JarsWafProxy {
         ctx.security_headers = vhost_cfg.security_headers.clone();
         ctx.dlp_config = vhost_cfg.dlp.clone();
 
-        // 0. Direct IP Access Block
-        if let Some(host_str) = host.as_deref() {
-            let clean_host = host_str.split(':').next().unwrap_or(host_str);
-            if clean_host.parse::<std::net::IpAddr>().is_ok() {
+        // ── Phase Pipeline ─────────────────────────────────────
+        let phase_ctx = crate::rule_engine::phase::PhaseContext {
+            client_ip,
+            method: req_method.clone(),
+            path: path.clone(),
+            query: query_str.clone(),
+            host: host.clone(),
+            headers: headers_map.clone(),
+            body: String::new(),
+            vhost_name: vhost_cfg.name.clone(),
+            request_id: ctx.request_id.clone(),
+            max_body: vhost_cfg.max_body.clone(),
+            max_conns_per_ip: vhost_cfg.max_conns_per_ip,
+            bot_challenge_enabled: vhost_cfg.bot_challenge_enabled,
+        };
+        match self.phase_pipeline.execute(&phase_ctx).await {
+            crate::rule_engine::phase::PhaseResult::Reject {
+                status,
+                title,
+                description,
+                rule_id,
+            } => {
                 let entry = crate::logging::WafLogEntry {
                     timestamp: chrono::Utc::now().to_rfc3339(),
                     client_ip: client_ip.to_string(),
                     method: req_method.clone(),
                     path: path.clone(),
                     action: "BLOCK".to_string(),
-                    rule_id: "DIRECT-IP-001".to_string(),
-                    reason: format!("Direct IP access block: {}", clean_host),
+                    rule_id,
+                    reason: format!("Phase block: {}", description),
                 };
                 let _ = self.log_tx.try_send(entry);
                 let _ = respond_custom_error(
                     session,
-                    403,
-                    "Access Denied",
-                    &format!("Direct IP access block: {}", clean_host),
+                    status,
+                    &title,
+                    &description,
                     &client_ip.to_string(),
-                    "DIRECT-IP-001",
+                    "",
                 )
                 .await;
                 return Ok(true);
             }
+            crate::rule_engine::phase::PhaseResult::Continue => {}
         }
 
         // 0.1. Slowloris Connection Limit Check

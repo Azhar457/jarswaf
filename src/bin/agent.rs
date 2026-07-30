@@ -15,6 +15,10 @@ struct Cli {
     /// Registration token for the Controller
     #[arg(short, long)]
     token: Option<String>,
+
+    /// Path to custom rules directory (default: rules/)
+    #[arg(short = 'r', long, default_value = "rules")]
+    rules_dir: String,
 }
 
 #[tokio::main]
@@ -32,5 +36,5 @@ async fn main() {
         .init();
 
     let cli = Cli::parse();
-    jarswaf::agent::run_agent(&cli.config, cli.controller, cli.token).await;
+    jarswaf::agent::run_agent(&cli.config, cli.controller, cli.token, &cli.rules_dir).await;
 }

@@ -1,0 +1,52 @@
+# jarsWAF Rule Profiles — batch rule management
+#
+# Profiles memungkinkan user switch antara level keamanan
+# tanpa edit rules satu-satu.
+#
+# Cara pakai:
+#   jarswaf --profile strict
+#   jarswaf rules switch moderate
+
+profiles:
+  # ── Default Profile ──
+  - name: moderate
+    description: "Balance antara keamanan dan false positive rendah"
+    default: true
+    enabled_rules:
+      - group: "sqli"
+      - group: "xss"
+      - group: "lfi"
+      - group: "rce"
+    disabled_ids:
+      - "100005"  # XSS event handler (paranoia 2)
+      - "100010"  # Scanner detection (paranoia 2)
+
+  # ── Strict Profile ──
+  - name: strict
+    description: "Maksimal keamanan — semua rule aktif, termasuk paranoia 2"
+    enabled_rules:
+      - group: "sqli"
+      - group: "xss"
+      - group: "lfi"
+      - group: "rce"
+      - group: "brute-force"
+      - group: "scanner"
+    disabled_ids: []
+
+  # ── Permissive Profile ──
+  - name: permissive
+    description: "Minimal blocking — log + anomaly scoring only"
+    enabled_rules:
+      - group: "sqli"
+      - group: "lfi"
+    disabled_ids:
+      - "100005"  # XSS event handler
+      - "100006"  # LFI path traversal (via scoring, not block)
+      - "100009"  # RCE (lots of FPs on json payloads)
+
+  # ── SQLi-Only Profile ──
+  - name: sqli-only
+    description: "Hanya deteksi SQL injection — zero FPs for other categories"
+    enabled_rules:
+      - group: "sqli"
+    disabled_ids: []
