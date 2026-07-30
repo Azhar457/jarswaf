@@ -10,6 +10,7 @@ pub mod metrics;
 pub mod proxy;
 pub mod proxy_engine;
 pub mod rasp;
+pub mod rule_engine;
 pub mod rules;
 pub mod tls;
 pub mod types;

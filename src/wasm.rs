@@ -23,7 +23,9 @@ impl WasmPluginEngine {
     /// Load all `.wasm` files from the given directory.
     /// Non-fatal: invalid files are logged and skipped.
     pub fn load_plugins(dir: &Path) -> Self {
-        let engine = Engine::default();
+        let mut config = Config::new();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config).unwrap_or_else(|_| Engine::default());
         let mut plugins = Vec::new();
 
         if !dir.exists() {
@@ -99,6 +101,7 @@ impl WasmPluginEngine {
     /// Execute a single plugin. Returns `true` if the request should be blocked.
     fn run_plugin(&self, plugin: &WasmPlugin, path: &str, query: &str, body: &str) -> Result<bool> {
         let mut store = Store::new(&self.engine, ());
+        let _ = store.set_fuel(100_000);
         let instance = Instance::new(&mut store, &plugin.module, &[])?;
 
         // Get the plugin's exported memory

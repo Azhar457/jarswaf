@@ -46,18 +46,33 @@ static EMAIL_REGEX: Lazy<Regex> =
 
 // ── Scanner ─────────────────────────────────────────────────────────────────
 
-/// Run all enabled DLP checks against `body`.  Returns findings.
-pub fn scan_body(body: &str, cfg: &crate::config::DlpConfig) -> Vec<DlpFinding> {
-    if !cfg.enabled || body.len() > 10 * 1024 * 1024 {
+/// Run all enabled DLP checks against `body`. Returns findings.
+pub fn scan_body(raw_body: &str, cfg: &crate::config::DlpConfig) -> Vec<DlpFinding> {
+    if !cfg.enabled || raw_body.is_empty() {
         return Vec::new();
     }
 
+    // Limit scanned body to first 1MB to prevent excessive memory/CPU usage
+    let scan_len = raw_body.len().min(1024 * 1024);
+    let body_slice = &raw_body[..scan_len];
+
     // Quick allow-list check: if body contains any allowlisted string → skip
     for item in &cfg.allowlist {
-        if body.contains(item) {
+        if body_slice.contains(item) {
             return Vec::new();
         }
     }
+
+    // Strip zero-width characters (U+200B, U+200C, U+200D) that bypass regexes
+    let body_cleaned = if body_slice.contains('\u{200b}')
+        || body_slice.contains('\u{200c}')
+        || body_slice.contains('\u{200d}')
+    {
+        body_slice.replace(['\u{200b}', '\u{200c}', '\u{200d}'], "")
+    } else {
+        body_slice.to_string()
+    };
+    let body = body_cleaned.as_str();
 
     let mut findings = Vec::new();
 

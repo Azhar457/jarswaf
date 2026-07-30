@@ -8,12 +8,15 @@ pub struct MultipartFinding {
 }
 
 pub fn inspect_multipart(body: &[u8], boundary: &str) -> Vec<MultipartFinding> {
+    const MAX_MULTIPART_PARTS: usize = 1000;
     let mut findings = Vec::new();
     let boundary_bytes = format!("--{}", boundary).into_bytes();
 
     // Find all boundaries
     let mut i = 0;
-    while i < body.len() {
+    let mut parts_count = 0;
+    while i < body.len() && parts_count < MAX_MULTIPART_PARTS {
+        parts_count += 1;
         // Find next boundary
         if let Some(pos) = find_subslice(&body[i..], &boundary_bytes) {
             let part_start = i + pos + boundary_bytes.len();

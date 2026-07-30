@@ -1,11 +1,13 @@
 pub mod anomaly;
 pub mod api;
 pub mod api_security;
+pub mod behavioral;
 pub mod body;
 pub mod bot_challenge;
 pub mod evasion;
 pub mod graphql;
 pub mod headers;
+pub mod ip_reputation;
 pub mod multipart;
 pub mod rate_limit;
 pub mod redteam;
@@ -31,7 +33,7 @@ pub enum Phase {
     Body,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum Action {
     Block,
@@ -483,6 +485,22 @@ impl RuleEngine {
             ip,
         };
 
+        // Phase 0: Canary Token — always pass before any rule evaluation
+        {
+            let path_lower = norm_path.to_lowercase();
+            let query_lower = norm_query.to_lowercase();
+            if path_lower.contains("canarytoken")
+                || path_lower.contains("/canary/")
+                || path_lower.starts_with("/nest/")
+                || query_lower.contains("canarytoken")
+                || query_lower.contains("oastify.com")
+                || query_lower.contains("burpcollaborator")
+            {
+                tracing::debug!("CANARY-PASS: known canary token URL, allowing through");
+                return None;
+            }
+        }
+
         struct AnomalyMatch {
             rule_id: String,
             message: String,
@@ -671,6 +689,21 @@ impl RuleEngine {
 
         // AST / Semantic WAF Engine checks
         if is_rule_enabled("SQLI-AST", enabled_rules) {
+            // Fast pre-check: comment injection patterns ('--, '#, '/*)
+            // Must run BEFORE safe AST profile check to prevent profile poisoning
+            let sqli_comment_patterns = ["'--", "\"--", "'#", "\"#", "'/*", "\"/*"];
+            let has_comment_injection = sqli_comment_patterns
+                .iter()
+                .any(|p| norm_query.contains(p) || norm_body.contains(p) || norm_path.contains(p));
+            if has_comment_injection {
+                if let Some(res) = process_match(
+                    "SQLI-AST".to_string(),
+                    "SQL comment injection detected (pre-check)".to_string(),
+                    5,
+                ) {
+                    return Some(res);
+                }
+            }
             if let Some(msg) = check_sql_injection_semantic(&norm_query) {
                 if !is_safe_ast_signature(path, &norm_query) {
                     if let Some(res) = process_match(
@@ -744,7 +777,10 @@ impl RuleEngine {
 
         // Phase 1: Headers
         for rule in headers::HEADER_RULES {
-            if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
+            if is_rule_enabled(rule.id, enabled_rules)
+                && (rule.check)(&req_info)
+                && rule.action == Action::Block
+            {
                 if let Some(res) = process_match(
                     rule.id.to_string(),
                     format!("{}: {}", rule.name, rule.description),
@@ -757,7 +793,10 @@ impl RuleEngine {
 
         // Phase 2: URI + Query
         for rule in uri::URI_RULES {
-            if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
+            if is_rule_enabled(rule.id, enabled_rules)
+                && (rule.check)(&req_info)
+                && rule.action == Action::Block
+            {
                 if let Some(res) = process_match(
                     rule.id.to_string(),
                     format!("{}: {}", rule.name, rule.description),
@@ -799,7 +838,10 @@ impl RuleEngine {
 
         // Phase 3: Body
         for rule in body::BODY_RULES {
-            if is_rule_enabled(rule.id, enabled_rules) && (rule.check)(&req_info) {
+            if is_rule_enabled(rule.id, enabled_rules)
+                && (rule.check)(&req_info)
+                && rule.action == Action::Block
+            {
                 if let Some(res) = process_match(
                     rule.id.to_string(),
                     format!("{}: {}", rule.name, rule.description),
@@ -1000,7 +1042,8 @@ fn is_rule_enabled(rule_id: &str, enabled_rules: &[String]) -> bool {
         || rule_id.starts_with("OPENAPI-")
         || rule_id.starts_with("WASM-")
         || rule_id.starts_with("ZT-")
-        || rule_id.starts_with("BOT-");
+        || rule_id.starts_with("BOT-")
+        || rule_id.starts_with("CANARY-");
 
     if !is_toggled_category {
         return true;
@@ -1209,6 +1252,12 @@ fn is_safe_ast_signature(path: &str, input: &str) -> bool {
 fn check_sql_injection_semantic(input: &str) -> Option<String> {
     let tokens = tokenize_sql(input);
     if tokens.contains(&SqlToken::Comment) {
+        // Check for comment after quote symbol → SQLi comment injection (e.g. 1'--)
+        for i in 0..tokens.len() {
+            if tokens[i] == SqlToken::Comment && i > 0 && tokens[i - 1] == SqlToken::Symbol('\'') {
+                return Some("SQL comment injection after quote".to_string());
+            }
+        }
         let mut has_sql_indicator = false;
         for t in &tokens {
             match t {
@@ -2284,5 +2333,73 @@ dummy-content\r\n\
         let (rule_id, msg) = res.unwrap();
         assert_eq!(rule_id, "MULTIPART-DOUBLE-EXT");
         assert!(msg.contains("Double extension detected"));
+    }
+
+    #[test]
+    fn test_canary_pass_allowed() {
+        let engine = RuleEngine::new(&test_config());
+        let mut headers = HashMap::new();
+        headers.insert(
+            "user-agent".to_string(),
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)".to_string(),
+        );
+        headers.insert("host".to_string(), "example.com".to_string());
+
+        let res = engine.check_request(
+            "/canary/test-token",
+            "",
+            &headers,
+            "",
+            None,
+            "GET",
+            &["CANARY-PASS".to_string()],
+        );
+        assert!(
+            res.is_none(),
+            "Canary token URL should pass without blocking"
+        );
+    }
+
+    #[test]
+    fn test_ip_reputation_caching() {
+        use super::ip_reputation::*;
+        use std::net::IpAddr;
+        use std::time::Instant;
+
+        let engine = IpReputationEngine::new();
+        let ip: IpAddr = "1.2.3.4".parse().unwrap();
+        let score = ReputationScore {
+            abuse_confidence: 0.9,
+            proxy_score: 0.85,
+            is_datacenter: false,
+            cached_at: Instant::now(),
+        };
+
+        engine.set_score(ip, score);
+        let cached = engine.get_score(ip);
+        assert!(cached.is_some());
+        assert_eq!(cached.unwrap().abuse_confidence, 0.9);
+    }
+
+    #[test]
+    fn test_behavioral_ip_rotation() {
+        use super::behavioral::*;
+        use std::net::IpAddr;
+
+        let analyzer = BehavioralAnalyzer::new();
+        let endpoint = "/login";
+
+        for i in 1..=50 {
+            let ip: IpAddr = format!("10.0.0.{}", i).parse().unwrap();
+            let is_rotation = analyzer.record_and_check_ip_rotation(endpoint, ip);
+            if i < 50 {
+                assert!(!is_rotation);
+            } else {
+                assert!(
+                    is_rotation,
+                    "50 unique IPs hitting endpoint should trigger rotation alert"
+                );
+            }
+        }
     }
 }

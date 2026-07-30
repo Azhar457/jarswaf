@@ -2,20 +2,16 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
-
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| Version | Supported |
+|---------|-----------|
+| 0.x     | ✅ Active development |
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+**jarsWAF is a security tool — we take vulnerabilities seriously.**
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+If you find a security issue:
+1. **DM** [@Azhar457](https://github.com/Azhar457) on GitHub
+2. Or open a **confidential issue** at https://github.com/Azhar457/jarswaf/issues
+
+We aim to respond within 48 hours.

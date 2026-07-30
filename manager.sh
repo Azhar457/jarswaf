@@ -920,12 +920,89 @@ build_agent_only() {
     read -n 1 -s -r -p "Press any key to return to menu..."
 }
 
+test_xdp() {
+    print_banner
+    log_info "Starting Automated eBPF/XDP Kernel Fast-Drop Verification Test..."
+
+    if [ "$EUID" -ne 0 ]; then
+        log_warn "eBPF/XDP testing requires root privileges for veth interface management."
+        SUDO="sudo"
+    else
+        SUDO=""
+    fi
+
+    # 1. Build eBPF binary if missing
+    EBPF_OBJ="${SCRIPT_DIR}/jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf"
+    if [ ! -f "$EBPF_OBJ" ]; then
+        log_info "eBPF binary not found at $EBPF_OBJ. Building now via cargo xtask..."
+        cargo +nightly run -p xtask -- ebpf || { log_error "Failed to build eBPF binary!"; return 1; }
+    fi
+    log_success "eBPF binary verified at: $EBPF_OBJ"
+
+    # 2. Grant capabilities to binaries if present
+    for bin in "${SCRIPT_DIR}/target/debug/agent" "${SCRIPT_DIR}/target/release/agent" "${SCRIPT_DIR}/target/debug/jarswaf" "${SCRIPT_DIR}/target/release/jarswaf"; do
+        if [ -f "$bin" ]; then
+            $SUDO setcap cap_bpf,cap_net_admin+ep "$bin" 2>/dev/null || true
+            log_success "Granted CAP_BPF,CAP_NET_ADMIN to: $bin"
+        fi
+    done
+
+    # 3. Create isolated veth test network pair
+    log_info "Setting up test network interface (veth0 <-> veth1 in testns)..."
+    $SUDO ip netns del testns 2>/dev/null || true
+    $SUDO ip link del veth0 2>/dev/null || true
+    $SUDO ip netns add testns
+    $SUDO ip link add veth0 type veth peer name veth1
+    $SUDO ip link set veth1 netns testns
+    $SUDO ip addr add 10.0.0.1/24 dev veth0
+    $SUDO ip link set veth0 up
+    $SUDO ip netns exec testns ip addr add 10.0.0.2/24 dev veth1
+    $SUDO ip netns exec testns ip link set veth1 up
+    $SUDO ip netns exec testns ip link set lo up
+
+    # 4. Verify baseline ICMP Ping
+    log_info "Testing baseline connection (Host 10.0.0.1 <-> TestNS 10.0.0.2)..."
+    if $SUDO ip netns exec testns ping -c 2 -W 1 10.0.0.1 >/dev/null 2>&1; then
+        log_success "Baseline ping: PASS (10.0.0.2 -> 10.0.0.1 reachable)"
+    else
+        log_error "Baseline ping failed!"
+        $SUDO ip netns del testns 2>/dev/null || true
+        $SUDO ip link del veth0 2>/dev/null || true
+        return 1
+    fi
+
+    echo ""
+    echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}${BOLD}║  ✅  eBPF/XDP TEST ENVIRONMENT READY!                            ║${NC}"
+    echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  To test XDP fast drop with jarsWAF agent:"
+    echo -e "    1. Start agent on veth0: ${BOLD}sudo ./target/release/jarswaf agent --config config.standalone.toml${NC}"
+    echo -e "    2. Ping from testns:    ${BOLD}sudo ip netns exec testns ping 10.0.0.1${NC}"
+    echo ""
+
+    read -p "  Clean up test interfaces (veth0/testns)? [Y/n]: " cleanup_opt
+    if [[ "$cleanup_opt" =~ ^[Yy]$ ]] || [[ -z "$cleanup_opt" ]]; then
+        $SUDO ip netns del testns 2>/dev/null || true
+        $SUDO ip link del veth0 2>/dev/null || true
+        log_success "Cleaned up veth0 and testns."
+    else
+        log_info "Kept veth0 (10.0.0.1) and testns (10.0.0.2) active for manual testing."
+    fi
+
+    read -n 1 -s -r -p "Press any key to return to menu..."
+}
+
 # ================================================================
 #  CLI ARGUMENT PARSING (Non-interactive)
 # ================================================================
 
 if [ "$1" != "" ]; then
     case $1 in
+        --test-xdp|test-xdp|xdp)
+            test_xdp
+            exit 0
+            ;;
         --deps|deps|setup)
             setup_all_dependencies
             exit 0
@@ -1025,9 +1102,10 @@ while true; do
     echo -e "  ${CYAN}9)${NC}  📊 System Status & Health Check"
     echo -e "  ${DIM}10)${NC} 📋 View Real-time Logs"
     echo -e "  ${MAGENTA}11)${NC} 🧹 Run Linters & Formatters"
+    echo -e "  ${GREEN}12)${NC} ⚡ Test eBPF/XDP Kernel Drop Environment"
     echo -e "  ${DIM}0)${NC}  Exit"
     echo ""
-    read -p "  Select [0-11]: " opt
+    read -p "  Select [0-12]: " opt
     case $opt in
         1) setup_all_dependencies ;;
         2) build_from_source ;;
@@ -1040,6 +1118,7 @@ while true; do
         9) show_status ;;
         10) show_logs ;;
         11) run_formatters ;;
+        12) test_xdp ;;
         0) echo -e "${CYAN}Goodbye! 🛡️${NC}"; exit 0 ;;
         *) echo -e "${RED}Invalid option!${NC}"; sleep 1 ;;
     esac

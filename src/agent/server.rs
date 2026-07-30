@@ -26,6 +26,8 @@ pub async fn run_server(cfg: &config::Config, state: AppState) {
         blocklist: state.blocklist.clone(),
         log_tx: state.log_tx.clone(),
         webhooks: cfg.global.webhooks.clone(),
+        phase_pipeline: crate::rule_engine::phase::PhasePipeline::default()
+            .register(Box::new(crate::rule_engine::phase::DirectIpBlockHandler)),
     };
 
     // Store config in ArcSwap for lock-free reads in Pingora

@@ -1,0 +1,185 @@
+- id: "100001"
+  name: "SQLi — UNION SELECT"
+  phase: request_body
+  severity: critical
+  paranoia: 1
+  tags: [sqli, owasp-top10]
+  match:
+    any:
+      - field: body
+        operator: rx
+        value: "(?i)union.*select"
+      - field: args
+        operator: rx
+        value: "(?i)union.*select"
+  action: block
+  anomaly_score: 50
+  enabled: true
+
+- id: "100002"
+  name: "SQLi — OR Tautology"
+  phase: request_body
+  severity: critical
+  paranoia: 1
+  tags: [sqli, owasp-top10]
+  match:
+    any:
+      - field: body
+        operator: rx
+        value: "'\\s*or\\s+'.*'\\s*="
+      - field: body
+        operator: rx
+        value: "'\\s*or\\s+'\\d+'\\s*=\\s*'\\d+"
+      - field: args
+        operator: rx
+        value: "'\\s*or\\s+'.*'\\s*="
+  action: block
+  anomaly_score: 50
+  enabled: true
+
+- id: "100003"
+  name: "SQLi — Comment Injection"
+  phase: request_body
+  severity: high
+  paranoia: 1
+  tags: [sqli, comment-bypass]
+  match:
+    any:
+      - field: body
+        operator: pm
+        value: ["'--", "'#", "'/*"]
+      - field: args
+        operator: pm
+        value: ["'--", "'#", "'/*"]
+  action: block
+  anomaly_score: 30
+  enabled: true
+
+- id: "100004"
+  name: "XSS — Script Tag"
+  phase: request_body
+  severity: critical
+  paranoia: 1
+  tags: [xss, owasp-top10]
+  match:
+    any:
+      - field: body
+        operator: rx
+        value: "(?i)<script[^>]*>[^<]*<\\/script>"
+      - field: args
+        operator: rx
+        value: "(?i)<script[^>]*>[^<]*<\\/script>"
+  action: block
+  anomaly_score: 50
+  enabled: true
+
+- id: "100005"
+  name: "XSS — Event Handler"
+  phase: request_body
+  severity: high
+  paranoia: 2
+  tags: [xss, owasp-top10]
+  match:
+    any:
+      - field: body
+        operator: rx
+        value: "(?i)\\b(onload|onerror|onclick|onmouseover|onfocus|onchange|onreset|onsubmit)\\s*="
+      - field: args
+        operator: rx
+        value: "(?i)\\b(onload|onerror|onclick|onmouseover|onfocus|onchange|onreset|onsubmit)\\s*="
+  action: anomaly
+  anomaly_score: 30
+  enabled: true
+
+- id: "100006"
+  name: "LFI — Path Traversal"
+  phase: request_headers
+  severity: high
+  paranoia: 1
+  tags: [lfi, path-traversal]
+  match:
+    any:
+      - field: path
+        operator: rx
+        value: "\\.\\./"
+      - field: path
+        operator: rx
+        value: "\\.\\.\\\\"
+      - field: path
+        operator: rx
+        value: "%2e%2e/"
+  action: block
+  anomaly_score: 30
+  enabled: true
+
+- id: "100007"
+  name: "LFI — /etc/passwd"
+  phase: request_body
+  severity: critical
+  paranoia: 1
+  tags: [lfi, sensitive-file]
+  match:
+    any:
+      - field: body
+        operator: contains
+        value: "/etc/passwd"
+      - field: args
+        operator: contains
+        value: "/etc/passwd"
+      - field: path
+        operator: rx
+        value: "/etc/passwd"
+  action: block
+  anomaly_score: 50
+  enabled: true
+
+- id: "100008"
+  name: "POST to login — rate limit anomaly"
+  phase: request_headers
+  severity: medium
+  paranoia: 1
+  tags: [brute-force, login]
+  match:
+    all:
+      - field: method
+        operator: equals
+        value: "POST"
+      - field: path
+        operator: rx
+        value: "(?i)(login|signin|auth|token)"
+  action: anomaly
+  anomaly_score: 5
+  enabled: true
+
+- id: "100009"
+  name: "RCE — Command Injection"
+  phase: request_body
+  severity: critical
+  paranoia: 1
+  tags: [rce, command-injection]
+  match:
+    any:
+      - field: body
+        operator: rx
+        value: "(?i)(;\\s*(ls|cat|whoami|id|wget|curl|nc|bash|python|perl|cmd|powershell)\\s|`[^`]+`|\\$\\([^)]+\\))"
+      - field: args
+        operator: rx
+        value: "(?i)(;\\s*(ls|cat|whoami|id|wget|curl|nc|bash|python|perl|cmd|powershell)\\s|`[^`]+`|\\$\\([^)]+\\))"
+  action: block
+  anomaly_score: 100
+  enabled: true
+
+- id: "100010"
+  name: "Scanner/User-Agent Detection"
+  phase: request_headers
+  severity: low
+  paranoia: 2
+  tags: [scanner, user-agent]
+  match:
+    any:
+      - field: headers.user-agent
+        operator: pm
+        value: ["sqlmap", "nikto", "nmap", "burpsuite", "acunetix", "nessus", "openvas", "zap", "wpscan", "gobuster", "dirbuster", "hydra", "medusa", "patator"]
+  action: anomaly
+  anomaly_score: 10
+  enabled: false
