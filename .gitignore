@@ -1,8 +1,11 @@
 # Rust build artifacts
-/target/
+/target
 **/*.rs.bk
+*.swp
+*.swo
 
-# Node build artifacts
+# External reference repos — cloned for research, not part of source
+/external/
 /node_modules/
 /dashboard/node_modules/
 /dashboard/dist/
@@ -23,3 +26,5 @@ docs/
 .env
 IDEA.md
 config_backups
+__pycache__/
+*.pyc

@@ -3,8 +3,8 @@ allowlists = []
 blacklists = []
 
 [global]
-port_http = 80
-port_https = 443
+port_http = 8000
+port_https = 8443
 max_body_size = 10485760
 default_rate_limit = 600
 log_dir = "./logs"
@@ -68,7 +68,7 @@ hosts = ["*.jarswafwaf.demo"]
 backend = "127.0.0.1:8080"
 tenant = "default"
 rate_limit_tiers = []
-rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*"]
+rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*", "CANARY-*", "BHV-*", "IPREP-*"]
 blocked_countries = []
 geoblock_type = "Blocklist"
 custom_rules = ["CR-825"]

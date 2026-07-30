@@ -60,4 +60,4 @@ EXPOSE 8080
 ENV RUST_LOG=info
 ENV JARSWAF_PORT=8080
 
-CMD ["/app/jarswaf"]
+CMD ["/app/jarswaf", "agent"]

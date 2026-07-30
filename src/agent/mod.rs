@@ -9,10 +9,60 @@ pub use server::AppState;
 use std::sync::Arc;
 use tracing::info;
 
-pub async fn run_agent(config_path: &str, controller: Option<String>, token: Option<String>) {
+pub async fn run_agent(
+    config_path: &str,
+    controller: Option<String>,
+    token: Option<String>,
+    rules_dir: &str,
+) {
     // Load config
     let cfg = config::load_config(config_path).expect("Failed to load config");
     let config_arc = Arc::new(std::sync::RwLock::new(cfg.clone()));
+
+    // Load custom rules from YAML files
+    let rules_path = std::path::Path::new(rules_dir);
+    match crate::rule_engine::load_rules_directory(rules_path) {
+        Ok(rules) => {
+            let count = rules.len();
+            let mut registry = crate::rule_engine::RULE_REGISTRY.write().await;
+            for rule in rules {
+                registry.add_rule(rule);
+            }
+
+            // Load profiles dan apply default profile
+            let profile_path = rules_path.join("profiles.yaml");
+            if profile_path.exists() {
+                match crate::rule_engine::load_profiles(&profile_path) {
+                    Ok(config) => {
+                        if let Some(profile) = crate::rule_engine::get_active_profile(&config, None)
+                        {
+                            crate::rule_engine::apply_profile(profile, &mut registry);
+                            let enabled = registry.rules.iter().filter(|r| r.enabled).count();
+                            info!(
+                                "Active profile: {} — {} rules enabled (of {} total)",
+                                profile.name,
+                                enabled,
+                                registry.rules.len()
+                            );
+                        }
+                    }
+                    Err(e) => tracing::warn!("Failed to load profiles: {}", e),
+                }
+            }
+
+            if count > 0 {
+                info!("Loaded {} custom rule(s) from {:?}", count, rules_path);
+            } else {
+                info!(
+                    "No custom rules found in {:?}, using defaults only",
+                    rules_path
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to load custom rules from {:?}: {}", rules_path, e);
+        }
+    }
 
     // Start background memory cleanup for rate limiter & reputation counters
     rules::start_rate_limiter_cleanup();

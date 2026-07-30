@@ -13,6 +13,14 @@ pub struct WafLogEntry {
     pub reason: String,
 }
 
+impl WafLogEntry {
+    pub fn sanitize(&mut self) {
+        self.path = self.path.replace('\r', "\\r").replace('\n', "\\n");
+        self.reason = self.reason.replace('\r', "\\r").replace('\n', "\\n");
+        self.method = self.method.replace('\r', "\\r").replace('\n', "\\n");
+    }
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct Stats {
     pub total_requests: i64,

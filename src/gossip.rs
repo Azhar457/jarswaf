@@ -174,6 +174,8 @@ impl GossipNode {
         let key = Key::from(psk_bytes);
         let cipher = ChaCha20Poly1305::new(&key);
 
+        let mut seen_nonces = std::collections::HashSet::new();
+
         loop {
             if !*running.lock().await {
                 break;
@@ -193,6 +195,18 @@ impl GossipNode {
 
                     let mut nonce_bytes = [0u8; 12];
                     nonce_bytes.copy_from_slice(&buf[4..4 + NONCE_LEN]);
+
+                    // Anti-replay: drop duplicate nonces
+                    if !seen_nonces.insert(nonce_bytes) {
+                        debug!("Gossip: replay detected (duplicate nonce) from {src}");
+                        continue;
+                    }
+
+                    // Keep cache bounded
+                    if seen_nonces.len() > 10_000 {
+                        seen_nonces.clear();
+                    }
+
                     let nonce = Nonce::from(nonce_bytes);
                     let ciphertext_len =
                         u16::from_le_bytes([buf[4 + NONCE_LEN], buf[4 + NONCE_LEN + 1]]) as usize;
@@ -207,6 +221,12 @@ impl GossipNode {
                         Ok(plaintext) => {
                             match bincode::deserialize::<ThreatIntelMessage>(&plaintext) {
                                 Ok(msg) => {
+                                    // Validate TTL / expiry
+                                    if msg.ttl_secs == 0 {
+                                        debug!("Gossip: expired TTL from {src}, skipping");
+                                        continue;
+                                    }
+
                                     if let Some(ref h) = handler {
                                         h.on_threat_intel(&msg).await;
                                     }

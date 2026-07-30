@@ -1,0 +1,86 @@
+//! Behavioral Detection & Anti-Proxy Rotation Module for jarsWAF
+//!
+//! Detects multi-IP endpoint rotation (9Proxy residential proxy attacks),
+//! credential stuffing, and rapid User-Agent switching.
+
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
+use std::net::IpAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+
+pub struct BehavioralAnalyzer {
+    // endpoint -> list of (timestamp, IpAddr)
+    endpoint_hits: DashMap<String, Vec<(Instant, IpAddr)>>,
+    // IP -> list of (timestamp, User-Agent)
+    ip_ua_history: DashMap<IpAddr, Vec<(Instant, String)>>,
+    // Global request counter for periodic cleanup
+    counter: AtomicUsize,
+}
+
+impl Default for BehavioralAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BehavioralAnalyzer {
+    pub fn new() -> Self {
+        Self {
+            endpoint_hits: DashMap::new(),
+            ip_ua_history: DashMap::new(),
+            counter: AtomicUsize::new(0),
+        }
+    }
+
+    /// Record a hit to an endpoint and check for 9Proxy IP rotation (BHV-001)
+    /// Triggers if >50 unique IPs hit the same sensitive endpoint within 60 seconds.
+    pub fn record_and_check_ip_rotation(&self, endpoint: &str, ip: IpAddr) -> bool {
+        self.maybe_cleanup();
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+
+        let mut entry = self.endpoint_hits.entry(endpoint.to_string()).or_default();
+        let hits = entry.value_mut();
+
+        // Retain only entries within sliding window
+        hits.retain(|(ts, _)| now.duration_since(*ts) < window);
+        hits.push((now, ip));
+
+        // Count unique IPs in window
+        let unique_ips: std::collections::HashSet<_> = hits.iter().map(|(_, ip)| *ip).collect();
+        unique_ips.len() >= 50
+    }
+
+    /// Record a request from an IP and check for rapid User-Agent rotation (BHV-003)
+    /// Triggers if a single IP rotates >10 different User-Agents within 120 seconds.
+    pub fn record_and_check_ua_rotation(&self, ip: IpAddr, user_agent: &str) -> bool {
+        let now = Instant::now();
+        let window = Duration::from_secs(120);
+
+        let mut entry = self.ip_ua_history.entry(ip).or_default();
+        let uas = entry.value_mut();
+
+        uas.retain(|(ts, _)| now.duration_since(*ts) < window);
+        uas.push((now, user_agent.to_string()));
+
+        let unique_uas: std::collections::HashSet<_> = uas.iter().map(|(_, ua)| ua).collect();
+        unique_uas.len() >= 10
+    }
+
+    /// Periodic cleanup of stale sliding windows
+    fn maybe_cleanup(&self) {
+        let count = self.counter.fetch_add(1, Ordering::Relaxed);
+        if count.is_multiple_of(1000) {
+            let now = Instant::now();
+            let window = Duration::from_secs(120);
+
+            self.endpoint_hits
+                .retain(|_, hits| hits.iter().any(|(ts, _)| now.duration_since(*ts) < window));
+            self.ip_ua_history
+                .retain(|_, uas| uas.iter().any(|(ts, _)| now.duration_since(*ts) < window));
+        }
+    }
+}
+
+pub static BEHAVIORAL_ANALYZER: Lazy<BehavioralAnalyzer> = Lazy::new(BehavioralAnalyzer::new);

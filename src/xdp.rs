@@ -26,22 +26,33 @@ impl XdpManager {
     pub fn new() -> Self {
         #[cfg(target_os = "linux")]
         {
-            // Try loading from Docker path first, then fall back to local development build path
-            let bpf = match Ebpf::load_file("/app/jarswaf-ebpf") {
-                Ok(b) => Some(b),
-                Err(e1) => {
-                    match Ebpf::load_file("target/bpfel-unknown-none/release/jarswaf-ebpf") {
-                        Ok(b) => Some(b),
-                        Err(e2) => {
-                            warn!(
-                                "Failed to load eBPF object. Error 1: {:?}. Error 2: {:?}",
-                                e1, e2
-                            );
-                            None
+            let candidate_paths = [
+                "/app/jarswaf-ebpf",
+                "jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf",
+                "target/bpfel-unknown-none/release/jarswaf-ebpf",
+                "/opt/jarswaf/jarswaf-ebpf",
+            ];
+
+            let mut bpf = None;
+            for path in &candidate_paths {
+                if std::path::Path::new(path).exists() {
+                    match Ebpf::load_file(path) {
+                        Ok(b) => {
+                            info!("Successfully loaded eBPF object from: {}", path);
+                            bpf = Some(b);
+                            break;
+                        }
+                        Err(e) => {
+                            warn!("Failed loading eBPF object from {}: {:?}", path, e);
                         }
                     }
                 }
-            };
+            }
+
+            if bpf.is_none() {
+                warn!("Could not locate or load jarswaf-ebpf binary. eBPF packet drop will be disabled.");
+            }
+
             Self { bpf }
         }
 
@@ -70,13 +81,32 @@ impl XdpManager {
                 .try_into()
                 .map_err(|e| format!("{}", e))?;
             program.load().map_err(|e| format!("{}", e))?;
-            program
-                .attach(_interface, XdpMode::default())
-                .map_err(|e| format!("failed to attach the XDP program: {}", e))?;
-            info!(
-                "XDP program successfully attached to interface: {}",
-                _interface
-            );
+
+            // Try Native Driver mode first; fall back to Generic (Skb) mode for WiFi/virtual interfaces
+            match program.attach(_interface, XdpMode::Driver) {
+                Ok(_) => {
+                    info!(
+                        "XDP program attached in Native Driver mode to interface: {}",
+                        _interface
+                    );
+                }
+                Err(e_drv) => {
+                    warn!(
+                        "Driver XDP mode failed on interface {} ({:?}), falling back to Generic (Skb) mode...",
+                        _interface, e_drv
+                    );
+                    program.attach(_interface, XdpMode::Skb).map_err(|e| {
+                        format!(
+                            "Failed attaching XDP in both Driver and Generic mode: {}",
+                            e
+                        )
+                    })?;
+                    info!(
+                        "XDP program attached in Generic (Skb) mode to interface: {}",
+                        _interface
+                    );
+                }
+            }
             Ok(())
         }
 

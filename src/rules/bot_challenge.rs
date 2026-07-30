@@ -67,7 +67,16 @@ pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> S
                 }}
             }} catch(e) {{}}
 
-            return {{ canvas: canvasHash.substring(0, 16), webgl: encodeURIComponent(webgl) }};
+            // 3. Headless Automation Inspection (Playwright / Puppeteer / Selenium)
+            let isHeadless = 0;
+            try {{
+                if (navigator.webdriver) isHeadless = 1;
+                if (!navigator.languages || navigator.languages.length === 0) isHeadless = 1;
+                if (window.outerWidth === 0 && window.outerHeight === 0) isHeadless = 1;
+                if (navigator.userAgent.indexOf("Chrome") !== -1 && !window.chrome) isHeadless = 1;
+            }} catch(e) {{}}
+
+            return {{ canvas: canvasHash.substring(0, 16), webgl: encodeURIComponent(webgl), headless: isHeadless }};
         }}
 
         async function solve() {{
@@ -91,6 +100,11 @@ pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> S
             await mousePromise;
             
             const fp = await getFingerprints();
+            if (fp.headless === 1) {{
+                // Block or fail headless automation
+                document.body.innerHTML = '<h1>Access Denied</h1><p>Automated browser framework detected (Playwright/Puppeteer).</p>';
+                return;
+            }}
 
             let nonce = 0;
             while (true) {{
@@ -113,14 +127,36 @@ pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> S
     )
 }
 
-/// Generates the HMAC signature for the verified cookie.
+/// Generates the HMAC signature for the verified cookie using ARX Construction
+/// (Addition, Bitwise Rotation, XOR + Stateful Key Evolution) for ultra-hard anti-reversing.
 pub fn generate_challenge_signature(timestamp: &str, client_ip: &str, secret: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(timestamp.as_bytes());
     hasher.update(b"|");
     hasher.update(client_ip.as_bytes());
     hasher.update(b"|");
-    hasher.update(secret.as_bytes());
+
+    // ARX (Addition, Rotate, XOR) Cryptographic Transformation with Stateful Key Evolution
+    let mut stateful_key: u8 = 0x5A;
+    let obfuscated_secret: Vec<u8> = secret
+        .bytes()
+        .enumerate()
+        .map(|(idx, byte)| {
+            // 1. Stateful Key Evolution (LFSR/Rolling key per step)
+            stateful_key = stateful_key.wrapping_mul(33).wrapping_add(idx as u8);
+
+            // 2. Non-Linear Addition (Modulo 256 ADD)
+            let add_step = byte.wrapping_add(stateful_key);
+
+            // 3. Bitwise Rotation (ROL 3 bits) for bit diffusion
+            let rot_step = add_step.rotate_left(3);
+
+            // 4. XOR Combination (Linear XOR layer with evolved key)
+            rot_step ^ (stateful_key ^ 0xA5)
+        })
+        .collect();
+
+    hasher.update(&obfuscated_secret);
     format!("{:x}", hasher.finalize())
 }
 

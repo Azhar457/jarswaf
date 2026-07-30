@@ -1,0 +1,72 @@
+@id: "J001"
+@name: "SQLi Basic"
+@phase: request_body
+@severity: critical
+@action: block
+@score: 50
+@tags: ["sqli", "critical"]
+
+match any {
+  body ~ "(?i)union\s+select"
+  args ~ "(?i)union\s+select"
+}
+
+---
+
+@id: "J002"
+@name: "XSS Script"
+@phase: request_body
+@severity: critical
+@action: block
+@score: 50
+@tags: ["xss", "critical"]
+
+match any {
+  body ~ "(?i)<script[^>]*>[^<]*<\/script>"
+  args ~ "(?i)<script[^>]*>[^<]*<\/script>"
+}
+
+---
+
+@id: "J003"
+@name: "Path Traversal"
+@phase: request_headers
+@severity: high
+@action: block
+@score: 30
+@tags: ["lfi", "path-traversal"]
+
+match any {
+  path ~ "\.\./"
+  path ~ "\.\.\\"
+}
+
+---
+
+@id: "J004"
+@name: "Scanner Detection"
+@phase: request_headers
+@severity: low
+@action: anomaly
+@score: 10
+@paranoia: 2
+@tags: ["scanner", "recon"]
+
+match any {
+  headers.user-agent in ["sqlmap", "nikto", "nmap", "burpsuite", "acunetix", "nessus", "openvas", "zap", "wpscan", "gobuster", "dirbuster", "hydra", "medusa", "patator"]
+}
+
+---
+
+@id: "J005"
+@name: "Admin Path Access"
+@phase: request_headers
+@severity: high
+@action: anomaly
+@score: 20
+@tags: ["admin", "access-control"]
+
+match all {
+  path ~ "(?i)(admin|config|backup)"
+  method equals "GET"
+}
