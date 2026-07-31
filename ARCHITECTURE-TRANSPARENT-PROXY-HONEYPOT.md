@@ -2,7 +2,8 @@
 
 **Project:** `jarsWAF`  
 **Stack:** Rust + Aya (eBPF) + Cloudflare Pingora  
-**Status:** Architecture Design & Subsystem Specification
+**Version:** 0.2.0-Architecture  
+**Status:** Comprehensive Architecture & Gap Analysis Resolution
 
 ---
 
@@ -11,107 +12,140 @@
 ### 1. Architectural Flow Diagram
 
 ```
-[Internet Traffic]
-       ↓ (Port 80/443 or any port)
-[NIC eth0 (Host / Container)]
-       ↓
+[Internet Traffic (IPv4 & IPv6, TCP & UDP/QUIC)]
+       │
+       ▼
+[NIC Interface (tc_interface / eth0)]
+       │
+       ▼
 [eBPF TC Ingress Hook (tc_ingress)]
-       ├── Check skb.mark == WAF_BYPASS_MARK (0x4242)
-       │      └── [MATCH] → Allow (Bypass to real socket/loopback)
-       └── [NO MATCH] →
-              ├── Save (src_ip, src_port, orig_dst_ip, orig_dst_port) in BPF HashMap
-              ├── BPF bpf_skb_store_bytes() / NAT dst_port → 18000 (WAF Port)
+       ├── [Check skb.mark == WAF_BYPASS_MARK (0x4242)]
+       │      └── 🟢 MATCH → Pass to target socket (Loop Prevention)
+       └── 🔴 NO MATCH →
+              ├── Save tuple (src_ip, src_port, orig_dst_ip, orig_dst_port) in BPF Conntrack HashMap
+              ├── Handle IPv4 (`sockaddr_in`) & IPv6 (`sockaddr_in6`)
+              ├── BPF NAT rewrite dst_port → 18000 (WAF Port)
               └── Return TC_ACT_OK (Forward to Pingora)
-       ↓
-[Pingora Listening on 18000 with SO_MARK (0x4242) & IP_TRANSPARENT]
-       ↓
+       │
+       ▼
+[Pingora Listening on 18000 (SO_MARK 0x4242, IP_TRANSPARENT)]
+       │
+       ├── Reads `SO_ORIGINAL_DST` (IPv4) or `SO_ORIGINAL_DST6` (IPv6)
+       │
+       ▼
 [Pingora request_filter / PhasePipeline Inspection]
-       ├── [ALLOWED] → Read SO_ORIGINAL_DST via `getsockopt`
-       │                Forward to Original Target Destination with SO_MARK (0x4242)
-       └── [BLOCKED/FLAGGED] → Transparent Steering to Virtual Honeypot (127.0.0.1:9999)
-```
-
-### 2. Key Components & Implementation Design
-
-#### A. eBPF TC Classifier (`tc_ingress`)
-- **Hook Type:** `BPF_PROG_TYPE_SCHED_CLS` attached to `tc ingress` on network interface (`eth0`).
-- **Loop Prevention (`SO_MARK`):**
-  - When Pingora makes outgoing backend connections to original destinations, it sets `SO_MARK` socket option to `0x4242` (`WAF_BYPASS_MARK`).
-  - The eBPF TC classifier checks `skb->mark`. If `skb->mark == 0x4242`, the packet is immediately passed (`TC_ACT_OK`) without port rewriting, preventing infinite proxy loops.
-- **Port Rewriting:**
-  - Rewrites TCP destination port from target port (e.g. 80, 443, 8080) to Pingora WAF port (e.g. 18000).
-  - Recalculates TCP/IP checksums using BPF helpers.
-
-#### B. Pingora Socket Configuration
-- **`IP_TRANSPARENT`:** Enables binding/listening to non-local addresses and receiving packets redirected by eBPF/tproxy.
-- **`SO_ORIGINAL_DST` (`getsockopt`):**
-  - Extract `sockaddr_in` from client socket to retrieve real destination IP and Port before proxy interception.
-
----
-
-## 🍯 PART 2: Virtual Honeypot Deception Infrastructure (Tarpit + Honeypot Hybrid)
-
-### 1. Core Design Philosophy
-When an attacker sends malicious payloads (SQLi, RevShell, LFI, Bot probes) or comes from a high-risk IP:
-- ❌ **Traditional WAF:** Returns instant `403 Forbidden` or `DROP`. (Gives instant feedback to attackers, prompting IP rotation or tool modification).
-- ✅ **jarsWAF Virtual Honeypot:** Transparently steers the attacker's TCP connection to an isolated **Honeypot Deception Engine** (`127.0.0.1:9999` or Honeypot NetNS).
-- **Result:** Attacker believes their attack succeeded or is interacting with a vulnerable target, wasting their resources, delaying further attacks, and exposing their tactics (`HoneypotEvent` threat intelligence).
-
----
-
-### 2. Deception Architecture Layers
-
-```
-                               ┌────────────────────────────────────────────────────────┐
-                               │             Pingora WAF (Port 18000)                   │
-                               └──────────────────────────┬─────────────────────────────┘
-                                                          │ Flagged Attacker Connection
-                                                          ▼
-                               ┌────────────────────────────────────────────────────────┐
-                               │           Honeypot Steering Controller                 │
-                               │  - Sets ctx.upstream_override = "127.0.0.1:9999"      │
-                               │  - Logs HoneypotEvent (IP, Path, Payload, UA)          │
-                               └──────────────────────────┬─────────────────────────────┘
-                                                          │ Forward Connection
-                                                          ▼
-   ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
-   │ Virtual Honeypot Network Namespace (`ip netns add honeypot`)                                    │
-   │                                                                                                 │
-   │   ┌─────────────────────────────────┐               ┌───────────────────────────────────────┐   │
-   │   │ Fake Admin & API Deception      │               │ Canary Token Injector (Honeydoc)      │   │
-   │   │ - `/admin`, `/wp-admin`         │               │ - Fake `.env` with Canary Credentials │   │
-   │   │ - `/phpinfo.php`, `/.git/config`│               │ - Fake API keys (AWS/JWT)             │   │
-   │   └─────────────────────────────────┘               └───────────────────────────────────────┘   │
-   │                                                                                                 │
-   │   ┌─────────────────────────────────┐               ┌───────────────────────────────────────┐   │
-   │   │ Tarpit Latency Generator        │               │ Network Sandbox & Outbound Isolation  │   │
-   │   │ - Artificial delay (50-200ms)    │               │ - `iptables -P OUTPUT DROP`           │   │
-   │   └─────────────────────────────────┘               └───────────────────────────────────────┘   │
-   └─────────────────────────────────────────────────────────────────────────────────────────────────┘
+       ├── 🟢 [CLEAN REQUEST] → Forward to Original Target Destination with SO_MARK (0x4242)
+       └── 🔴 [BLOCKED / FLAGGED] → Transparent Steering to Virtual Honeypot Deception Engine
 ```
 
 ---
 
-### 3. Deception Capabilities Matrix
+### 2. Resolution of Critical Technical Gaps (1 - 5)
 
-| Deception Feature | Description | Threat Intel / Operational Purpose |
-| :--- | :--- | :--- |
-| **Honeypot Traffic Steering** | `ctx.upstream_override = Some("127.0.0.1:9999")` | Redirects flagged traffic seamlessly without breaking TCP handshake. |
-| **Fake Admin Panels** | Mocks `/admin`, `/phpinfo.php`, `/wp-admin`, `/api/v1/auth` | Collects credential stuffing & automated bot login attempts. |
-| **Canary Tokens (`Honeydoc`)** | Serves fake `.env`, `id_rsa`, AWS secret keys with trackable tokens | Triggers alert when attacker uses leaked fake credentials outside the honeypot. |
-| **Tarpit Latency (50-200ms)** | Applies random artificial sleep per chunk | Slows down automated scanners, fuzzers, and brute-force tools. |
-| **Strict NetNS Isolation** | Isolated namespace + `iptables -P OUTPUT DROP` | Prevents lateral movement, SSRF exploitation, and outbound command execution. |
-| **`HoneypotEvent` SIEM Logging** | Structured JSON logs with timestamp, IP, path, payload, UA | Real-time SIEM alert feed and threat actor profiling. |
+#### 🔴 Gap 1: Config Clarification (TC vs XDP)
+- **`tc_interface`**: Dedicated interface for eBPF TC classifier (`tc_ingress`) handling port redirection and socket layer transparent proxying.
+- **`xdp_interface`**: Optional high-performance XDP hook for early L3/L4 packet dropping before socket allocation during DDoS attacks.
+
+#### 🔴 Gap 2: Dual IPv4 & IPv6 Handling
+- **eBPF Program**: Handles both `ETH_P_IP` (0x0800) and `ETH_P_IPV6` (0x86DD).
+- **Pingora Socket Extraction**: Uses `SO_ORIGINAL_DST` (`SOL_IP`) for IPv4 and `SO_ORIGINAL_DST6` (`SOL_IPV6` / `IP6T_SO_ORIGINAL_DST`) for IPv6 socket addresses.
+
+#### 🔴 Gap 3: BPF Map Overflow & Conntrack Capacity Management
+- **Map Capacity**: Configurable LRU HashMap (`conntrack_map_capacity = 65536`).
+- **Overflow Policies**:
+  - `drop_oldest`: Uses `BPF_MAP_TYPE_LRU_HASH` so kernel automatically evicts oldest unused connections.
+  - `reject_new`: Emits TCP RST on overflow to prevent uninspected bypass.
+
+#### 🔴 Gap 4: Explicit Fallback Mode (`ebpf_load_failure`)
+If eBPF TC hook fails to load (kernel version incompatibility or missing `CAP_BPF`):
+- `block_all`: Fails closed, rejecting incoming non-whitelisted traffic.
+- `passthrough`: Fails open with emergency log alert.
+- `exit`: Immediately halts `jarswaf` daemon to prevent silent security degradation.
+
+#### 🔴 Gap 5: UDP / QUIC (HTTP/3) Interception
+- eBPF TC program intercepts UDP port 443 packets and redirects to Pingora's UDP/QUIC listener or applies TPROXY UDP socket redirection.
 
 ---
 
-## 🧪 PART 3: Configuration Spec (`jarswaf.toml`)
+## 🍯 PART 2: Virtual Honeypot Infrastructure (Protocol-Aware Deception)
+
+### 1. Multi-Protocol Deception Matrix (Gap 6)
+
+When traffic is flagged, `jarsWAF` steers the TCP socket based on destination port to a protocol-aware honeypot handler:
+
+| Port | Service | Handshake / Response Protocol | Attacker Impact / Threat Intel |
+| :--- | :--- | :--- | :--- |
+| **80 / 443** | Fake HTTP / Admin | Serves fake `/admin`, `/phpinfo.php`, `.env` with Canary Credentials & Tarpit Latency (50-200ms) | Captures Web Exploits, LFI, SQLi, Bot probes |
+| **22** | Fake SSH | Mocks `SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6\r\n` banner | Captures SSH brute-force & credential stuffing |
+| **3306** | Fake MySQL | Emits MySQL 8.0 Initial Handshake Packet (`mysql_native_password`) | Traps DB scanning & auth bypass attempts |
+| **5432** | Fake PostgreSQL| Responds with SSL Refusal (`N`) & MD5 Password Auth Prompt | Traps Postgres DB enumeration |
+| **6379** | Fake Redis | Mocks RESP Protocol (`-NOAUTH Authentication required.\r\n`) | Captures Redis unauth RCE & probe attempts |
+
+---
+
+### 2. Blocklist TTL & Reputation Decay (Gap 7)
+- **Temporary Block TTL**: Flagged IPs are held in Honeypot for `block_ttl_seconds` (default: 3600s / 1 hour).
+- **Strike Escalation**: After `escalate_after_strikes` (default: 3 strikes), the IP is escalated to a permanent eBPF XDP DROP blocklist across all nodes.
+
+---
+
+### 3. TLS Termination & Certificate Management (Gap 8)
+- **ALPN Negotiation**: Supports `h2` and `http/1.1`.
+- **Dynamic SNI Loader**: Resolves TLS certificates dynamically per VHost using `TlsConfig`.
+- **Pre-Inspection Decryption**: Pingora terminates TLS, inspects raw HTTP/1.1 & HTTP/2 headers/body, then re-encrypts or forwards to backend.
+
+---
+
+### 4. Observability & Prometheus Metrics (Gap 9)
+
+Dedicated Metrics Server (`/metrics` on port 9090):
+```prometheus
+# HELP jarswaf_requests_total Total HTTP requests processed
+jarswaf_requests_total{vhost="default",status="200"} 15420
+# HELP jarswaf_blocked_total Total requests blocked or steered
+jarswaf_blocked_total{rule_id="REVSHELL-001"} 42
+# HELP jarswaf_honeypot_active_sessions Active honeypot tarpit connections
+jarswaf_honeypot_active_sessions 5
+# HELP jarswaf_ebpf_map_utilization_ratio BPF Conntrack map usage ratio
+jarswaf_ebpf_map_utilization_ratio 0.23
+```
+
+---
+
+## 🟡 PART 3: Nice-to-Have Features & Operational Hardening (Gaps 10 - 13)
+
+### 1. External Threat Intel Feeds (Gap 10)
+- Ingests AbuseIPDB & GreyNoise blocklists periodically, pre-populating BPF reputation maps.
+
+### 2. Canary Token Callback Endpoint (Gap 11)
+- Exposes `/api/v1/canary/callback` to ingest webhook notifications whenever leaked honeydoc credentials (AWS keys, JWTs) are executed outside the honeypot.
+
+### 3. Session Fingerprinting Beyond IP (Gap 12)
+- Integrates JA3/JA4 TLS Client Hello fingerprinting & HTTP header ordering analysis to track attackers rotating IP addresses via VPNs/Proxies.
+
+### 4. Graceful Shutdown & Kernel Cleanup (Gap 13)
+- Implements `tokio::signal::ctrl_c()` and `SIGTERM` handlers.
+- Automatically detaches eBPF TC hooks (`tc filter del`) and clears BPF maps upon process termination to prevent orphan kernel rules.
+
+---
+
+## ⚙️ Updated Configuration Specification (`jarswaf.toml`)
 
 ```toml
 [global]
 port_http = 80
 port_https = 443
+log_dir = "./logs"
+waf_enabled = true
+
+[global.ebpf]
+tc_interface = "eth0"
 xdp_interface = "eth0"
+conntrack_map_capacity = 65536
+map_overflow_policy = "drop_oldest"
+ebpf_load_failure = "block_all"
+enable_ipv6 = true
+enable_quic_udp = true
 
 [honeypot]
 enabled = true
@@ -119,12 +153,23 @@ upstream_addr = "127.0.0.1:9999"
 min_delay_ms = 50
 max_delay_ms = 200
 enable_canary_tokens = true
+block_ttl_seconds = 3600
+escalate_after_strikes = 3
+canary_callback_url = "http://127.0.0.1:8080/api/v1/canary/callback"
+ssh_port = 22
+mysql_port = 3306
+postgres_port = 5432
+redis_port = 6379
+
+[metrics]
+prometheus_port = 9090
+health_check_port = 8080
 ```
 
 ---
 
-## 🛠️ Summary & Status
+## 🛠️ Implementation Summary & Status
 
-- ✅ `src/honeypot.rs` module created with `HoneypotConfig`, `HoneypotEvent`, and `generate_fake_env_honeydoc()`.
-- ✅ Integrates cleanly into `src/config.rs`, `src/lib.rs`, `src/rules.rs`, and `src/vhost.rs`.
+- ✅ `src/honeypot.rs` updated with Protocol-Aware Handshake Generators (SSH, MySQL, Postgres, Redis).
+- ✅ `src/config.rs` updated with `EbpfConfig` (`tc_interface`, conntrack capacity, overflow policies, IPv6/QUIC flags).
 - ✅ 130 unit tests passing with zero compilation warnings.
