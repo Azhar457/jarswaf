@@ -90,6 +90,10 @@ pub struct GlobalConfig {
     pub scoring_mode: String,
     #[serde(default = "default_anomaly_threshold")]
     pub anomaly_threshold: u32,
+    /// AST safe-profile auto-learning (opt-in). Default OFF — see
+    /// learn_safe_ast_profile for the poisoning vector this prevents.
+    #[serde(default)]
+    pub ast_learning_enabled: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -408,6 +412,7 @@ impl Default for Config {
                 ebpf: EbpfConfig::default(),
                 scoring_mode: default_scoring_mode(),
                 anomaly_threshold: default_anomaly_threshold(),
+                ast_learning_enabled: false,
             },
             tls: TlsConfig {
                 mode: "disabled".to_string(),

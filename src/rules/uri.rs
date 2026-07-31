@@ -27,6 +27,26 @@ static SSRF_002_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(127\.1|0x7f000001|2130706433|0177\.0\.0\.1|017700000001|0x7f\.0x0\.0x1|0x7f\.0\.0\.1|::ffff:0:7f00:1|0:0:0:0:0:ffff:7f00:1)").unwrap()
 });
 
+// XSS in URI/query — catches javascript: scheme, HTML-entity-encoded tags,
+// data: URIs, vbscript:, and mixed-case/malformed script tags after decoding.
+static XSS_URI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(javascript\s*:|vbscript\s*:|data\s*:\s*text/html|&#x?\w+;*\s*<|&#x?\w+;*\s*scr|<\s*script|<script|</script|on\w+\s*=|onload|onerror|onclick|alert\s*\(|confirm\s*\(|prompt\s*\()").unwrap()
+});
+
+fn check_xss_uri_001(req: &RequestInfo) -> bool {
+    XSS_URI_001_REGEX.is_match(req.query)
+}
+
+// SQLi heuristics that the AST engine misses (whitespace-less keywords,
+// DB-specific keywords, encoded separators)
+static SQLI_URI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(collate\s+nocase|\([0-9a-z]+\)\s*(or|and)\s*\([0-9a-z]+\)=|union\s*select|'#|\x27#|--\s*$|%c0%af|%c0%a7|%u[0-9a-f]{4}|%[0-9a-f]{2}%[0-9a-f]{2}or|or%00|\x27%00|'or\s|'and\s|'\s*or\s*'|\x27\s*or\s*\x27|1'or'1|1'and'1|'or\d|'and\d|\x27or\d|\x27and\d)").unwrap()
+});
+
+fn check_sqli_uri_001(req: &RequestInfo) -> bool {
+    SQLI_URI_001_REGEX.is_match(req.query)
+}
+
 fn check_lfi_001(req: &RequestInfo) -> bool {
     let target = format!("{}?{}", req.path, req.query);
     LFI_001_REGEX.is_match(&target)
@@ -126,5 +146,23 @@ pub static URI_RULES: &[Rule] = &[
         severity: Severity::High,
         description: "Potential DNS rebinding or OOB interaction domain",
         check: check_ssrf_003,
+    },
+    Rule {
+        id: "XSS-URI-001",
+        name: "XSS in URI/Query (Scheme & Encoded Tags)",
+        phase: Phase::Uri,
+        action: Action::Block,
+        severity: Severity::High,
+        description: "XSS payload in query using javascript:/data:/vbscript: scheme, HTML-entity-encoded tags, or event handlers",
+        check: check_xss_uri_001,
+    },
+    Rule {
+        id: "SQLI-URI-001",
+        name: "SQLi Heuristic (Whitespace-less & DB-specific)",
+        phase: Phase::Uri,
+        action: Action::Block,
+        severity: Severity::High,
+        description: "SQLi variants the AST engine misses: whitespace-less tautologies, COLLATE NOCASE, encoded separators, comment injection",
+        check: check_sqli_uri_001,
     },
 ];

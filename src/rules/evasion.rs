@@ -40,9 +40,26 @@ fn check_smuggling(headers: &AHashMap<String, String>) -> bool {
     // Check for obfuscated Transfer-Encoding
     if has_te {
         if let Some(v_str) = headers.get("transfer-encoding") {
-            // If it's something weird like 'chunked, chunked' or contains spaces 'chunked '
-            if v_str.contains("  ") || v_str.to_lowercase() != *v_str {
+            let te_lower = v_str.to_lowercase();
+            // Duplicate TE (TE.TE): 'chunked, chunked' — a smuggling vector
+            if v_str.split(',').count() > 1 {
+                warn!(
+                    "Request Smuggling detected: Multiple Transfer-Encoding values ({})",
+                    v_str
+                );
+                return true;
+            }
+            // If it's something weird like contains spaces 'chunked ' or mixed case
+            if v_str.contains("  ") || te_lower != *v_str {
                 warn!("Request Smuggling detected: Obfuscated Transfer-Encoding");
+                return true;
+            }
+            // Valid TE values must be exactly 'chunked' or 'identity' (RFC 7230 §3.3.1)
+            if te_lower != "chunked" && te_lower != "identity" {
+                warn!(
+                    "Request Smuggling detected: Unexpected Transfer-Encoding value '{}'",
+                    v_str
+                );
                 return true;
             }
         }

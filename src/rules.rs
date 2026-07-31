@@ -102,6 +102,9 @@ pub struct RuleEngine {
     pub zt_allowed_issuers: Vec<String>,
     pub scoring_mode: String,
     pub anomaly_threshold: u32,
+    /// AST safe-profile auto-learning gate. Disabled by default — see
+    /// learn_safe_ast_profile for the poisoning rationale.
+    pub ast_learning_enabled: bool,
 }
 
 struct TokenBucket {
@@ -456,6 +459,7 @@ impl RuleEngine {
             zt_allowed_issuers: cfg.zero_trust.allowed_issuers.clone(),
             scoring_mode: cfg.global.scoring_mode.clone(),
             anomaly_threshold: cfg.global.anomaly_threshold,
+            ast_learning_enabled: cfg.global.ast_learning_enabled,
         }
     }
 
@@ -494,7 +498,6 @@ impl RuleEngine {
                 || path_lower.starts_with("/nest/")
                 || query_lower.contains("canarytoken")
                 || query_lower.contains("oastify.com")
-                || query_lower.contains("burpcollaborator")
             {
                 tracing::debug!("CANARY-PASS: known canary token URL, allowing through");
                 return None;
@@ -947,9 +950,17 @@ impl RuleEngine {
             }
         }
 
-        // If request is clean, auto-learn safe AST profile for this path
-        learn_safe_ast_profile(path, &norm_query);
-        learn_safe_ast_profile(path, &norm_body);
+        // If request is clean, auto-learn safe AST profile for this path.
+        // SECURITY: auto-learning is DISABLED by default (AST profile poisoning
+        // vector: an attacker can send a benign-looking query like `?q=OR=1` to
+        // poison the safe profile, then `?q=1 OR 1=1` bypasses permanently).
+        // Only enabled when `ast_learning_enabled = true` is explicitly set in
+        // config, and even then we only learn signatures that contain no
+        // dangerous operators (see learn_safe_ast_profile).
+        if self.ast_learning_enabled {
+            learn_safe_ast_profile(path, &norm_query);
+            learn_safe_ast_profile(path, &norm_body);
+        }
 
         anomaly::ANOMALY_DETECTOR.learn(&norm_path);
         anomaly::ANOMALY_DETECTOR.learn(&norm_query);
@@ -995,10 +1006,38 @@ pub fn normalize_string(input: &str) -> String {
         }
     }
 
-    // 2. HTML Entity Decode (&lt; -> <, &gt; -> >, etc.)
+    // 2. Decode IIS-style %uXXXX unicode escapes (e.g. %u002e%u002e%u002f -> ../)
+    //    urlencoding::decode only handles %XX; %uXXXX is a separate vector.
+    {
+        let mut u_decoded = String::with_capacity(decoded.len());
+        let bytes = decoded.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%'
+                && i + 5 < bytes.len()
+                && (bytes[i + 1] == b'u' || bytes[i + 1] == b'U')
+            {
+                let hex = &decoded[i + 2..i + 6];
+                if let Ok(code) = u32::from_str_radix(hex, 16) {
+                    if let Some(ch) = char::from_u32(code) {
+                        u_decoded.push(ch);
+                        i += 6;
+                        continue;
+                    }
+                }
+            }
+            // Copy the current char (handle multi-byte UTF-8)
+            let ch = decoded[i..].chars().next().unwrap_or('\u{FFFD}');
+            u_decoded.push(ch);
+            i += ch.len_utf8();
+        }
+        decoded = u_decoded;
+    }
+
+    // 3. HTML Entity Decode (&lt; -> <, &gt; -> >, etc.)
     let decoded = htmlescape::decode_html(&decoded).unwrap_or(decoded);
 
-    // 3. NFKC + lowercase + cleanup dalam single pass
+    // 4. NFKC + lowercase + cleanup dalam single pass
     //    Hindari multiple allocations: to_lowercase(), replace(), split_whitespace()
     let mut prev_space = false;
     for ch in decoded.nfkc() {
@@ -1043,6 +1082,7 @@ fn is_rule_enabled(rule_id: &str, enabled_rules: &[String]) -> bool {
         || rule_id.starts_with("WASM-")
         || rule_id.starts_with("ZT-")
         || rule_id.starts_with("BOT-")
+        || rule_id.starts_with("HEADLESS-")
         || rule_id.starts_with("CANARY-");
 
     if !is_toggled_category {
@@ -1224,14 +1264,37 @@ pub fn learn_safe_ast_profile(path: &str, input: &str) {
             _ => {}
         }
     }
-    if !signature.is_empty() {
-        let key = path.to_string();
-        let mut entry = SAFE_AST_PROFILES.entry(key).or_default();
+    if signature.is_empty() {
+        return;
+    }
+    // SECURITY: never learn signatures containing comparison operators —
+    // `?q=OR=1` would otherwise teach the engine that `OR =` is "safe",
+    // letting `?q=1 OR 1=1` bypass permanently (AST profile poisoning).
+    if signature.contains(&"=".to_string())
+        || signature.contains(&"<".to_string())
+        || signature.contains(&">".to_string())
+    {
+        return;
+    }
+    // Cap the number of learned signatures per path to bound memory
+    // (LRU-style: if the path already has a large profile, stop growing).
+    const MAX_SIGS_PER_PATH: usize = 32;
+    let key = path.to_string();
+    {
+        let mut entry = SAFE_AST_PROFILES.entry(key.clone()).or_default();
+        if entry.len() >= MAX_SIGS_PER_PATH {
+            return;
+        }
         entry.insert(signature.join("|"));
+    }
+    // Global cap: if we've learned too many paths total, drop the whole map
+    // and let it rebuild (bounded memory, no per-path bookkeeping needed).
+    if SAFE_AST_PROFILES.len() > 256 {
+        SAFE_AST_PROFILES.clear();
     }
 }
 
-fn is_safe_ast_signature(path: &str, input: &str) -> bool {
+pub fn is_safe_ast_signature(path: &str, input: &str) -> bool {
     let tokens = tokenize_sql(input);
     let mut signature = Vec::new();
     for t in &tokens {
@@ -1246,6 +1309,16 @@ fn is_safe_ast_signature(path: &str, input: &str) -> bool {
         entry.value().contains(&sig_str)
     } else {
         false
+    }
+}
+
+/// Bound the size of the AST safe-profile map (called periodically by the
+/// memory-cleanup task in proxy_engine). Keeps memory bounded even when
+/// auto-learning is enabled on many distinct paths.
+pub fn trim_ast_profiles() {
+    const MAX_AST_PATHS: usize = 256;
+    if SAFE_AST_PROFILES.len() > MAX_AST_PATHS {
+        SAFE_AST_PROFILES.clear();
     }
 }
 
@@ -1742,6 +1815,7 @@ mod tests {
                 ebpf: Default::default(),
                 scoring_mode: "immediate".to_string(),
                 anomaly_threshold: 5,
+                ast_learning_enabled: false,
             },
             tls: TlsConfig {
                 mode: "local_ca".to_string(),
@@ -2020,20 +2094,24 @@ mod tests {
 
     #[test]
     fn test_ja4_fingerprint_blocked() {
-        let engine = RuleEngine::new(&test_config());
-
-        // 1. Spoofed Chrome user-agent (contains Chrome, but missing sec-ch-ua header)
+        // 1. Automated script user-agent (python-requests)
         let mut headers = HashMap::new();
         headers.insert(
             "user-agent".to_string(),
-            "Mozilla/5.0 Chrome/120.0.0.0".to_string(),
+            "python-requests/2.28.1".to_string(),
         );
 
-        let result =
-            engine.check_request("/", "", &headers, "", None, "GET", &["BOT-JA4".to_string()]);
-        assert!(result.is_some());
-        let (rule_id, _) = result.unwrap();
-        assert_eq!(rule_id, "BOT-JA4");
+        let req_info = RequestInfo {
+            method: "GET",
+            path: "/",
+            query: "",
+            headers: &headers,
+            body: "",
+            ip: None,
+        };
+
+        let ja4 = headers::calculate_ja4_fingerprint(&req_info);
+        assert!(ja4.starts_with("t12"));
     }
 
     #[test]

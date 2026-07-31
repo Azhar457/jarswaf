@@ -26,7 +26,7 @@ static CMDI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 static CMDI_002_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?i)(nslookup\s+.*\.|dig\s+.*\.|wget\s+.*\.|curl\s+.*\.|ping\s+.*\.|traceroute\s+.*\.|whois\s+.*\.attacker|burpcollaborator|dnslog|requestbin|interactsh)"#).unwrap()
+    Regex::new(r"(?i)(nslookup\s+[^\s]|dig\s+[^\s]|wget\s+[^\s]|curl\s+[^\s]|ping\s+[^\s]|traceroute\s+[^\s]|whois\s+[^\s]|burpcollaborator|dnslog|requestbin|interactsh|oastify|canarytokens)").unwrap()
 });
 
 // File Upload Regexes
