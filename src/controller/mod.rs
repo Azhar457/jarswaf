@@ -30,91 +30,10 @@ pub struct BlockCommand {
     pub reason: Option<String>,
 }
 
-pub async fn run_controller(port: u16, config_path: String) {
-    // Ensure admin token is generated if not exists
-    if let Ok(mut cfg) = config::load_config(&config_path) {
-        let has_token = match &cfg.global.admin_token {
-            Some(t) => !t.trim().is_empty(),
-            None => false,
-        };
-
-        if !has_token {
-            let generated = uuid::Uuid::new_v4().simple().to_string();
-            cfg.global.admin_token = Some(generated.clone());
-            if config::save_config(&config_path, &cfg).is_ok() {
-                println!("\n\n");
-                println!(
-                    "========================================================================"
-                );
-                println!("                   jarsWAF - SECURITY INITIALIZATION                  ");
-                println!(
-                    "========================================================================"
-                );
-                println!("  A secure random administrator token has been generated for you:");
-                println!("  ");
-                println!("  Admin Token:  \x1b[1;33m{}\x1b[0m", generated);
-                println!("  ");
-                println!(
-                    "  IMPORTANT: Please copy and save this key in a safe place (e.g., Notepad)."
-                );
-                println!("  It is used to access the dashboard and register agents.");
-                println!("  This token will NOT be shown again.");
-                println!(
-                    "========================================================================"
-                );
-                println!("\n\n");
-            }
-        }
-    }
-
-    let cfg = config::load_config(&config_path).expect("Failed to load config");
-    let db_path = cfg.logging.db_path.clone();
-    logging::init_sqlite_db(&db_path).expect("Failed to initialize SQLite DB");
-    handlers::start_threat_intel_scraper(db_path.clone());
-
-    let grpc_token = cfg
-        .global
-        .grpc_token
-        .clone()
-        .unwrap_or_else(|| "default_token".to_string());
-    tokio::spawn(async move {
-        if let Err(e) = crate::grpc::server::run_manager_server(9000, grpc_token).await {
-            tracing::error!("gRPC Manager Server error: {}", e);
-        }
-    });
-
-    // Initialize broadcast channel for live logs
-    let (tx, _rx) = broadcast::channel(10000);
-    let (config_tx, _config_rx) = broadcast::channel(100);
-    // Channel for real-time block commands pushed to agents
-    let (block_tx, _block_rx) = broadcast::channel(1000);
-
-    // App state
-    let initial_stats = logging::sqlite_get_stats(&db_path, 24).unwrap_or(logging::Stats {
-        total_requests: 0,
-        blocked: 0,
-        rate_limited: 0,
-    });
-    info!(
-        "Loaded baseline stats from SQLite: total={}, blocked={}, rate_limited={}",
-        initial_stats.total_requests, initial_stats.blocked, initial_stats.rate_limited
-    );
-
-    let state = ControllerState {
-        tx,
-        block_tx,
-        db_path,
-        logging_enabled: Arc::new(AtomicBool::new(true)),
-        log_size_limit_mb: Arc::new(AtomicU64::new(500)), // default 500MB
-        config_path,
-        agent_registry: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-        total_requests: Arc::new(AtomicU64::new(initial_stats.total_requests as u64)),
-        blocked: Arc::new(AtomicU64::new(initial_stats.blocked as u64)),
-        rate_limited: Arc::new(AtomicU64::new(initial_stats.rate_limited as u64)),
-        config_tx,
-        config_lock: Arc::new(tokio::sync::Mutex::new(())),
-    };
-
+/// Build the Controller router with all routes + middleware.
+/// Exposed so integration tests can spin up the API without spinning up
+/// gRPC, SQLite, or the threat intel scraper.
+pub fn build_router(state: ControllerState) -> Router {
     // CORS Configuration for local Svelte dashboard
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -222,14 +141,102 @@ pub async fn run_controller(port: u16, config_path: String) {
             auth::auth_middleware,
         ));
 
-    let app = Router::new()
+    Router::new()
         .route("/health", get(health_handler))
         .route("/install.sh", get(handlers::serve_install_script))
         .route("/metrics", get(handlers::get_metrics_handler))
         .merge(api_routes)
         .fallback_service(tower_http::services::ServeDir::new("dashboard/dist"))
         .layer(cors)
-        .with_state(state);
+        .with_state(state)
+}
+
+pub async fn run_controller(port: u16, config_path: String) {
+    // Ensure admin token is generated if not exists
+    if let Ok(mut cfg) = config::load_config(&config_path) {
+        let has_token = match &cfg.global.admin_token {
+            Some(t) => !t.trim().is_empty(),
+            None => false,
+        };
+
+        if !has_token {
+            let generated = uuid::Uuid::new_v4().simple().to_string();
+            cfg.global.admin_token = Some(generated.clone());
+            if config::save_config(&config_path, &cfg).is_ok() {
+                println!("\n\n");
+                println!(
+                    "========================================================================"
+                );
+                println!("                   jarsWAF - SECURITY INITIALIZATION                  ");
+                println!(
+                    "========================================================================"
+                );
+                println!("  A secure random administrator token has been generated for you:");
+                println!("  ");
+                println!("  Admin Token:  \x1b[1;33m{}\x1b[0m", generated);
+                println!("  ");
+                println!(
+                    "  IMPORTANT: Please copy and save this key in a safe place (e.g., Notepad)."
+                );
+                println!("  It is used to access the dashboard and register agents.");
+                println!("  This token will NOT be shown again.");
+                println!(
+                    "========================================================================"
+                );
+                println!("\n\n");
+            }
+        }
+    }
+
+    let cfg = config::load_config(&config_path).expect("Failed to load config");
+    let db_path = cfg.logging.db_path.clone();
+    logging::init_sqlite_db(&db_path).expect("Failed to initialize SQLite DB");
+    handlers::start_threat_intel_scraper(db_path.clone());
+
+    let grpc_token = cfg
+        .global
+        .grpc_token
+        .clone()
+        .unwrap_or_else(|| "default_token".to_string());
+    tokio::spawn(async move {
+        if let Err(e) = crate::grpc::server::run_manager_server(9000, grpc_token).await {
+            tracing::error!("gRPC Manager Server error: {}", e);
+        }
+    });
+
+    // Initialize broadcast channel for live logs
+    let (tx, _rx) = broadcast::channel(10000);
+    let (config_tx, _config_rx) = broadcast::channel(100);
+    // Channel for real-time block commands pushed to agents
+    let (block_tx, _block_rx) = broadcast::channel(1000);
+
+    // App state
+    let initial_stats = logging::sqlite_get_stats(&db_path, 24).unwrap_or(logging::Stats {
+        total_requests: 0,
+        blocked: 0,
+        rate_limited: 0,
+    });
+    info!(
+        "Loaded baseline stats from SQLite: total={}, blocked={}, rate_limited={}",
+        initial_stats.total_requests, initial_stats.blocked, initial_stats.rate_limited
+    );
+
+    let state = ControllerState {
+        tx,
+        block_tx,
+        db_path,
+        logging_enabled: Arc::new(AtomicBool::new(true)),
+        log_size_limit_mb: Arc::new(AtomicU64::new(500)), // default 500MB
+        config_path,
+        agent_registry: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        total_requests: Arc::new(AtomicU64::new(initial_stats.total_requests as u64)),
+        blocked: Arc::new(AtomicU64::new(initial_stats.blocked as u64)),
+        rate_limited: Arc::new(AtomicU64::new(initial_stats.rate_limited as u64)),
+        config_tx,
+        config_lock: Arc::new(tokio::sync::Mutex::new(())),
+    };
+
+    let app = build_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr)

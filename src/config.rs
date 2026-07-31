@@ -30,6 +30,8 @@ pub struct Config {
     pub api_schemas: Vec<RouteSchema>,
     #[serde(default)]
     pub zero_trust: ZeroTrustConfig,
+    #[serde(default)]
+    pub honeypot: crate::honeypot::HoneypotConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -374,6 +376,7 @@ impl Default for Config {
             gossip: GossipConfig::default(),
             api_schemas: Vec::new(),
             zero_trust: ZeroTrustConfig::default(),
+            honeypot: crate::honeypot::HoneypotConfig::default(),
         }
     }
 }

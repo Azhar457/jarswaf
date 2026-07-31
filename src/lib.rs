@@ -5,6 +5,7 @@ pub mod controller;
 pub mod dlp;
 pub mod gossip;
 pub mod grpc;
+pub mod honeypot;
 pub mod logging;
 pub mod metrics;
 pub mod proxy;
