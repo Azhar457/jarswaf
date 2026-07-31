@@ -131,6 +131,7 @@ mod tests {
             gossip: crate::config::GossipConfig::default(),
             api_schemas: vec![],
             zero_trust: crate::config::ZeroTrustConfig::default(),
+            honeypot: crate::honeypot::HoneypotConfig::default(),
         }
     }
 
