@@ -87,6 +87,7 @@ mod tests {
                 metrics_push_url: None,
                 metrics_push_interval_secs: 60,
                 xdp_interface: None,
+                ebpf: Default::default(),
                 scoring_mode: "immediate".to_string(),
                 anomaly_threshold: 5,
             },

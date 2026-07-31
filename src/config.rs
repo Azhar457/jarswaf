@@ -83,10 +83,58 @@ pub struct GlobalConfig {
     /// XDP network interface to attach to (e.g., "eth0", "podman0")
     #[serde(default = "default_xdp_interface")]
     pub xdp_interface: Option<String>,
+    /// Advanced eBPF TC & Conntrack settings
+    #[serde(default)]
+    pub ebpf: EbpfConfig,
     #[serde(default = "default_scoring_mode")]
     pub scoring_mode: String,
     #[serde(default = "default_anomaly_threshold")]
     pub anomaly_threshold: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EbpfConfig {
+    #[serde(default = "default_tc_interface")]
+    pub tc_interface: Option<String>,
+    #[serde(default = "default_xdp_interface")]
+    pub xdp_interface: Option<String>,
+    #[serde(default = "default_conntrack_capacity")]
+    pub conntrack_map_capacity: usize,
+    #[serde(default = "default_overflow_policy")]
+    pub map_overflow_policy: String,
+    #[serde(default = "default_load_failure_policy")]
+    pub ebpf_load_failure: String,
+    #[serde(default = "default_true")]
+    pub enable_ipv6: bool,
+    #[serde(default = "default_true")]
+    pub enable_quic_udp: bool,
+}
+
+fn default_tc_interface() -> Option<String> {
+    Some("eth0".to_string())
+}
+fn default_conntrack_capacity() -> usize {
+    65536
+}
+fn default_overflow_policy() -> String {
+    "drop_oldest".to_string()
+}
+fn default_load_failure_policy() -> String {
+    "block_all".to_string()
+}
+
+impl Default for EbpfConfig {
+    fn default() -> Self {
+        Self {
+            tc_interface: default_tc_interface(),
+            xdp_interface: default_xdp_interface(),
+            conntrack_map_capacity: default_conntrack_capacity(),
+            map_overflow_policy: default_overflow_policy(),
+            ebpf_load_failure: default_load_failure_policy(),
+            enable_ipv6: true,
+            enable_quic_udp: true,
+        }
+    }
 }
 
 fn default_mode() -> String {
@@ -357,6 +405,7 @@ impl Default for Config {
                 metrics_push_interval_secs: 60,
                 webhooks: Vec::new(),
                 xdp_interface: None,
+                ebpf: EbpfConfig::default(),
                 scoring_mode: default_scoring_mode(),
                 anomaly_threshold: default_anomaly_threshold(),
             },

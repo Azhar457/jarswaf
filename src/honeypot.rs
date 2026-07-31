@@ -22,6 +22,20 @@ pub struct HoneypotConfig {
     pub max_delay_ms: u64, // e.g. 200ms artificial latency
     #[serde(default = "default_canary_tokens")]
     pub enable_canary_tokens: bool,
+    #[serde(default = "default_block_ttl")]
+    pub block_ttl_seconds: u64, // Default: 3600 (1 hour IP block TTL)
+    #[serde(default = "default_escalate_strikes")]
+    pub escalate_after_strikes: u32, // Default: 3 strikes before permanent ban
+    #[serde(default)]
+    pub canary_callback_url: Option<String>,
+    #[serde(default = "default_ssh_port")]
+    pub ssh_port: u16, // Default: 22
+    #[serde(default = "default_mysql_port")]
+    pub mysql_port: u16, // Default: 3306
+    #[serde(default = "default_postgres_port")]
+    pub postgres_port: u16, // Default: 5432
+    #[serde(default = "default_redis_port")]
+    pub redis_port: u16, // Default: 6379
 }
 
 fn default_enabled() -> bool {
@@ -39,6 +53,24 @@ fn default_max_delay_ms() -> u64 {
 fn default_canary_tokens() -> bool {
     true
 }
+fn default_block_ttl() -> u64 {
+    3600
+}
+fn default_escalate_strikes() -> u32 {
+    3
+}
+fn default_ssh_port() -> u16 {
+    22
+}
+fn default_mysql_port() -> u16 {
+    3306
+}
+fn default_postgres_port() -> u16 {
+    5432
+}
+fn default_redis_port() -> u16 {
+    6379
+}
 
 impl Default for HoneypotConfig {
     fn default() -> Self {
@@ -48,6 +80,13 @@ impl Default for HoneypotConfig {
             min_delay_ms: 50,
             max_delay_ms: 200,
             enable_canary_tokens: true,
+            block_ttl_seconds: default_block_ttl(),
+            escalate_after_strikes: default_escalate_strikes(),
+            canary_callback_url: None,
+            ssh_port: default_ssh_port(),
+            mysql_port: default_mysql_port(),
+            postgres_port: default_postgres_port(),
+            redis_port: default_redis_port(),
         }
     }
 }
@@ -57,8 +96,8 @@ impl Default for HoneypotConfig {
 pub struct HoneypotEvent {
     pub timestamp: String,
     pub attacker_ip: IpAddr,
-    pub service: String, // e.g. "http", "fake_admin", "fake_env"
-    pub action: String,  // e.g. "honeypot_steered", "canary_accessed"
+    pub service: String, // e.g. "http", "ssh", "mysql", "postgres", "redis"
+    pub action: String,  // e.g. "honeypot_steered", "canary_accessed", "port_probe"
     pub path: String,
     pub user_agent: Option<String>,
     pub payload: String,
@@ -92,7 +131,7 @@ impl HoneypotEvent {
     }
 }
 
-/// Generates fake honeypot payloads (e.g. fake .env with canary keys or fake phpinfo)
+/// Generates fake honeypot HTTP payloads (e.g. fake .env with canary keys)
 pub fn generate_fake_env_honeydoc() -> String {
     "# Production Environment File (CONFIDENTIAL)\n\
      APP_NAME=EnterpriseCore\n\
@@ -105,6 +144,23 @@ pub fn generate_fake_env_honeydoc() -> String {
      AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n\
      CANARY_TOKEN=http://canarytokens.com/feedback/tags/jarswaf-honeypot/index.html\n"
         .to_string()
+}
+
+/// Protocol-Aware Deception Payload Generators
+pub fn generate_fake_ssh_banner() -> &'static str {
+    "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6\r\n"
+}
+
+pub fn generate_fake_mysql_handshake() -> &'static [u8] {
+    b"\x4a\x00\x00\x00\x0a\x38\x2e\x30\x2e\x33\x35\x00\x01\x00\x00\x00\x41\x42\x43\x44\x45\x46\x47\x48\x00\xff\xf7\x21\x02\x00\xff\xc7\x15\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x49\x50\x51\x52\x53\x54\x55\x56\x57\x58\x00\x6d\x79\x73\x71\x6c\x5f\x6e\x61\x74\x69\x76\x65\x5f\x70\x61\x73\x73\x77\x6f\x72\x64\x00"
+}
+
+pub fn generate_fake_postgres_auth() -> &'static str {
+    "N" // SSL refused, prompt for MD5 password
+}
+
+pub fn generate_fake_redis_resp() -> &'static str {
+    "-NOAUTH Authentication required.\r\n"
 }
 
 #[cfg(test)]
@@ -125,5 +181,16 @@ mod tests {
         assert_eq!(event.service, "http");
         assert_eq!(event.action, "honeypot_steered");
         assert!(generate_fake_env_honeydoc().contains("CANARY_TOKEN"));
+    }
+
+    #[test]
+    fn test_protocol_aware_payloads() {
+        assert!(generate_fake_ssh_banner().starts_with("SSH-2.0"));
+        assert!(!generate_fake_mysql_handshake().is_empty());
+        assert_eq!(generate_fake_postgres_auth(), "N");
+        assert_eq!(
+            generate_fake_redis_resp(),
+            "-NOAUTH Authentication required.\r\n"
+        );
     }
 }
