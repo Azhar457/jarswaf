@@ -8,7 +8,12 @@ pub struct MultipartFinding {
 }
 
 pub fn inspect_multipart(body: &[u8], boundary: &str) -> Vec<MultipartFinding> {
-    const MAX_MULTIPART_PARTS: usize = 1000;
+    // CPU-exhaustion bound: 100 parts max per request (was 1000 — an attacker
+    // could send thousands of tiny parts to pin WAF CPU while the backend
+    // happily parses them all).
+    const MAX_MULTIPART_PARTS: usize = 100;
+    // Part-header size bound: each part's header section must be small.
+    const MAX_PART_HEADER_BYTES: usize = 4096;
     let mut findings = Vec::new();
     let boundary_bytes = format!("--{}", boundary).into_bytes();
 
@@ -42,10 +47,40 @@ pub fn inspect_multipart(body: &[u8], boundary: &str) -> Vec<MultipartFinding> {
             }
 
             let part_data = &body[header_start..part_end];
+            // Enforce part-header size bound before inspecting (a malicious
+            // part with a giant header section could be a parse-cost attack).
+            if let Some(hdr_end) =
+                find_subslice(part_data, b"\r\n\r\n").or_else(|| find_subslice(part_data, b"\n\n"))
+            {
+                if hdr_end > MAX_PART_HEADER_BYTES {
+                    findings.push(MultipartFinding {
+                        rule_id: "MULTIPART-HEADER-LIMIT",
+                        description: format!(
+                            "Multipart part header section exceeds {} bytes",
+                            MAX_PART_HEADER_BYTES
+                        ),
+                        filename: String::new(),
+                    });
+                    continue;
+                }
+            }
             inspect_part(part_data, &mut findings);
         } else {
             break;
         }
+    }
+
+    // If we stopped because the part-count cap was hit AND there is still
+    // more body to parse, that is a part-exhaustion attempt — flag it.
+    if parts_count >= MAX_MULTIPART_PARTS && i < body.len() {
+        findings.push(MultipartFinding {
+            rule_id: "MULTIPART-PART-LIMIT",
+            description: format!(
+                "Multipart body exceeds maximum of {} parts (potential part-exhaustion attack)",
+                MAX_MULTIPART_PARTS
+            ),
+            filename: String::new(),
+        });
     }
 
     findings
