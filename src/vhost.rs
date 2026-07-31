@@ -90,6 +90,7 @@ mod tests {
                 ebpf: Default::default(),
                 scoring_mode: "immediate".to_string(),
                 anomaly_threshold: 5,
+                ast_learning_enabled: false,
             },
             tls: crate::config::TlsConfig {
                 mode: "local_ca".to_string(),

@@ -104,7 +104,6 @@ fn check_canary_pass(req: &RequestInfo) -> bool {
         || path_lower.starts_with("/nest/")
         || query_lower.contains("canarytoken")
         || query_lower.contains("oastify.com")
-        || query_lower.contains("burpcollaborator")
 }
 
 pub static HEADER_RULES: &[Rule] = &[
@@ -175,7 +174,7 @@ pub static HEADER_RULES: &[Rule] = &[
         id: "BOT-JA4",
         name: "Malicious JA4 Fingerprint",
         phase: Phase::Headers,
-        action: Action::Block,
+        action: Action::Log,
         severity: Severity::High,
         description: "Client TLS fingerprint matches known botnet / automated script signatures",
         check: check_ja4_fingerprint,
@@ -266,12 +265,7 @@ pub fn calculate_ja4_fingerprint(req: &RequestInfo) -> String {
         .map(|s| s.as_str())
         .unwrap_or("");
 
-    let tls_version = if ua.contains("Chrome")
-        || ua.contains("Safari")
-        || ua.contains("Firefox")
-        || ua.contains("curl")
-        || ua.contains("python")
-    {
+    let tls_version = if ua.contains("Chrome") || ua.contains("Safari") || ua.contains("Firefox") {
         "13"
     } else {
         "12"
@@ -310,13 +304,6 @@ fn check_ja4_fingerprint(req: &RequestInfo) -> bool {
     };
     if ua.is_empty() {
         return false;
-    }
-    if ua.contains("Chrome") {
-        // If they claim to be Chrome, but don't have the typical Chrome headers, they are spoofing!
-        let has_sec_ch = req.headers.contains_key("sec-ch-ua");
-        if !has_sec_ch {
-            return true;
-        }
     }
 
     let ja4 = calculate_ja4_fingerprint(req);

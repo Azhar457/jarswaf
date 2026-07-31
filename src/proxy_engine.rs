@@ -49,6 +49,38 @@ pub static SESSION_FINGERPRINTS: once_cell::sync::Lazy<dashmap::DashMap<std::net
 /// Entries beyond cap evict oldest first via retain-order.
 pub const BLOCKLIST_MAX_ENTRIES: usize = 100_000;
 
+/// Headers a client must never be allowed to set directly. Only honored when
+/// the connection peer is in `trusted_proxies` (e.g. Cloudflare, a reverse
+/// proxy in front of jarsWAF). Otherwise they are stripped before the rule
+/// engine sees them — spoofing X-Forwarded-For to bypass IP reputation /
+/// rate limiting is a real attack (and was a confirmed lab bypass).
+const SPOOFABLE_PROXY_HEADERS: [&str; 4] =
+    ["x-forwarded-for", "x-real-ip", "client-ip", "forwarded"];
+
+/// Strip spoofable proxy headers from a request header map unless the direct
+/// connection peer is a configured trusted proxy.
+fn sanitize_proxy_headers(
+    headers_map: &mut ahash::AHashMap<String, String>,
+    peer_ip: std::net::IpAddr,
+    config: &crate::config::Config,
+) {
+    let trusted = config.global.trusted_proxies.as_deref().unwrap_or(&[]);
+    let peer_trusted = trusted
+        .iter()
+        .any(|t| t.parse::<std::net::IpAddr>() == Ok(peer_ip));
+    if peer_trusted {
+        return; // trusted proxy — keep headers as-is
+    }
+    for h in SPOOFABLE_PROXY_HEADERS.iter() {
+        if headers_map.remove(*h).is_some() {
+            tracing::debug!(
+                "Stripped spoofable proxy header '{}' from untrusted peer",
+                h
+            );
+        }
+    }
+}
+
 /// Semaphore limiting concurrent WAF rule checks (regex/AST tokenization).
 /// Prevents N concurrent blocking ops from starving tokio worker threads.
 /// When full, new requests skip WAF inspection gracefully (allow, not crash).
@@ -57,7 +89,10 @@ pub const BLOCKLIST_MAX_ENTRIES: usize = 100_000;
 pub static WAF_SEMAPHORE: once_cell::sync::Lazy<tokio::sync::Semaphore> =
     once_cell::sync::Lazy::new(|| tokio::sync::Semaphore::new(64));
 
-/// Try-acquire WAF semaphore with a short timeout to prevent silent bypass under burst traffic.
+/// Try-acquire WAF semaphore with a short timeout.
+/// FAIL-CLOSED: when the semaphore is saturated (concurrency DoS / traffic
+/// spike), we must NOT silently pass the request to the backend without
+/// inspection. Instead we bail out to the caller which responds 503.
 macro_rules! try_waf_permit {
     () => {{
         match tokio::time::timeout(
@@ -66,10 +101,12 @@ macro_rules! try_waf_permit {
         )
         .await
         {
-            Ok(Ok(permit)) => permit,
-            _ => {
-                tracing::warn!("WAF semaphore timeout — skipping rule check, allowing request");
-                return Ok(false);
+            Ok(Ok(permit)) => Ok(Some(permit)),
+            Ok(Err(_)) | Err(_) => {
+                tracing::warn!(
+                    "WAF semaphore timeout — rejecting request (fail-closed) to avoid uninspected pass-through"
+                );
+                Err(())
             }
         }
     }};
@@ -111,9 +148,17 @@ pub fn start_memory_cleanup() {
         let mut interval = tokio::time::interval(Duration::from_secs(1800));
         loop {
             interval.tick().await;
-            tracing::debug!("Memory cleanup: clearing active-connection tracking tables");
+            tracing::debug!("Memory cleanup: bounding connection-tracking tables");
+            // Hard caps (LRU-style approximation) — prevents OOM from
+            // attacker scanning with millions of random IPs.
+            trim_dashmap(&ACTIVE_CONNECTIONS, 50_000);
+            trim_dashmap(&SESSION_FINGERPRINTS, 10_000);
+            trim_dashmap(&BACKEND_ACTIVE_REQUESTS, 5_000);
+            trim_dashmap(&ROUND_ROBIN_COUNTERS, 512);
+            // SAFE_AST_PROFILES is bounded inside learn_safe_ast_profile
+            // (cap per path + global clear) — belt and suspenders:
+            crate::rules::trim_ast_profiles();
             ACTIVE_CONNECTIONS.retain(|_, _| false);
-            SESSION_FINGERPRINTS.retain(|_, _| false);
             BACKEND_ACTIVE_REQUESTS.retain(|_, _| false);
         }
     });
@@ -317,9 +362,11 @@ async fn respond_custom_error_with_headers(
         ("text/html", html)
     };
 
+    // Content-Length in Rust String::len() is byte count (handles multi-byte 🛡️ emoji correctly).
     if let Ok(mut resp) = ResponseHeader::build(status_code, Some(body.len())) {
         let _ = resp.insert_header("Content-Type", content_type);
         let _ = resp.insert_header("Server", "jarsWAF");
+        let _ = resp.insert_header("Connection", "close");
 
         // Inject extra headers
         if let Some(headers) = extra_headers {
@@ -737,10 +784,13 @@ impl ProxyHttp for JarsWafProxy {
         ctx.client_ip = Some(client_ip);
 
         // Extract req_header fields early to avoid hold-borrow of session
-        let (req_method, path, query_str, host, headers_map) = {
+        let (req_method, path, query_str, host, mut headers_map, cl_values, te_present) = {
             let req_header = session.req_header();
             let req_method = req_header.method.as_str().to_string();
-            let path = req_header.uri.path().to_string();
+            // Strip matrix parameters (RFC 3986 / Spring-Boot style `/path;jsessionid=x`)
+            // so rule evaluation sees the canonical path. `;` separates matrix params.
+            let raw_path = req_header.uri.path();
+            let path = raw_path.split(';').next().unwrap_or(raw_path).to_string();
             let query_str = req_header.uri.query().unwrap_or("").to_string();
             let host = req_header
                 .headers
@@ -749,13 +799,102 @@ impl ProxyHttp for JarsWafProxy {
                 .map(|s| s.to_string());
 
             let mut headers_map = ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
+            // Detect duplicate Content-Length values BEFORE the AHashMap
+            // collapses them (request-smuggling vector: CL: 42 + CL: 0).
+            let mut cl_values: Vec<String> = Vec::new();
+            let mut te_present = false;
             for (name, value) in req_header.headers.iter() {
+                let lname = name.as_str().to_ascii_lowercase();
+                if lname == "content-length" {
+                    if let Ok(val_str) = value.to_str() {
+                        cl_values.push(val_str.trim().to_string());
+                    }
+                } else if lname == "transfer-encoding" {
+                    te_present = true;
+                }
                 if let Ok(val_str) = value.to_str() {
                     headers_map.insert(name.to_string(), val_str.to_string());
                 }
             }
-            (req_method, path, query_str, host, headers_map)
+            (
+                req_method,
+                path,
+                query_str,
+                host,
+                headers_map,
+                cl_values,
+                te_present,
+            )
         };
+
+        // ── Request Smuggling pre-check (before AHashMap collapse) ────────
+        // RFC 7230 §3.3.2: multiple Content-Length headers must be rejected.
+        // AHashMap would silently keep only the last value — a differential
+        // between front-end (WAF) and back-end (app server) smuggling vector.
+        let cl_smuggling = cl_values.len() > 1 && cl_values.windows(2).any(|w| w[0] != w[1]);
+        if cl_smuggling {
+            tracing::warn!(
+                "Request Smuggling detected: duplicate Content-Length headers {:?}",
+                cl_values
+            );
+            let entry = crate::logging::WafLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                client_ip: client_ip.to_string(),
+                method: req_method.clone(),
+                path: path.clone(),
+                action: "BLOCK".to_string(),
+                rule_id: "EVASION-SMUGGLING".to_string(),
+                reason: format!(
+                    "Duplicate Content-Length headers with different values: {:?}",
+                    cl_values
+                ),
+            };
+            let _ = self.log_tx.try_send(entry);
+            let _ = respond_custom_error(
+                session,
+                400,
+                "Bad Request",
+                "Duplicate Content-Length headers",
+                &client_ip.to_string(),
+                "EVASION-SMUGGLING",
+            )
+            .await;
+            return Ok(true);
+        }
+        // CL+TE combo is also a smuggling vector — reject at the proxy level
+        // (defense in depth; the rule engine's check_smuggling also catches it).
+        if !cl_values.is_empty() && te_present {
+            tracing::warn!("Request Smuggling detected: Content-Length + Transfer-Encoding combo");
+            let entry = crate::logging::WafLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                client_ip: client_ip.to_string(),
+                method: req_method.clone(),
+                path: path.clone(),
+                action: "BLOCK".to_string(),
+                rule_id: "EVASION-SMUGGLING".to_string(),
+                reason: "Content-Length + Transfer-Encoding present (CL.TE/TE.CL)".to_string(),
+            };
+            let _ = self.log_tx.try_send(entry);
+            let _ = respond_custom_error(
+                session,
+                400,
+                "Bad Request",
+                "Conflicting framing headers (CL+TE)",
+                &client_ip.to_string(),
+                "EVASION-SMUGGLING",
+            )
+            .await;
+            return Ok(true);
+        }
+
+        // Sanitize spoofable proxy headers (X-Forwarded-For, Client-IP, ...)
+        // unless the peer is a configured trusted proxy.
+        let config = GLOBAL_CONFIG.load();
+        {
+            let mut sanitized = headers_map.clone();
+            sanitize_proxy_headers(&mut sanitized, client_ip, &config);
+            headers_map = sanitized;
+        }
 
         // Health endpoint — respond 200 OK for load balancer probes.
         // No WAF processing, no logging — lightweight.
@@ -800,8 +939,6 @@ impl ProxyHttp for JarsWafProxy {
             }
         }
 
-        let config = GLOBAL_CONFIG.load();
-
         // Match VHost
         let (backend_addr, vhost_cfg) = match crate::vhost::match_vhost(host.as_deref(), &config) {
             Some((b, v)) => (b.to_string(), v.clone()),
@@ -826,6 +963,36 @@ impl ProxyHttp for JarsWafProxy {
         ctx.max_concurrent_requests = vhost_cfg.max_concurrent_requests;
         ctx.security_headers = vhost_cfg.security_headers.clone();
         ctx.dlp_config = vhost_cfg.dlp.clone();
+
+        // ── Phase 0: Canary Token fast-path ─────────────────────────────
+        // Canary tokens are tripwires: they MUST reach the backend so the
+        // alert fires. This check runs AFTER vhost resolution (so the upstream
+        // peer is known) but BEFORE blocklist/reputation/rate-limit/rule-engine
+        // checks — otherwise an auto-remediated IP would have its canary
+        // requests blocked by COLLAB-001 and the tripwire never fires.
+        {
+            let path_lower = path.to_lowercase();
+            let query_lower = query_str.to_lowercase();
+            if path_lower.contains("canarytoken")
+                || path_lower.contains("/canary/")
+                || path_lower.starts_with("/nest/")
+                || query_lower.contains("canarytoken")
+                || query_lower.contains("oastify.com")
+            {
+                tracing::info!("CANARY-PASS: canary token path, allowing through");
+                let entry = crate::logging::WafLogEntry {
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    client_ip: client_ip.to_string(),
+                    method: req_method.clone(),
+                    path: path.clone(),
+                    action: "PASS".to_string(),
+                    rule_id: "CANARY-PASS".to_string(),
+                    reason: "Canary token tripwire — allowed through to trigger alert".to_string(),
+                };
+                let _ = self.log_tx.try_send(entry);
+                return Ok(false); // continue to upstream, skip all WAF checks
+            }
+        }
 
         // ── Phase Pipeline ─────────────────────────────────────
         let phase_ctx = crate::rule_engine::phase::PhaseContext {
@@ -1168,8 +1335,17 @@ impl ProxyHttp for JarsWafProxy {
         }
 
         // 1. Check Blocklist (Persistent/Reputation & Auto-Remediation)
-        let is_blocklisted = self.blocklist.contains_key(&client_ip)
-            || crate::rules::is_ip_temporarily_blocked(client_ip);
+        let is_private_or_loopback = client_ip.is_loopback()
+            || match client_ip {
+                std::net::IpAddr::V4(ipv4) => ipv4.is_private(),
+                std::net::IpAddr::V6(ipv6) => {
+                    let octets = ipv6.octets();
+                    (octets[0] & 0xfe) == 0xfc || (octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80)
+                }
+            };
+        let is_blocklisted = !is_private_or_loopback
+            && (self.blocklist.contains_key(&client_ip)
+                || crate::rules::is_ip_temporarily_blocked(client_ip));
         if is_blocklisted {
             let entry = crate::logging::WafLogEntry {
                 timestamp: chrono::Utc::now().to_rfc3339(),
@@ -1398,8 +1574,32 @@ impl ProxyHttp for JarsWafProxy {
         if !config.global.waf_enabled {
             return Ok(false);
         }
-        // Acquire semaphore — skip WAF if concurrent regex work saturates
-        let _permit = try_waf_permit!();
+        // Acquire semaphore — FAIL-CLOSED: if the semaphore is saturated
+        // (concurrency DoS / traffic spike), reject with 503 instead of
+        // letting the request pass uninspected.
+        if let Err(()) = try_waf_permit!() {
+            let entry = crate::logging::WafLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                client_ip: client_ip.to_string(),
+                method: req_method.clone(),
+                path: path.clone(),
+                action: "BLOCK".to_string(),
+                rule_id: "WAF-CAPACITY".to_string(),
+                reason: "WAF capacity exhausted (semaphore timeout) — rejected fail-closed"
+                    .to_string(),
+            };
+            let _ = self.log_tx.try_send(entry);
+            let _ = respond_custom_error(
+                session,
+                503,
+                "Service Unavailable",
+                "WAF is at capacity. Please retry.",
+                &client_ip.to_string(),
+                "WAF-CAPACITY",
+            )
+            .await;
+            return Ok(true);
+        }
         if let Some((rule_id, reason)) = rule_engine.check_request(
             &path,
             &query_str,
@@ -1615,6 +1815,8 @@ impl ProxyHttp for JarsWafProxy {
     where
         Self::CTX: Send + Sync,
     {
+        // Strip client-supplied X-Forwarded-For headers to prevent IP spoofing
+        let _ = upstream_request.remove_header("X-Forwarded-For");
         if let Some(ip) = ctx.client_ip {
             upstream_request
                 .insert_header("X-Forwarded-For", ip.to_string())
@@ -1759,7 +1961,7 @@ impl ProxyHttp for JarsWafProxy {
             let body_str = String::from_utf8_lossy(&ctx.body_buffer);
 
             // Extract req_header fields early to avoid hold-borrow of session
-            let (path, query, method, host, headers_map) = {
+            let (path, query, method, host, mut headers_map) = {
                 let req_header = session.req_header();
                 let path = req_header.uri.path().to_string();
                 let query = req_header.uri.query().unwrap_or("").to_string();
@@ -1779,6 +1981,13 @@ impl ProxyHttp for JarsWafProxy {
                 }
                 (path, query, method, host, headers_map)
             };
+
+            // Sanitize spoofable proxy headers for body inspection too.
+            if let Some(peer_ip) = ctx.client_ip {
+                let mut sanitized = headers_map.clone();
+                sanitize_proxy_headers(&mut sanitized, peer_ip, &config);
+                headers_map = sanitized;
+            }
 
             if let Some((_, vhost_cfg)) = crate::vhost::match_vhost(host.as_deref(), &config) {
                 // 2.7. API Security (GraphQL)
@@ -1810,16 +2019,33 @@ impl ProxyHttp for JarsWafProxy {
 
                 let rule_engine = crate::rules::RuleEngine::new(&config);
 
-                // Acquire semaphore — skip body WAF if concurrent regex work saturates
-                let _permit = match crate::proxy_engine::WAF_SEMAPHORE.try_acquire() {
-                    Ok(p) => p,
-                    Err(_) => {
-                        tracing::warn!("WAF semaphore full — skipping body rule check");
-                        ctx.body_buffer.clear();
-                        ctx.body_buffer.shrink_to_fit();
-                        return Ok(());
-                    }
-                };
+                // Acquire semaphore — FAIL-CLOSED: if the semaphore is
+                // saturated, reject with 503 rather than letting the body
+                // pass uninspected (body is where SQLi/XSS/webshells live).
+                if crate::proxy_engine::WAF_SEMAPHORE.try_acquire().is_err() {
+                    tracing::warn!("WAF semaphore full — rejecting body inspection (fail-closed)");
+                    ctx.is_blocked = true;
+                    let client_ip_str = ctx
+                        .client_ip
+                        .map_or("Unknown".to_string(), |ip| ip.to_string());
+                    let entry = crate::logging::WafLogEntry {
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        client_ip: client_ip_str.clone(),
+                        method: session.req_header().method.as_str().to_string(),
+                        path: session.req_header().uri.path().to_string(),
+                        action: "BLOCK".to_string(),
+                        rule_id: "WAF-CAPACITY".to_string(),
+                        reason: "WAF body inspection capacity exhausted — rejected fail-closed"
+                            .to_string(),
+                    };
+                    let _ = self.log_tx.try_send(entry);
+                    return Err(pingora::Error::create(
+                        pingora::ErrorType::HTTPStatus(503),
+                        pingora::ErrorSource::Downstream,
+                        Some("Service Unavailable".into()),
+                        None,
+                    ));
+                }
 
                 if let Some((rule_id, reason)) = rule_engine.check_request(
                     &path,
