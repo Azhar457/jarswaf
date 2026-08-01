@@ -7,6 +7,7 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use tokio::io::AsyncWriteExt;
 use tracing::info;
 
 /// Configuration for Honeypot Deception System
@@ -161,6 +162,114 @@ pub fn generate_fake_postgres_auth() -> &'static str {
 
 pub fn generate_fake_redis_resp() -> &'static str {
     "-NOAUTH Authentication required.\r\n"
+}
+
+/// Spawn TCP listeners for protocol-aware honeypot services.
+///
+/// Each listener accepts connections, sends the corresponding fake
+/// handshake (SSH banner / MySQL native handshake / Postgres auth /
+/// Redis NOAUTH), applies tarpit-style delay, then closes. Every
+/// connection is logged as a HoneypotEvent for SIEM correlation.
+///
+/// This wires the previously-dead payload generators in this module to
+/// real sockets — see FEATURE-ANALYSIS gap "Protocol-Aware Honeypot".
+pub async fn start_honeypot_listeners(cfg: &HoneypotConfig) {
+    if !cfg.enabled {
+        return;
+    }
+    let mut tasks = Vec::new();
+
+    // SSH — send banner immediately (nmap service detection trigger)
+    tasks.push(tokio::spawn(honeypot_listener(
+        cfg.ssh_port,
+        "ssh",
+        generate_fake_ssh_banner().as_bytes().to_vec(),
+        cfg.min_delay_ms,
+        cfg.max_delay_ms,
+    )));
+
+    // MySQL — send fake native handshake packet
+    tasks.push(tokio::spawn(honeypot_listener(
+        cfg.mysql_port,
+        "mysql",
+        generate_fake_mysql_handshake().to_vec(),
+        cfg.min_delay_ms,
+        cfg.max_delay_ms,
+    )));
+
+    // Postgres — send "N" (SSL refused → MD5 auth prompt follows)
+    tasks.push(tokio::spawn(honeypot_listener(
+        cfg.postgres_port,
+        "postgres",
+        generate_fake_postgres_auth().as_bytes().to_vec(),
+        cfg.min_delay_ms,
+        cfg.max_delay_ms,
+    )));
+
+    // Redis — send NOAUTH error (classic unauthenticated Redis probe reply)
+    tasks.push(tokio::spawn(honeypot_listener(
+        cfg.redis_port,
+        "redis",
+        generate_fake_redis_resp().as_bytes().to_vec(),
+        cfg.min_delay_ms,
+        cfg.max_delay_ms,
+    )));
+
+    for t in tasks {
+        let _ = t.await;
+    }
+}
+
+async fn honeypot_listener(
+    port: u16,
+    service: &'static str,
+    banner: Vec<u8>,
+    min_delay_ms: u64,
+    max_delay_ms: u64,
+) {
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(
+                "Honeypot {} listener failed to bind {}: {}",
+                service,
+                addr,
+                e
+            );
+            return;
+        }
+    };
+    tracing::info!("Honeypot {} listening on {}", service, addr);
+    loop {
+        let (mut sock, peer) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(_) => continue,
+        };
+        let banner = banner.clone();
+        tokio::spawn(async move {
+            // Tarpit: random delay between min and max to slow scanners
+            let delay = if max_delay_ms > min_delay_ms {
+                min_delay_ms + (rand::random::<u64>() % (max_delay_ms - min_delay_ms))
+            } else {
+                min_delay_ms
+            };
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+            let _ = sock.write_all(&banner).await;
+            // Brief pause then close — mimics a real service that drops
+            // connections after sending its banner.
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            let event = HoneypotEvent::new(
+                peer.ip(),
+                service,
+                "port_probe",
+                &format!("/{}", service),
+                None,
+                "probe_handshake_sent",
+            );
+            event.log();
+        });
+    }
 }
 
 #[cfg(test)]

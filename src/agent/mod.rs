@@ -106,6 +106,19 @@ pub async fn run_agent(
         }
     }
 
+    // Start protocol-aware honeypot listeners (SSH/MySQL/Postgres/Redis)
+    // if enabled in config — wires the payload generators in honeypot.rs
+    // to real sockets for deception steering.
+    {
+        if cfg.honeypot.enabled {
+            info!("Protocol-aware honeypot listeners ENABLED (ssh/mysql/postgres/redis)");
+        }
+        let honeypot_cfg = cfg.honeypot.clone();
+        tokio::spawn(async move {
+            crate::honeypot::start_honeypot_listeners(&honeypot_cfg).await;
+        });
+    }
+
     // Determine logging mode from config
     let log_mode = cfg.logging.mode.clone();
     // Initialize SQLite database
