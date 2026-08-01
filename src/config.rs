@@ -601,6 +601,44 @@ pub fn parse_rate_limit(s: &str) -> u32 {
     number_str.parse::<u32>().unwrap_or(600)
 }
 
+/// Match a path against a rate-limit policy pattern, returning
+/// `(matched, specificity)` where specificity is the number of literal
+/// characters in the matched prefix (higher = more specific).
+///
+/// Rules:
+/// - `/*` or `*` matches everything with specificity 1 (least specific)
+/// - `/api/auth/*` matches prefix `/api/auth/` with specificity = len("/api/auth/")
+/// - `*.css` matches extension with specificity = len of extension pattern
+/// - `/login` matches exactly with specificity = usize::MAX (most specific)
+pub fn path_policy_match(pattern: &str, path: &str) -> (bool, usize) {
+    let pat = pattern.trim();
+    if pat.is_empty() {
+        return (false, 0);
+    }
+    if pat == "/*" || pat == "*" {
+        return (true, 1);
+    }
+    if let Some(prefix) = pat.strip_suffix("/*") {
+        let specificity = prefix.len(); // includes trailing '/' if present
+        let prefix = prefix.trim_end_matches('/');
+        // `/api/auth` matches `/api/auth` and `/api/auth/...`; also avoid
+        // `/api` matching `/apiary` (boundary check).
+        if path == prefix
+            || path.starts_with(&format!("{}/", prefix))
+            || (prefix.is_empty() && path.starts_with('/'))
+        {
+            return (true, specificity);
+        }
+        return (false, 0);
+    }
+    if let Some(ext) = pat.strip_prefix("*.") {
+        let specificity = ext.len();
+        let matched = path.ends_with(&format!(".{}", ext));
+        return (matched, if matched { specificity } else { 0 });
+    }
+    (path == pat, usize::MAX)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AllowlistRule {
     pub name: String,
@@ -850,4 +888,57 @@ pub struct RouteSchema {
     pub path: String,
     pub method: String,
     pub parameters: Vec<ParameterSchema>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_path_policy_match_specificity_ordering() {
+        // Catch-all matches everything but is least specific
+        assert_eq!(path_policy_match("/*", "/api/auth/login"), (true, 1));
+        // Prefix match is more specific than catch-all
+        assert_eq!(
+            path_policy_match("/api/auth/*", "/api/auth/login"),
+            (true, "/api/auth".len())
+        );
+        // Exact match is most specific
+        assert_eq!(path_policy_match("/login", "/login"), (true, usize::MAX));
+        // Boundary: /api must NOT match /apiary
+        assert_eq!(path_policy_match("/api/*", "/apiary"), (false, 0));
+        // Extension match
+        assert_eq!(path_policy_match("*.css", "/static/app.css"), (true, 3));
+        assert_eq!(path_policy_match("*.css", "/static/app.js"), (false, 0));
+        // Exact match on path with trailing slash
+        assert_eq!(
+            path_policy_match("/api/auth/*", "/api/auth"),
+            (true, "/api/auth".len())
+        );
+    }
+
+    #[test]
+    fn test_path_policy_match_picks_most_specific() {
+        // Simulate policy selection: /login must win over /* and /api/auth/*
+        let path = "/login";
+        let mut best: Option<(usize, u32)> = None;
+        for (pat, limit) in [("/*", 600u32), ("/api/auth/*", 10), ("/login", 10)] {
+            let (m, spec) = path_policy_match(pat, path);
+            if m && best.map_or(true, |(bs, _)| spec > bs) {
+                best = Some((spec, limit));
+            }
+        }
+        assert_eq!(best, Some((usize::MAX, 10)));
+
+        // /api/auth/login: /api/auth/* (10) must win over /* (600)
+        let path = "/api/auth/login";
+        let mut best: Option<(usize, u32)> = None;
+        for (pat, limit) in [("/*", 600u32), ("/api/auth/*", 10)] {
+            let (m, spec) = path_policy_match(pat, path);
+            if m && best.map_or(true, |(bs, _)| spec > bs) {
+                best = Some((spec, limit));
+            }
+        }
+        assert_eq!(best, Some((9, 10)));
+    }
 }

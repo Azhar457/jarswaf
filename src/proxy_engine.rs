@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{path_policy_match, Config};
 use crate::rule_engine::phase::PhasePipeline;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -1450,43 +1450,45 @@ impl ProxyHttp for JarsWafProxy {
         // Priority: vhost rate_limit_tiers (path-specific) → global rate_limit_policies → vhost rate_limit → global default
         let mut active_limit = None;
 
-        // 2.5a. VHost `rate_limit_tiers` — per-path policy pada vhost ini
-        for tier in &vhost_cfg.rate_limit_tiers {
-            let matches = if tier.path == "/*" || tier.path == "*" {
-                true
-            } else if let Some(prefix) = tier.path.strip_suffix("/*") {
-                path.starts_with(prefix)
-            } else if let Some(ext) = tier.path.strip_prefix("*.") {
-                path.ends_with(ext)
-            } else {
-                path == tier.path
-            };
-            if matches {
-                active_limit = Some(tier.limit);
-                break;
+        // 2.5a. VHost `rate_limit_tiers` — per-path policy pada vhost ini.
+        // Longest-prefix (most specific) match wins — a tier for `/api/auth/*`
+        // must beat a tier for `/*`, otherwise brute-force protection on
+        // auth endpoints is silently bypassed by the catch-all.
+        {
+            let mut best: Option<(usize, u32)> = None; // (specificity, limit)
+            for tier in &vhost_cfg.rate_limit_tiers {
+                let (matches, specificity) = path_policy_match(&tier.path, &path);
+                if matches && best.is_none_or(|(best_spec, _)| specificity > best_spec) {
+                    best = Some((specificity, tier.limit));
+                }
+            }
+            if let Some((_, limit)) = best {
+                active_limit = Some(limit);
             }
         }
 
         // 2.5b. Global `rate_limit_policies` — hanya jika vhost tier tidak match
         if active_limit.is_none() {
+            let mut best: Option<(usize, u32)> = None; // (specificity, limit)
             for policy in &config.rate_limit_policies {
                 let matches = policy.path.split(',').any(|pat| {
-                    let pat = pat.trim();
-                    if pat == "/*" || pat == "*" {
-                        true
-                    } else if let Some(prefix) = pat.strip_suffix("/*") {
-                        path.starts_with(prefix)
-                    } else if let Some(ext) = pat.strip_prefix("*.") {
-                        path.ends_with(ext)
-                    } else {
-                        path == pat
-                    }
+                    let (m, _) = path_policy_match(pat.trim(), &path);
+                    m
                 });
-
                 if matches {
-                    active_limit = Some(crate::config::parse_rate_limit(&policy.limit));
-                    break;
+                    let (_, specificity) = policy
+                        .path
+                        .split(',')
+                        .map(|pat| path_policy_match(pat.trim(), &path))
+                        .max_by_key(|(_, spec)| *spec)
+                        .unwrap_or((false, 0));
+                    if best.is_none_or(|(best_spec, _)| specificity > best_spec) {
+                        best = Some((specificity, crate::config::parse_rate_limit(&policy.limit)));
+                    }
                 }
+            }
+            if let Some((_, limit)) = best {
+                active_limit = Some(limit);
             }
         }
 
@@ -1508,7 +1510,7 @@ impl ProxyHttp for JarsWafProxy {
         if let Some(limit) = active_limit {
             if limit > 0 {
                 let rl_status = rule_engine
-                    .check_rate_limit(client_ip, limit, &config.redis, user_key)
+                    .check_rate_limit(client_ip, limit, &config.redis, user_key, &path)
                     .await;
                 ctx.rate_limit_status = Some(rl_status.clone());
                 if !rl_status.allowed {
