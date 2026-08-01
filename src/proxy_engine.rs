@@ -780,9 +780,9 @@ impl ProxyHttp for JarsWafProxy {
                 match dlp_cfg.action.as_str() {
                     "block" => {
                         return Err(pingora::Error::create(
-                            pingora::ErrorType::HTTPStatus(502),
+                            pingora::ErrorType::HTTPStatus(403),
                             pingora::ErrorSource::Downstream,
-                            Some("DLP Blocked".into()),
+                            Some("DLP Blocked (403 Forbidden)".into()),
                             None,
                         ));
                     }
