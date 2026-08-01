@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 static BOT_001_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(sqlmap|nikto|nmap|masscan|zgrab|gobuster|dirb|wfuzz|nessus|openvas|w3af|arachni|skipfish|wapiti|vega|netsparker|acunetix|burpsuite|metasploit|nuclei|python|urllib|curl|wget|httpclient|go-http-client|perl|java)").unwrap()
+    Regex::new(r"(?i)(sqlmap|nikto|nmap|masscan|zgrab|gobuster|dirb|wfuzz|nessus|openvas|w3af|arachni|skipfish|wapiti|vega|netsparker|acunetix|burpsuite|metasploit|nuclei|censys|shodan|binaryedge|zoomeye|shadowserver|leakix|internet-measurement|paloaltonetworks|stretchoid|python|urllib|curl|wget|httpclient|go-http-client|perl|java)").unwrap()
 });
 
 static XFF_001_REGEX: Lazy<Regex> = Lazy::new(|| {

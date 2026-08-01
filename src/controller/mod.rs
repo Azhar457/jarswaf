@@ -42,6 +42,19 @@ pub fn build_router(state: ControllerState) -> Router {
 
     // Build Controller router
     let api_routes = Router::new()
+        .route("/api/v1/auth/login", post(auth::login_handler))
+        .route(
+            "/api/v1/auth/change-password",
+            post(auth::change_password_handler),
+        )
+        .route(
+            "/api/v1/onboarding/status",
+            get(handlers::get_onboarding_status_handler),
+        )
+        .route(
+            "/api/v1/onboarding/complete",
+            post(handlers::post_complete_onboarding_handler),
+        )
         .route(
             "/api/v1/agents/register",
             post(handlers::register_agent_handler),
@@ -152,6 +165,9 @@ pub fn build_router(state: ControllerState) -> Router {
 }
 
 pub async fn run_controller(port: u16, config_path: String) {
+    // Ensure random admin password exists on first boot and print credentials banner
+    let _admin_pass = auth::ensure_admin_credentials(&config_path);
+
     // Ensure admin token is generated if not exists
     if let Ok(mut cfg) = config::load_config(&config_path) {
         let has_token = match &cfg.global.admin_token {
@@ -202,6 +218,15 @@ pub async fn run_controller(port: u16, config_path: String) {
         if let Err(e) = crate::grpc::server::run_manager_server(9000, grpc_token).await {
             tracing::error!("gRPC Manager Server error: {}", e);
         }
+    });
+
+    // Spawn embedded Pingora WAF Agent Proxy inside Controller so it includes full Agent capabilities
+    let agent_cfg = config_path.clone();
+    let controller_url = format!("http://127.0.0.1:{}", port);
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        info!("🛡️  Embedded WAF Agent Engine initializing inside Controller...");
+        crate::agent::run_agent(&agent_cfg, Some(controller_url), None, "rules").await;
     });
 
     // Initialize broadcast channel for live logs
