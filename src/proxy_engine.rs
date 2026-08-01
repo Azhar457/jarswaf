@@ -362,9 +362,12 @@ async fn respond_custom_error_with_headers(
         ("text/html", html)
     };
 
-    // Content-Length in Rust String::len() is byte count (handles multi-byte 🛡️ emoji correctly).
+    // Content-Length MUST be set explicitly; ResponseHeader::build's
+    // size_hint only allocates memory, it does not add the header.
+    // Without Content-Length, curl hangs waiting for keep-alive close.
     if let Ok(mut resp) = ResponseHeader::build(status_code, Some(body.len())) {
         let _ = resp.insert_header("Content-Type", content_type);
+        let _ = resp.insert_header("Content-Length", body.len().to_string());
         let _ = resp.insert_header("Server", "jarsWAF");
         let _ = resp.insert_header("Connection", "close");
 
