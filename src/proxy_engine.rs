@@ -700,6 +700,37 @@ impl ProxyHttp for JarsWafProxy {
                     .insert_header("X-RateLimit-Reset", rl_status.reset_after_secs.to_string());
             }
         }
+
+        // ── Security Headers ─────────────────────────────────────────────
+        if let Some(ref sh) = ctx.security_headers {
+            if sh.enabled {
+                let _ = upstream_response.insert_header("Server", "jarswaf");
+                if let Some(ref csp) = sh.content_security_policy {
+                    let _ = upstream_response.insert_header("Content-Security-Policy", csp);
+                }
+                if let Some(ref hsts) = sh.strict_transport_security {
+                    let _ = upstream_response.insert_header("Strict-Transport-Security", hsts);
+                }
+                if let Some(ref xfo) = sh.x_frame_options {
+                    let _ = upstream_response.insert_header("X-Frame-Options", xfo);
+                }
+                if let Some(ref xcto) = sh.x_content_type_options {
+                    let _ = upstream_response.insert_header("X-Content-Type-Options", xcto);
+                }
+                if let Some(ref rp) = sh.referrer_policy {
+                    let _ = upstream_response.insert_header("Referrer-Policy", rp);
+                }
+                if let Some(ref pp) = sh.permissions_policy {
+                    let _ = upstream_response.insert_header("Permissions-Policy", pp);
+                }
+                if let Some(ref corp) = sh.cross_origin_resource_policy {
+                    let _ = upstream_response.insert_header("Cross-Origin-Resource-Policy", corp);
+                }
+                for (k, v) in &sh.extra_headers {
+                    let _ = upstream_response.insert_header(k.clone(), v.clone());
+                }
+            }
+        }
         Ok(())
     }
 

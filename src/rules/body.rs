@@ -39,6 +39,38 @@ static UPLOAD_002_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 // Check functions
+// NoSQL Injection Regexes (MongoDB/Express operators)
+// Covers: $ne, $gt, $lt, $regex, $where, $nin, $exists, $type, $or, $and,
+// $all, $size, $elemMatch — in body JSON, query params, and URL-encoded forms.
+static NOSQL_001_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?i)(\$ne|\$gt|\$lt|\$gte|\$lte|\$regex|\$where|\$nin|\$exists|\$type|\$or|\$and|\$all|\$size|\$elemMatch|\$not|\$nor|\$mod|\$options|\$slice|\$comment)"#).unwrap()
+});
+
+static NOSQL_002_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?i)(\|\|\s*1\s*==\s*1|&&\s*1\s*==\s*1|\|\|\s*true\s*==\s*true|\|\|\s*['\"]?true['\"]?\s*$|\$where['\"]?\s*[:=]\s*['\"]?\s*function\s*\(|\.map\s*\(\s*function|\.find\s*\(\s*\{.*\$|\$\$)"#).unwrap()
+});
+
+// Prototype Pollution Regexes
+// Covers: __proto__, constructor.prototype, prototype, in body JSON + query.
+static PROTO_001_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r#"(?i)(__proto__|constructor\s*\.\s*prototype|\bprototype\b|\[\s*['"]__proto__['"]\s*\])"#,
+    )
+    .unwrap()
+});
+
+fn check_nosql_001(req: &RequestInfo) -> bool {
+    matches_payload(req, &NOSQL_001_REGEX)
+}
+
+fn check_nosql_002(req: &RequestInfo) -> bool {
+    matches_payload(req, &NOSQL_002_REGEX)
+}
+
+fn check_proto_001(req: &RequestInfo) -> bool {
+    matches_payload(req, &PROTO_001_REGEX)
+}
+
 fn matches_payload(req: &RequestInfo, regex: &Regex) -> bool {
     regex.is_match(req.body) || regex.is_match(req.query) || regex.is_match(req.path)
 }
@@ -246,6 +278,33 @@ fn check_sqli_quote_tautology(req: &RequestInfo) -> bool {
 }
 
 pub static BODY_RULES: &[Rule] = &[
+    Rule {
+        id: "NOSQL-001",
+        name: "NoSQL Injection - MongoDB Operator (Basic)",
+        phase: Phase::Body,
+        action: Action::Block,
+        severity: Severity::Critical,
+        description: "MongoDB operator injection ($ne, $gt, $regex, etc.)",
+        check: check_nosql_001,
+    },
+    Rule {
+        id: "NOSQL-002",
+        name: "NoSQL Injection - JS Tautology / $where (Advanced)",
+        phase: Phase::Body,
+        action: Action::Block,
+        severity: Severity::Critical,
+        description: "NoSQL injection via JS tautology or $where function",
+        check: check_nosql_002,
+    },
+    Rule {
+        id: "PROTO-001",
+        name: "Prototype Pollution",
+        phase: Phase::Body,
+        action: Action::Block,
+        severity: Severity::High,
+        description: "Prototype pollution via __proto__/constructor.prototype",
+        check: check_proto_001,
+    },
     Rule {
         id: "SSTI-001",
         name: "Server-Side Template Injection (Basic)",
@@ -571,5 +630,76 @@ mod tests {
 
         let req_ifs = make_req("cat$IFS/etc/passwd", "");
         assert!(check_revshell_obfuscated(&req_ifs));
+    }
+
+    #[test]
+    fn test_nosql_001_operators() {
+        // MongoDB operator injection in JSON body
+        let req1 = make_req(r#"{"username":{"$ne":null},"password":{"$ne":null}}"#, "");
+        assert!(check_nosql_001(&req1));
+
+        // $gt operator in query
+        let req2 = make_req("", "user[$gt]=&pass[$gt]=");
+        assert!(check_nosql_001(&req2));
+
+        // $regex operator
+        let req3 = make_req(r#"{"q":{"$regex":".*"},"role":"admin"}"#, "");
+        assert!(check_nosql_001(&req3));
+
+        // $where operator
+        let req4 = make_req(r#"{"$where":"this.password.length > 0"}"#, "");
+        assert!(check_nosql_001(&req4));
+
+        // $or operator
+        let req5 = make_req(r#"{"$or":[{"user":"admin"}]}"#, "");
+        assert!(check_nosql_001(&req5));
+
+        // Benign: no operators
+        let benign = make_req(r#"{"username":"admin","password":"secret"}"#, "");
+        assert!(!check_nosql_001(&benign));
+    }
+
+    #[test]
+    fn test_nosql_002_tautology() {
+        // $or with true/gt in JSON — detected by NOSQL-001 (operator), but
+        // ALSO exercises the OR-tautology shape in NOSQL-002 via || form:
+        // JS || tautology
+        let req1 = make_req("user=admin||1==1", "");
+        assert!(check_nosql_002(&req1));
+
+        // && 1==1 tautology
+        let req2 = make_req("user=admin&&1==1", "");
+        assert!(check_nosql_002(&req2));
+
+        // $where function injection
+        let req3 = make_req(r#"{"$where":"function() { return true; }"}"#, "");
+        assert!(check_nosql_002(&req3));
+
+        // Benign tautology-free
+        let benign = make_req(r#"{"username":"admin","password":"secret"}"#, "");
+        assert!(!check_nosql_002(&benign));
+    }
+
+    #[test]
+    fn test_proto_001_pollution() {
+        // __proto__ in JSON body
+        let req1 = make_req(r#"{"__proto__":{"isAdmin":true}}"#, "");
+        assert!(check_proto_001(&req1));
+
+        // constructor.prototype
+        let req2 = make_req(r#"{"constructor":{"prototype":{"isAdmin":true}}}"#, "");
+        assert!(check_proto_001(&req2));
+
+        // __proto__ in query
+        let req3 = make_req("", "__proto__[isAdmin]=true");
+        assert!(check_proto_001(&req3));
+
+        // constructor[prototype] in query
+        let req4 = make_req("", "constructor[prototype][x]=y");
+        assert!(check_proto_001(&req4));
+
+        // Benign: no pollution
+        let benign = make_req(r#"{"username":"admin"}"#, "");
+        assert!(!check_proto_001(&benign));
     }
 }
