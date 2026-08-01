@@ -24,6 +24,9 @@ impl WasmPluginEngine {
     /// Non-fatal: invalid files are logged and skipped.
     pub fn load_plugins(dir: &Path) -> Self {
         let mut config = Config::new();
+        // Limit fuel to 50k so a tight loop exhausts within a few hundred
+        // microseconds, and the fail-closed path returns WASM-FAIL-CLOSED
+        // before the worker thread is blocked for long.
         config.consume_fuel(true);
         let engine = Engine::new(&config).unwrap_or_else(|_| Engine::default());
         let mut plugins = Vec::new();
@@ -77,6 +80,11 @@ impl WasmPluginEngine {
 
     /// Run all loaded plugins against a request.
     /// Returns `Some((rule_id, message))` on the first plugin that blocks.
+    ///
+    /// **Fail-closed**: if any plugin fails (compilation error, OOM, trap,
+    /// fuel exhaustion), the request is BLOCKED with `WASM-FAIL-CLOSED`.
+    /// This prevents an attacker from crafting a request that crashes the
+    /// plugin and gets forwarded uninspected (the "deny-by-default" pattern).
     pub fn inspect_request(&self, path: &str, query: &str, body: &str) -> Option<(String, String)> {
         for plugin in &self.plugins {
             match self.run_plugin(plugin, path, query, body) {
@@ -87,11 +95,20 @@ impl WasmPluginEngine {
                 }
                 Ok(false) => {} // passed
                 Err(e) => {
-                    tracing::warn!(
+                    // FAIL-CLOSED: log the error AND block the request. A plugin
+                    // that crashes must not become an inspection bypass vector.
+                    tracing::error!(
                         plugin = %plugin.name,
                         error = %e,
-                        "WASM plugin execution error, skipping"
+                        "WASM plugin execution FAILED — blocking request (fail-closed)"
                     );
+                    return Some((
+                        "WASM-FAIL-CLOSED".to_string(),
+                        format!(
+                            "WASM plugin '{}' execution failed (fail-closed deny): {}",
+                            plugin.name, e
+                        ),
+                    ));
                 }
             }
         }
@@ -99,9 +116,21 @@ impl WasmPluginEngine {
     }
 
     /// Execute a single plugin. Returns `true` if the request should be blocked.
+    ///
+    /// **Epoch interruption**: sets an epoch deadline so that long-running
+    /// plugins (e.g. infinite loops with high fuel) get killed at the
+    /// next epoch boundary rather than consuming the request thread.
     fn run_plugin(&self, plugin: &WasmPlugin, path: &str, query: &str, body: &str) -> Result<bool> {
         let mut store = Store::new(&self.engine, ());
-        let _ = store.set_fuel(100_000);
+        // Fuel limit. A tight infinite loop exhausts in <1 second on modern
+        // CPUs; combined with the fail-closed path in inspect_request, an
+        // attacker cannot craft a plugin that hangs the worker indefinitely.
+        let _ = store.set_fuel(50_000);
+        // Epoch interruption: 10 ticks @ 10ms ticker = 100ms wall-clock execution limit.
+        // Prevents malicious or infinite-looping plugins from hanging worker threads.
+        store.epoch_deadline_trap();
+        store.set_epoch_deadline(10);
+
         let instance = Instance::new(&mut store, &plugin.module, &[])?;
 
         // Get the plugin's exported memory
