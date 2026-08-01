@@ -239,6 +239,12 @@ pub struct VHost {
     pub websocket_security_enabled: bool,
     #[serde(default)]
     pub blocked_asns: Vec<u32>,
+    /// OWASP CRS Paranoia Level (PL1 = Default, PL2, PL3, PL4 = Strict)
+    #[serde(default)]
+    pub paranoia_level: Option<String>,
+    /// WAF Fingerprint Masking — replace Server header (e.g. "nginx" or "Apache")
+    #[serde(default)]
+    pub server_header_mask: Option<String>,
 }
 
 impl Default for VHost {
@@ -269,6 +275,8 @@ impl Default for VHost {
             bot_challenge_enabled: default_bot_challenge_enabled(),
             websocket_security_enabled: default_websocket_security_enabled(),
             blocked_asns: Vec::new(),
+            paranoia_level: None,
+            server_header_mask: None,
         }
     }
 }
@@ -924,7 +932,11 @@ mod tests {
         let mut best: Option<(usize, u32)> = None;
         for (pat, limit) in [("/*", 600u32), ("/api/auth/*", 10), ("/login", 10)] {
             let (m, spec) = path_policy_match(pat, path);
-            if m && best.map_or(true, |(bs, _)| spec > bs) {
+            let is_better = match best {
+                None => true,
+                Some((bs, _)) => spec > bs,
+            };
+            if m && is_better {
                 best = Some((spec, limit));
             }
         }
@@ -935,7 +947,11 @@ mod tests {
         let mut best: Option<(usize, u32)> = None;
         for (pat, limit) in [("/*", 600u32), ("/api/auth/*", 10)] {
             let (m, spec) = path_policy_match(pat, path);
-            if m && best.map_or(true, |(bs, _)| spec > bs) {
+            let is_better = match best {
+                None => true,
+                Some((bs, _)) => spec > bs,
+            };
+            if m && is_better {
                 best = Some((spec, limit));
             }
         }

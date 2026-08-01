@@ -14,17 +14,25 @@
 # WAF logs, databases & certificates
 /logs/
 /certs/
+/config_backups/
 *.db
+*.db-shm
+*.db-wal
 *.log
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
 .claude/
-#Document
+# Document & Env
 docs/
 .env
+.env.*
+secrets.toml
+*.pem
+*.key
+*.crt
 IDEA.md
-config_backups
+config_backups/
 __pycache__/
 *.pyc

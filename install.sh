@@ -134,7 +134,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${INSTALL_DIR}/agent --config ${INSTALL_DIR}/config.toml
+ExecStart=${INSTALL_DIR}/jarswaf controller --config ${INSTALL_DIR}/config.toml --port 8080
 WorkingDirectory=${INSTALL_DIR}
 Restart=always
 RestartSec=5
