@@ -1198,6 +1198,59 @@ fn tokenize_sql(input: &str) -> Vec<SqlToken> {
                 continue;
             }
         }
+        // PostgreSQL dollar-quoted strings: $$...$$ or $tag$...$tag$.
+        // Without this, an attacker hides keywords like UNION inside `$$`.
+        // Ref: https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-DOLLAR-QUOTING
+        if c == '$' && i + 1 < chars.len() && (chars[i + 1] == '$' || chars[i + 1].is_alphabetic())
+        {
+            // Find the matching closing tag.
+            let mut end = i + 2;
+            // If form is $tag$, the tag is `[A-Za-z_][A-Za-z0-9_]*` between the dollars.
+            if chars[i + 1] != '$' {
+                while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
+                    end += 1;
+                }
+                if end >= chars.len() || chars[end] != '$' {
+                    // Not a valid dollar-quoted string — fall through.
+                } else {
+                    let tag_open: String = chars[i..=end].iter().collect();
+                    let mut j = end + 1;
+                    let mut found = false;
+                    while j + tag_open.len() <= chars.len() {
+                        let candidate: String = chars[j..j + tag_open.len()].iter().collect();
+                        if candidate == tag_open {
+                            found = true;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if found {
+                        // Consume the entire $$...$$ block as a string literal
+                        let val: String = chars[end + 1..j].iter().collect();
+                        tokens.push(SqlToken::StringLiteral(val));
+                        i = j + tag_open.len();
+                        continue;
+                    }
+                }
+            } else {
+                // Form $$...$$
+                let mut j = i + 2;
+                let mut found = false;
+                while j + 2 <= chars.len() {
+                    if chars[j] == '$' && chars[j + 1] == '$' {
+                        found = true;
+                        break;
+                    }
+                    j += 1;
+                }
+                if found {
+                    let val: String = chars[i + 2..j].iter().collect();
+                    tokens.push(SqlToken::StringLiteral(val));
+                    i = j + 2;
+                    continue;
+                }
+            }
+        }
         if c == '=' || c == '<' || c == '>' || c == '!' {
             let mut op = c.to_string();
             if i + 1 < chars.len() && (chars[i + 1] == '=' || chars[i + 1] == '>') {
@@ -1559,25 +1612,38 @@ pub struct RateLimitStatus {
 }
 
 impl RuleEngine {
-    /// Build composite key: `ip` alone, or `ip|user_key` when user identifier exists.
-    fn rate_limit_key(ip: IpAddr, user_key: Option<&str>) -> String {
+    /// Build composite key: `ip|scope` alone, or `ip|scope|user_key` when user
+    /// identifier exists. Scope (path policy) isolates buckets per endpoint so
+    /// attack traffic on one path cannot starve the IP's other paths.
+    fn rate_limit_key(ip: IpAddr, user_key: Option<&str>, scope: &str) -> String {
         match user_key {
-            Some(k) if !k.is_empty() => format!("{}|{}", ip, k),
-            _ => ip.to_string(),
+            Some(k) if !k.is_empty() => format!("{}|{}|{}", ip, scope, k),
+            _ => format!("{}|{}", ip, scope),
         }
     }
 
     /// Rate limiter check (token bucket). Return true jika diizinkan.
     /// `user_key` opsional — kalau ada, key = `ip|user_key` (API key / user ID).
+    /// `scope` (biasanya path) membedakan bucket per endpoint — attack traffic
+    /// ke satu path tidak boleh mengunci bucket IP untuk semua path lain.
     pub fn check_rate_limit_local(
         &self,
         ip: IpAddr,
         limit: u32,
         user_key: Option<&str>,
+        scope: &str,
     ) -> RateLimitStatus {
         let rate = limit as f64 / 60.0; // req per detik
-        let capacity = rate * 2.0; // burst 2x
-        let key = Self::rate_limit_key(ip, user_key);
+                                        // Burst capacity: 2x rate, but never below 1.0 — otherwise
+                                        // limits < 30 req/min produce a bucket that can never refill to
+                                        // >= 1 token, silently DoS-ing every request (permanent 429).
+                                        // limit=0 (unlimited) keeps capacity 0 — caller guards with limit>0.
+        let capacity = if limit > 0 {
+            (rate * 2.0).max(1.0)
+        } else {
+            0.0
+        };
+        let key = Self::rate_limit_key(ip, user_key, scope);
         let mut bucket = RATE_LIMITER.entry(key).or_insert_with(|| TokenBucket {
             tokens: capacity,
             last_check: Instant::now(),
@@ -1622,7 +1688,12 @@ impl RuleEngine {
     /// Uses a separate token bucket pool keyed on the token string.
     pub fn check_rate_limit_token(&self, token: &str, limit: u32) -> RateLimitStatus {
         let rate = limit as f64 / 60.0;
-        let capacity = rate * 2.0;
+        // Same floor: burst capacity must never be < 1 token.
+        let capacity = if limit > 0 {
+            (rate * 2.0).max(1.0)
+        } else {
+            0.0
+        };
         let key = token.to_string();
         let mut bucket = TOKEN_RATE_LIMITER
             .entry(key)
@@ -1671,6 +1742,7 @@ impl RuleEngine {
         limit: u32,
         redis_config: &crate::config::RedisConfig,
         user_key: Option<&str>,
+        scope: &str,
     ) -> RateLimitStatus {
         if redis_config.enabled {
             let mut client_guard = REDIS_CLIENT.read().await;
@@ -1695,7 +1767,7 @@ impl RuleEngine {
 
             if let Some(client) = &*client_guard {
                 if let Ok(mut conn) = client.get_multiplexed_async_connection().await {
-                    let composite_key = Self::rate_limit_key(ip, user_key);
+                    let composite_key = Self::rate_limit_key(ip, user_key, scope);
                     let key = format!("ratelimit:sliding:{}", composite_key);
                     let window_secs: i64 = 60;
                     let now_us: i64 = chrono::Utc::now().timestamp_micros();
@@ -1751,7 +1823,7 @@ impl RuleEngine {
         }
 
         // Fallback to local rate limiting
-        self.check_rate_limit_local(ip, limit, user_key)
+        self.check_rate_limit_local(ip, limit, user_key, scope)
     }
 }
 
@@ -2052,7 +2124,11 @@ mod tests {
         let local_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
         // High limit should allow many requests
         for _ in 0..5 {
-            assert!(engine.check_rate_limit_local(local_ip, 1000, None).allowed);
+            assert!(
+                engine
+                    .check_rate_limit_local(local_ip, 1000, None, "/")
+                    .allowed
+            );
         }
     }
 
@@ -2063,7 +2139,7 @@ mod tests {
         // Very low limit — only burst capacity
         let mut allowed = 0;
         for _ in 0..10 {
-            if engine.check_rate_limit_local(ip, 5, None).allowed {
+            if engine.check_rate_limit_local(ip, 5, None, "/").allowed {
                 allowed += 1;
             }
         }
@@ -2086,7 +2162,7 @@ mod tests {
         // This is suspicious — let's verify
         for _ in 0..3 {
             assert!(
-                !engine.check_rate_limit_local(ip, 0, None).allowed,
+                !engine.check_rate_limit_local(ip, 0, None, "/").allowed,
                 "limit=0 should deny (capacity=0)"
             );
         }
@@ -2481,5 +2557,49 @@ dummy-content\r\n\
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_low_limit_bucket_capacity_floor() {
+        // Regression: limits < 30 req/min must not create a bucket that
+        // can never hold >= 1 token (permanent 429 DoS).
+        let engine = RuleEngine::new(&test_config());
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1));
+        // 10 req/min → rate 0.167/s → old capacity 0.33 (never >= 1.0)
+        let status = engine.check_rate_limit_local(ip, 10, None, "/");
+        assert!(
+            status.allowed,
+            "first request with low limit must be allowed (capacity floor)"
+        );
+        let status2 = engine.check_rate_limit_local(ip, 10, None, "/");
+        assert!(
+            !status2.allowed,
+            "second request must exceed burst capacity of 1 token"
+        );
+    }
+
+    #[test]
+    fn test_rate_limit_scope_isolation() {
+        // Regression: buckets must be per (ip, scope/path) — attack traffic on
+        // /api/auth/login must NOT starve /api/users for the same IP.
+        let engine = RuleEngine::new(&test_config());
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 3));
+        // Exhaust auth path bucket
+        let mut auth_allowed = 0;
+        for _ in 0..5 {
+            if engine
+                .check_rate_limit_local(ip, 10, None, "/api/auth/login")
+                .allowed
+            {
+                auth_allowed += 1;
+            }
+        }
+        assert_eq!(auth_allowed, 1, "auth bucket burst = 1 token");
+        // A different path must still be allowed (own bucket)
+        let users = engine.check_rate_limit_local(ip, 600, None, "/api/users");
+        assert!(
+            users.allowed,
+            "different path scope must have independent bucket"
+        );
     }
 }

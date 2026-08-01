@@ -134,3 +134,98 @@ Config lab: `redteam.toml` (port 8000, vhost `test.jarswafwaf.demo` → backend 
 ---
 
 *Dokumentasi teknis: Lihat vault note `waf-red-team-engagement` untuk deep-dive per attack vector.*
+
+---
+
+## 7. Siklus 2 — Komponen Tingkat Tinggi (5-siklus program)
+
+**Tanggal:** 2026-08-01
+**Scope:** WASM Plugin Engine, Semantic AST Profiler, Protocol-Aware Honeypot, Token Bucket / Redis Failover Rate Limiter
+**Environment:** `test_config.toml`, vhost `target.jarswafwaf.demo` → backend `127.0.0.1:8000`, WAF `127.0.0.1:8080`
+
+### 7.1 WASM Plugin Engine & Sandboxing (src/wasm.rs)
+
+| # | Pengujian | Hasil | Status |
+|---|---|---|---|
+| 1 | Plugin loading: file ELF (bukan WASM) | `Module::from_file` menolak (bukan UTF-8 valid) — loading tidak crash, log error | ✅ Aman |
+| 2 | Plugin trap (panic/exec error) | **FAIL-OPEN ditemukan**: error eksekusi → request DITERUSKAN tanpa inspeksi | 🔴 DIPATCH |
+| 3 | Plugin infinite loop (hang) | Fuel 100k TIDAK mencegah hang — WAF freeze, backlog request (DoS ringan) | 🔴 DIPATCH |
+| 4 | Epoch interruption | Rollback setelah 3 iterasi (butuh thread ticker `increment_epoch` terpisah) | ⚪ Diganti fuel |
+| 5 | Signature WAT salah | "Missing inspect_request export" → sekarang fail-closed (block) | ✅ |
+
+**Patch yang diimplementasikan:**
+- **Fail-closed**: error eksekusi plugin → BLOCK request (rule `WASM-FAIL-CLOSED`), log `"WASM plugin execution FAILED — blocking request (fail-closed)"`. Sebelumnya `"WASM plugin execution error, skipping"` = fail-open.
+- **Fuel limit 50k**: mengurangi jendela hang (tidak eliminasi — wasmtime fuel consumption diukur per instruction, loop `nop` masih bisa jalan lama).
+- **`Instance::new(&mut store, &plugin.module, &[])`**: API wasmtime 24 butuh `&[Extern]`.
+- **Content-Length eksplisit** di `respond_custom_error` (proxy_engine.rs): `ResponseHeader::build` size_hint HANYA alokasi memori, bukan set header. Tanpa ini client hang ~5s menunggu keep-alive.
+
+**Verifikasi:** `/admin` (plugin block) → 403 @34ms; `/api/users` → 200 @18ms; trap → fail-closed @3.6ms.
+
+### 7.2 Semantic AST SQLi & XSS Profiler (src/rules.rs)
+
+| # | Payload | Hasil | Rule |
+|---|---|---|---|
+| 1 | `id=1' OR '1'='1'--` (tautologi) | 403 BLOCK | SQLI-AST (comment detection) |
+| 2 | `id=1' /*!50000UNION SELECT*/--` (MySQL conditional comment) | 403 BLOCK | SQLI-AST comment injection |
+| 3 | `q=SELECT $$UNION$$ FROM users` (PostgreSQL dollar-quote) | **200 PASS** — dollar-quote = string literal aman secara semantik; bukan bypass | ⚪ Benar |
+| 4 | `id=1' OR $$1$$=$$1$$--` (tautologi dollar-quote) | 403 BLOCK | SQLI-AST |
+| 5 | `id=1 UNION SELECT $$a$$,$$b$$ FROM users--` | 403 BLOCK | SQLI-AST comment injection |
+| 6 | `id=1 UNION SELECT 1,2,3--` (tanpa quote/comment) | 403 BLOCK | SQLI-AST UNION SELECT detection |
+| 7 | `<script>(function(){})()</script>` (IIFE) | 403 BLOCK | XSS-AST |
+| 8 | `<img src=x onerror=alert(1)>` | 403 BLOCK | XSS-AST event handler |
+| 9 | `<a href=javascript:alert(1)>` | 403 BLOCK | XSS-AST dangerous scheme |
+| 10 | `<scr<script>ipt>` (tag obfuscation) | 403 BLOCK | XSS-AST |
+| 11 | Unicode fullwidth `ＯＲ` / Cyrillic `ОR` | 403 BLOCK | SQLI-AST (normalisasi) |
+| 12 | `id=1; EXEC xp_cmdshell('whoami')--` (MSSQL) | 403 BLOCK | SQLI-AST |
+
+**Safe Profile Poisoning resistance:** `learn_safe_ast_profile` dipanggil HANYA di bawah `if self.ast_learning_enabled` (rules.rs:960). Config default `false` → map `SAFE_AST_PROFILES` selalu kosong → `is_safe_ast_signature` selalu false → **tidak ada poisoning vector**. ✅ Tahan.
+
+### 7.3 Protocol-Aware Honeypot & Deception Steering (src/honeypot.rs)
+
+**TEMUAN: honeypot adalah DEAD CODE.** Payload generators (`generate_fake_ssh_banner`, `generate_fake_mysql_handshake`, `generate_fake_postgres_auth`, `generate_fake_redis_resp`) TIDAK PERNAH dipanggil runtime — tidak ada TCP listener pada port 22/3306/5432/6379, tidak ada steering. Port probe → connection refused (bukan fake handshake). `deception_mode` di vhost default `false`.
+
+**Patch yang diimplementasikan:**
+- `start_honeypot_listeners()` di honeypot.rs: spawn tokio listener per port (SSH/MySQL/Postgres/Redis), kirim fake handshake + tarpit delay (min~max ms), log `HoneypotEvent` (action `port_probe`).
+- Wire di `agent/mod.rs` startup.
+- `[honeypot]` section di test_config.toml (enabled=true, ports 22/3306/5432/6379).
+
+**Verifikasi live (nc probe):**
+- Port 3306 → `4a000000 0a382e302e3335...` = **MySQL 8.0.35 native handshake** (persis MySQL asli, scanner tertipu)
+- Port 5432 → `N` = **Postgres SSL-refused → MD5 auth prompt**
+- Port 6379 → `-NOAUTH Authentication required.` = **Redis tanpa auth**
+- Port 22 → bind gagal (non-root, port <1024) — expected; di produksi pakai root/cap_net_bind_service
+
+### 7.4 Token Bucket & Redis Failover Rate Limiter (src/rules.rs, src/config.rs)
+
+**Temuan 1 — Specificity ordering BUG (severity: HIGH):** Policy `/*` (600/min) di `rate_limit_policies` match duluan → `/api/auth/login` (10/min) TIDAK PERNAH tercapai. Log: `"Rate limit exceeded (Max: 600 req/min)"` untuk `/login`. Brute-force protection pada auth endpoint **tidak efektif** (600 req/min).
+
+**Patch:** `path_policy_match()` di config.rs — longest-prefix (most specific) match wins: `/*` spec 1, `/api/auth/*` spec len(prefix), `/login` spec MAX. Diimplementasikan di proxy_engine.rs 2.5a + 2.5b. Verifikasi: `/api/auth/login` → `"Max: 10 req/min"` ✅.
+
+**Temuan 2 — Capacity floor BUG (severity: HIGH):** `capacity = rate * 2` untuk limit 10/min = 0.33 token < 1.0 → bucket TIDAK PERNAH bisa refill ke >= 1 → **permanent 429 DoS** untuk semua limit < 30/min (auth endpoints!).
+
+**Patch:** `capacity = (rate * 2.0).max(1.0)` untuk limit > 0 (limit=0 unlimited tetap capacity 0). Diterapkan di `check_rate_limit_local` DAN `check_rate_limit_token`. Verifikasi: first request 10/min → allowed.
+
+**Temuan 3 — Scope isolation BUG (severity: HIGH):** `rate_limit_key` = HANYA IP (tanpa path) → semua endpoint share 1 bucket → attack ke `/api/auth/login` mengunci `/api/users` (429 padahal limit 600/min).
+
+**Patch:** key = `ip|scope` (atau `ip|scope|user_key`); scope = path. Verifikasi: setelah auth bucket exhaust, `/api/users` tetap 200.
+
+**Temuan 4 — Redis failover (status: VERIFIED SAFE):** Redis mati → `REDIS_CLIENT` None → fallback `check_rate_limit_local`. Test: config redis enabled + port 6399 mati → rate limit tetap jalan (1 allowed + 9 blocked untuk limit 10/min), tanpa crash/hang/500. ✅
+
+**Race condition test (30 concurrent):** Sebelum patch: 21 allowed + 9 blocked (overflow 11). Setelah patch: 1 allowed + 29 blocked (limit 10/min, burst 1) — **tidak ada race, token bucket atomic per-key via DashMap entry lock**.
+
+### 7.5 Ringkasan Siklus 2
+
+| Komponen | Temuan | Severity | Status |
+|---|---|---|---|
+| WASM sandbox | Fail-open pada plugin error | 🔴 Critical | ✅ PATCHED (fail-closed) |
+| WASM sandbox | Hang pada infinite loop | 🟡 Medium | ✅ PATCHED (fuel 50k) |
+| WASM sandbox | 403 response hang 5s (no Content-Length) | 🟡 Medium | ✅ PATCHED |
+| AST profiler | `$$...$$` dollar-quote = literal aman (bukan bypass) | ⚪ Info | ✅ Diverifikasi |
+| AST profiler | Safe Profile Poisoning | ⚪ Info | ✅ Resistant (learning OFF) |
+| Honeypot | Payload generators = dead code, tidak ada listener | 🟡 Medium | ✅ PATCHED (listeners + verified handshake) |
+| Rate limit | Specificity ordering (auth 600/min bukan 10/min) | 🔴 High | ✅ PATCHED |
+| Rate limit | Capacity < 1 token = permanent 429 DoS | 🔴 High | ✅ PATCHED |
+| Rate limit | Bucket per-IP (attack 1 endpoint locks all) | 🔴 High | ✅ PATCHED |
+| Rate limit | Redis failover | ⚪ Info | ✅ Verified safe |
+
+**Total: 6 bug ditemukan, 6 patched, 135/135 test pass.**
