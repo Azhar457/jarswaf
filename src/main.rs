@@ -34,6 +34,12 @@ enum Commands {
         #[arg(short, long, default_value_t = 8080)]
         port: u16,
     },
+    /// Run WAF in Standalone Bundle mode (Controller + Agent + Dashboard in 1 single binary)
+    Bundle {
+        /// Port to bind the Controller server (default: 8080)
+        #[arg(short, long, default_value_t = 8080)]
+        controller_port: u16,
+    },
     /// Generate a binding token for a Machine ID
     GenerateToken {
         /// The Machine ID to generate a token for (defaults to local machine ID)
@@ -41,6 +47,15 @@ enum Commands {
     },
     /// Print the local Machine ID
     MachineId,
+    /// Automatically configure local /etc/hosts (or Windows hosts) for dev domain
+    SetupHosts {
+        /// Domain name to bind to 127.0.0.1 (default: dev-waf.local)
+        #[arg(short, long, default_value = "dev-waf.local")]
+        domain: String,
+        /// IP address to bind to (default: 127.0.0.1)
+        #[arg(short, long, default_value = "127.0.0.1")]
+        ip: String,
+    },
 }
 
 fn get_machine_id() -> String {
@@ -90,6 +105,21 @@ async fn main() {
         Commands::Controller { port } => {
             jarswaf::controller::run_controller(port, cli.config).await;
         }
+        Commands::Bundle { controller_port } => {
+            let config_path = cli.config.clone();
+            let rules_dir = cli.rules_dir.clone();
+            tokio::spawn(async move {
+                jarswaf::controller::run_controller(controller_port, config_path).await;
+            });
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            jarswaf::agent::run_agent(
+                &cli.config,
+                Some(format!("http://127.0.0.1:{}", controller_port)),
+                None,
+                &rules_dir,
+            )
+            .await;
+        }
         Commands::GenerateToken { machine_id } => {
             let m_id = machine_id.unwrap_or_else(get_machine_id);
             match jarswaf::config::load_config(&cli.config) {
@@ -113,6 +143,46 @@ async fn main() {
         }
         Commands::MachineId => {
             println!("{}", get_machine_id());
+        }
+        Commands::SetupHosts { domain, ip } => {
+            let hosts_path = if cfg!(windows) {
+                "C:\\Windows\\System32\\drivers\\etc\\hosts"
+            } else {
+                "/etc/hosts"
+            };
+            println!("===============================================================");
+            println!("🛡️  jarsWAF HOSTS AUTOMATIC CONFIGURATOR");
+            println!("===============================================================");
+            println!("[INFO] Target File: {}", hosts_path);
+            let content = std::fs::read_to_string(hosts_path).unwrap_or_default();
+            if content.contains(&domain) {
+                println!("[OK] Entry untuk '{:<15} {}' SUDAH TERDAFTAR.", ip, domain);
+            } else {
+                let entry = format!(
+                    "\n# Added by jarsWAF auto-configurator\n{} {}\n",
+                    ip, domain
+                );
+                if let Err(e) = std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(hosts_path)
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
+                {
+                    eprintln!("[ERROR] Gagal menulis ke file hosts: {}", e);
+                    eprintln!("        Silakan jalankan perintah dengan 'sudo' (Linux/macOS) atau 'Run as Administrator' (Windows).");
+                    std::process::exit(1);
+                } else {
+                    println!(
+                        "[SUCCESS] Entri '{:<15} {}' berhasil ditambahkan ke {}.",
+                        ip, domain, hosts_path
+                    );
+                }
+            }
+            println!("---------------------------------------------------------------");
+            println!("📌 CARA AKSES REVERSE PROXY & DASHBOARD:");
+            println!("   - Web App via WAF Proxy : http://{}:8000", domain);
+            println!("   - HTTPS via WAF Proxy   : https://{}:8443", domain);
+            println!("   - Dashboard GUI Admin   : http://localhost:8080");
+            println!("===============================================================\n");
         }
     }
 }

@@ -2,7 +2,7 @@
 # TLS disabled, minimal noise, backend echo on 8080
 # 127.0.0.1 allowlisted (lab localhost), BOT-001 curl-rule noted as false-positive
 
-allowlists = [{ name = "lab-localhost", ips = ["127.0.0.1", "::1"], paths = ["/*"], enabled = true }]
+allowlists = []
 blacklists = []
 
 [global]
@@ -12,7 +12,7 @@ max_body_size = 10485760
 default_rate_limit = 600
 log_dir = "./logs"
 log_level = "verbose"
-admin_token = "6476d3eb0e7043f7b72272c308fce8bc"
+admin_token = "change-me-admin-token-placeholder"
 waf_enabled = true
 webhooks = []
 metrics_push_interval_secs = 60
@@ -50,7 +50,7 @@ hosts = ["test.jarswafwaf.demo", "127.0.0.1"]
 backend = "127.0.0.1:8080"
 tenant = "default"
 rate_limit_tiers = []
-rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*", "CANARY-*", "BHV-*", "IPREP-*", "SSTI-*", "XXE-*", "UPLOAD-*", "SMUGGLE-*", "REVSHELL-*", "WEBSHELL-*", "ANOMALY-*", "EVASION-*", "RATELIMIT-*", "CSRF-*"]
+rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*", "CANARY-*", "BHV-*", "IPREP-*", "SSTI-*", "XXE-*", "UPLOAD-*", "SMUGGLE-*", "REVSHELL-*", "WEBSHELL-*", "ANOMALY-*", "EVASION-*", "RATELIMIT-*", "CSRF-*", "NOSQL-*", "PROTO-*"]
 blocked_countries = []
 geoblock_type = "Blocklist"
 custom_rules = []
@@ -64,10 +64,22 @@ max_conns_per_ip = 500
 max_concurrent_requests = 500
 bot_challenge_enabled = false
 websocket_security_enabled = false
+paranoia_level = "PL1"
+server_header_mask = "nginx"
 
 [vhosts.logging]
 enabled = true
 db_path = "/tmp/jarswaf-redteam.db"
+
+[vhosts.security_headers]
+enabled = true
+content_security_policy = "default-src 'self'; script-src 'self'; object-src 'none'"
+strict_transport_security = "max-age=31536000; includeSubDomains"
+x_frame_options = "DENY"
+x_content_type_options = "nosniff"
+referrer_policy = "strict-origin-when-cross-origin"
+permissions_policy = "camera=(), microphone=(), geolocation=()"
+cross_origin_resource_policy = "same-origin"
 
 [redis]
 enabled = false

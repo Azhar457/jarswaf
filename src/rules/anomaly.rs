@@ -188,3 +188,126 @@ fn run_heuristic_inference(payload: &str) -> f32 {
 
     score.clamp(0.0, 1.0)
 }
+
+// ── CRS Anomaly Scoring & Paranoia Level (OWASP CRS v4 Standard) ────────────────
+
+/// Categorical attack types for OWASP CRS style anomaly scoring
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttackCategory {
+    SQLi,
+    XSS,
+    LFI,
+    RFI,
+    RCE,
+    Scanner,
+    Generic,
+}
+
+impl AttackCategory {
+    /// Scoring weight based on OWASP CRS recommendations
+    pub fn default_score(&self) -> u32 {
+        match self {
+            AttackCategory::SQLi => 50,
+            AttackCategory::XSS => 50,
+            AttackCategory::LFI => 50,
+            AttackCategory::RFI => 50,
+            AttackCategory::RCE => 100,
+            AttackCategory::Scanner => 25,
+            AttackCategory::Generic => 20,
+        }
+    }
+}
+
+/// Paranoia Level (PL1 = Normal/Default, PL4 = Extreme)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ParanoiaLevel {
+    PL1 = 1,
+    PL2 = 2,
+    PL3 = 3,
+    PL4 = 4,
+}
+
+impl ParanoiaLevel {
+    /// Blocking anomaly threshold based on paranoia level
+    pub fn anomaly_threshold(&self) -> u32 {
+        match self {
+            ParanoiaLevel::PL1 => 50,
+            ParanoiaLevel::PL2 => 40,
+            ParanoiaLevel::PL3 => 25,
+            ParanoiaLevel::PL4 => 10,
+        }
+    }
+
+    pub fn parse_str(s: &str) -> Self {
+        match s.to_uppercase().as_str() {
+            "PL2" | "2" => ParanoiaLevel::PL2,
+            "PL3" | "3" => ParanoiaLevel::PL3,
+            "PL4" | "4" => ParanoiaLevel::PL4,
+            _ => ParanoiaLevel::PL1,
+        }
+    }
+}
+
+/// Tracker for inbound & outbound CRS anomaly scores per request
+#[derive(Debug, Clone, Default)]
+pub struct CrsAnomalyTracker {
+    pub inbound_score: u32,
+    pub outbound_score: u32,
+    pub matched_rules: Vec<String>,
+}
+
+impl CrsAnomalyTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_inbound_attack(&mut self, category: AttackCategory, rule_id: &str) {
+        self.inbound_score += category.default_score();
+        self.matched_rules.push(rule_id.to_string());
+    }
+
+    pub fn add_custom_inbound_score(&mut self, score: u32, rule_id: &str) {
+        self.inbound_score += score;
+        self.matched_rules.push(rule_id.to_string());
+    }
+
+    pub fn should_block(&self, paranoia: ParanoiaLevel) -> bool {
+        self.inbound_score >= paranoia.anomaly_threshold()
+    }
+
+    pub fn header_value(&self) -> String {
+        format!(
+            "score={}; rules={:?}",
+            self.inbound_score, self.matched_rules
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_crs_anomaly_scoring() {
+        let mut tracker = CrsAnomalyTracker::new();
+        assert!(!tracker.should_block(ParanoiaLevel::PL1));
+
+        // Add SQLi (+50)
+        tracker.add_inbound_attack(AttackCategory::SQLi, "SQLI-001");
+        assert_eq!(tracker.inbound_score, 50);
+        assert!(tracker.should_block(ParanoiaLevel::PL1));
+        assert!(tracker.should_block(ParanoiaLevel::PL2));
+    }
+
+    #[test]
+    fn test_paranoia_level_thresholds() {
+        let mut tracker = CrsAnomalyTracker::new();
+        // Add Scanner (+25)
+        tracker.add_inbound_attack(AttackCategory::Scanner, "SCANNER-001");
+
+        // PL1 (threshold 50) -> PASS
+        assert!(!tracker.should_block(ParanoiaLevel::PL1));
+        // PL3 (threshold 25) -> BLOCK
+        assert!(tracker.should_block(ParanoiaLevel::PL3));
+    }
+}

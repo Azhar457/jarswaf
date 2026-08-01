@@ -14,6 +14,7 @@ pub mod redteam;
 pub mod threat_intel;
 pub mod trust;
 pub mod uri;
+pub mod whitelist;
 use ahash::AHashMap;
 use dashmap::DashMap;
 use std::net::IpAddr;
@@ -500,6 +501,17 @@ impl RuleEngine {
                 || query_lower.contains("oastify.com")
             {
                 tracing::debug!("CANARY-PASS: known canary token URL, allowing through");
+                return None;
+            }
+        }
+
+        // Phase 0.5: Tool Exclusion / Whitelist Check (OWASP CRS REQUEST-905-TOOL-EXCLUSION)
+        if let Some(ua) = headers.get("user-agent") {
+            if crate::rules::whitelist::is_whitelisted_bot(ua) {
+                tracing::debug!(
+                    "WHITELIST-PASS: Whitelisted bot User-Agent [{}] — bypassing WAF",
+                    ua
+                );
                 return None;
             }
         }

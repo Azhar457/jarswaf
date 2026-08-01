@@ -84,7 +84,7 @@ pub async fn get_agents_handler(State(state): State<ControllerState>) -> impl In
     let mut agents = Vec::new();
     if let Ok(lock) = state.agent_registry.read() {
         let now = std::time::Instant::now();
-        for (_, info) in lock.iter() {
+        for info in lock.values() {
             let mut agent_clone = info.clone();
             if now.duration_since(info.last_seen) > std::time::Duration::from_secs(15) {
                 agent_clone.status = "offline".to_string();

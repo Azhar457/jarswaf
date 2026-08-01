@@ -701,10 +701,21 @@ impl ProxyHttp for JarsWafProxy {
             }
         }
 
-        // ── Security Headers ─────────────────────────────────────────────
+        // ── Security Headers & Fingerprint Masking ──────────────────────
+        let config = GLOBAL_CONFIG.load();
+        if let Some(vhost_name) = ctx.vhost_name.as_deref() {
+            if let Some(vhost_cfg) = config.vhosts.iter().find(|v| v.name == vhost_name) {
+                if let Some(ref mask) = vhost_cfg.server_header_mask {
+                    let _ = upstream_response.insert_header("Server", mask);
+                }
+            }
+        }
+
         if let Some(ref sh) = ctx.security_headers {
             if sh.enabled {
-                let _ = upstream_response.insert_header("Server", "jarswaf");
+                if upstream_response.headers.get("Server").is_none() {
+                    let _ = upstream_response.insert_header("Server", "jarswaf");
+                }
                 if let Some(ref csp) = sh.content_security_policy {
                     let _ = upstream_response.insert_header("Content-Security-Policy", csp);
                 }
@@ -2027,7 +2038,9 @@ impl ProxyHttp for JarsWafProxy {
 
             if let Some((_, vhost_cfg)) = crate::vhost::match_vhost(host.as_deref(), &config) {
                 // 2.7. API Security (GraphQL)
-                if path.starts_with("/graphql") || path.starts_with("/api/graphql") {
+                if path.contains("graphql")
+                    || (ctx.body_buffer.starts_with(b"{") && body_str.contains("\"query\""))
+                {
                     if let Err(reason) =
                         crate::rules::api_security::check_graphql_depth(&ctx.body_buffer, 5)
                     {

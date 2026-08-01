@@ -133,11 +133,11 @@ fn check_csrf_002(req: &RequestInfo) -> bool {
 }
 
 fn check_upload_001(req: &RequestInfo) -> bool {
-    UPLOAD_001_REGEX.is_match(req.body)
+    UPLOAD_001_REGEX.is_match(req.body) || UPLOAD_001_REGEX.is_match(req.query)
 }
 
 fn check_upload_002(req: &RequestInfo) -> bool {
-    UPLOAD_002_REGEX.is_match(req.body)
+    UPLOAD_002_REGEX.is_match(req.body) || UPLOAD_002_REGEX.is_match(req.query)
 }
 
 fn check_upload_003(req: &RequestInfo) -> bool {
@@ -175,7 +175,7 @@ static REVSHELL_BASH_TCP: Lazy<Regex> = Lazy::new(|| {
 });
 static REVSHELL_PYTHON: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r#"(?i)(python[23]?\s*\-c\s*["'].*socket\.(SOCK_STREAM|AF_INET)|python[23]?.*pty\.spawn|python[23]?.*subprocess\.(call|Popen|run)|python[23]?.*os\.dup2|python[23]?.*socket\.connect)"#,
+        r#"(?i)(python[23]?\s*\-c\s*["'].*socket|python[23]?.*pty\.spawn|python[23]?.*subprocess|python[23]?.*os\.dup2|python[23]?.*socket\.connect)"#,
     )
     .unwrap()
 });

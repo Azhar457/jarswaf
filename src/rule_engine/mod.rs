@@ -46,6 +46,7 @@ use tracing;
 
 pub mod dsl;
 pub mod phase;
+pub mod seclang;
 
 // ────────────────────────────────────────────────────────────
 // Rule Types
