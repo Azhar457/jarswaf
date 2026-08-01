@@ -86,11 +86,13 @@ pub fn check_jwt_token(headers: &AHashMap<String, String>) -> Option<String> {
         .get("authorization")
         .or_else(|| headers.get("Authorization"))?;
 
-    if !auth_header.starts_with("Bearer ") {
-        return None;
-    }
-
-    let token = &auth_header[7..];
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .or_else(|| auth_header.strip_prefix("bearer "))
+        .or_else(|| auth_header.strip_prefix("Token "))
+        .or_else(|| auth_header.strip_prefix("token "))
+        .unwrap_or(auth_header)
+        .trim();
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Some("Malformed JWT: token must contain exactly 3 parts".to_string());
@@ -193,6 +195,32 @@ mod tests {
 
         let result = check_jwt_token(&headers);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_jwt_validation_flexible_prefixes() {
+        let raw_expired = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJleHAiOjE1MTYyMzkwMjJ9.signature";
+
+        // Test with "bearer "
+        let mut headers1 = AHashMap::new();
+        headers1.insert(
+            "Authorization".to_string(),
+            format!("bearer {}", raw_expired),
+        );
+        assert!(check_jwt_token(&headers1).unwrap().contains("Expired JWT"));
+
+        // Test with "Token "
+        let mut headers2 = AHashMap::new();
+        headers2.insert(
+            "authorization".to_string(),
+            format!("Token {}", raw_expired),
+        );
+        assert!(check_jwt_token(&headers2).unwrap().contains("Expired JWT"));
+
+        // Test with raw token string without prefix
+        let mut headers3 = AHashMap::new();
+        headers3.insert("Authorization".to_string(), raw_expired.to_string());
+        assert!(check_jwt_token(&headers3).unwrap().contains("Expired JWT"));
     }
 
     fn test_schemas() -> Vec<RouteSchema> {
