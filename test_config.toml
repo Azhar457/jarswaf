@@ -65,10 +65,10 @@ description = "Exempted assets to reduce WAF engine evaluation overhead."
 [[vhosts]]
 name = "jarswaf-demo"
 hosts = ["*.jarswafwaf.demo"]
-backend = "127.0.0.1:8080"
+backend = "127.0.0.1:8000"
 tenant = "default"
 rate_limit_tiers = []
-rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*"]
+rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*", "WASM-*"]
 blocked_countries = []
 geoblock_type = "Blocklist"
 custom_rules = ["CR-825"]
