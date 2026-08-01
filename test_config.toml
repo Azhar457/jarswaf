@@ -68,7 +68,7 @@ hosts = ["*.jarswafwaf.demo"]
 backend = "127.0.0.1:8000"
 tenant = "default"
 rate_limit_tiers = []
-rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*", "WASM-*"]
+rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*", "WASM-*", "JWT-*", "OPENAPI-*", "GRAPHQL-*", "NOSQL-*", "PROTO-*"]
 blocked_countries = []
 geoblock_type = "Blocklist"
 custom_rules = ["CR-825"]
@@ -82,6 +82,26 @@ max_conns_per_ip = 50
 max_concurrent_requests = 100
 bot_challenge_enabled = false
 websocket_security_enabled = false
+
+[vhosts.dlp]
+enabled = true
+action = "log"
+credit_card = true
+jwt_token = true
+cloud_secrets = true
+password_in_body = true
+email = true
+response_body_limit = 2097152
+
+[vhosts.security_headers]
+enabled = true
+content_security_policy = "default-src 'self'; script-src 'self'; object-src 'none'"
+strict_transport_security = "max-age=31536000; includeSubDomains"
+x_frame_options = "DENY"
+x_content_type_options = "nosniff"
+referrer_policy = "strict-origin-when-cross-origin"
+permissions_policy = "camera=(), microphone=(), geolocation=()"
+cross_origin_resource_policy = "same-origin"
 
 [vhosts.logging]
 enabled = true
