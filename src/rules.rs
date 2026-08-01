@@ -1083,7 +1083,9 @@ fn is_rule_enabled(rule_id: &str, enabled_rules: &[String]) -> bool {
         || rule_id.starts_with("ZT-")
         || rule_id.starts_with("BOT-")
         || rule_id.starts_with("HEADLESS-")
-        || rule_id.starts_with("CANARY-");
+        || rule_id.starts_with("CANARY-")
+        || rule_id.starts_with("NOSQL-")
+        || rule_id.starts_with("PROTO-");
 
     if !is_toggled_category {
         return true;
