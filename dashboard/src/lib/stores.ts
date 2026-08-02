@@ -54,6 +54,8 @@ export interface VHost {
   max_body: string;
   rate_limit: string;
   is_default?: boolean;
+  bot_challenge_enabled?: boolean;
+  websocket_security_enabled?: boolean;
   allowlists?: any[];
   blacklists?: any[];
 }
