@@ -4,6 +4,17 @@
   import Globe from "../components/ui/Globe.svelte";
   import Card from "../components/ui/Card.svelte";
   import Badge from "../components/ui/Badge.svelte";
+  import IpDetailModal from "../components/IpDetailModal.svelte";
+
+  let selectedIp: string | null = null;
+  let selectedCountry = "ID";
+  let showModal = false;
+
+  function openIpModal(ip: string, country: string) {
+    selectedIp = ip;
+    selectedCountry = country || "ID";
+    showModal = true;
+  }
 
   interface ThreatEvent {
     ip: string;
@@ -143,23 +154,29 @@
       >
         {#if events.length > 0}
           {#each events.slice(0, 15) as actor}
-            <Card
-              className="p-4 flex flex-col gap-2 border-slate-800 hover:border-slate-700 transition-colors"
+            <button
+              type="button"
+              on:click={() => openIpModal(actor.ip, actor.country)}
+              class="w-full text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 rounded-xl"
             >
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span class="font-mono text-sm font-bold text-red-400">{actor.ip}</span>
-                  <Badge variant="danger" className="text-[10px] px-1 py-0">{actor.rule_id}</Badge>
+              <Card
+                className="p-4 flex flex-col gap-2 border-slate-800 hover:border-slate-700 transition-colors"
+              >
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-sm font-bold text-red-400">{actor.ip}</span>
+                    <Badge variant="danger" className="text-[10px] px-1 py-0">{actor.rule_id}</Badge>
+                  </div>
+                  <span class="text-[10px] text-slate-500"
+                    >{new Date(actor.timestamp).toLocaleTimeString()}</span
+                  >
                 </div>
-                <span class="text-[10px] text-slate-500"
-                  >{new Date(actor.timestamp).toLocaleTimeString()}</span
-                >
-              </div>
-              <div class="flex items-center gap-1.5 text-xs text-slate-400">
-                <MapPin class="w-3 h-3 text-slate-500" />
-                <span>{actor.lat.toFixed(2)}, {actor.lng.toFixed(2)}</span>
-              </div>
-            </Card>
+                <div class="flex items-center gap-1.5 text-xs text-slate-400">
+                  <MapPin class="w-3 h-3 text-slate-500" />
+                  <span>{actor.lat.toFixed(2)}, {actor.lng.toFixed(2)}</span>
+                </div>
+              </Card>
+            </button>
           {/each}
         {:else if !loading}
           <div class="text-center py-6 text-slate-500 text-sm">Quiet right now.</div>
@@ -171,10 +188,19 @@
           <Activity size={16} class="text-blue-400" /> Network Sync Status
         </h3>
         <p class="text-xs text-slate-400 leading-relaxed">
-          The jarsWAF Reputation Network is currently distributing blocklist updates to all your Agent
+          The Reputation Network is currently distributing blocklist updates to all your Agent
           Nodes.
         </p>
       </Card>
     </div>
   </div>
 </div>
+
+{#if selectedIp}
+  <IpDetailModal
+    show={showModal}
+    ip={selectedIp}
+    country={selectedCountry}
+    onClose={() => (showModal = false)}
+  />
+{/if}
