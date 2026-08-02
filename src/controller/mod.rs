@@ -157,6 +157,14 @@ pub fn build_router(state: ControllerState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/install.sh", get(handlers::serve_install_script))
+        .route(
+            "/_jarswaf/challenge.js",
+            get(handlers::get_webrtc_challenge_js),
+        )
+        .route(
+            "/api/v1/proxy-unmask/verify",
+            post(handlers::verify_proxy_unmask_handler),
+        )
         .route("/metrics", get(handlers::get_metrics_handler))
         .merge(api_routes)
         .fallback_service(tower_http::services::ServeDir::new("dashboard/dist"))

@@ -9,6 +9,7 @@ pub mod graphql;
 pub mod headers;
 pub mod ip_reputation;
 pub mod multipart;
+pub mod proxy_unmask;
 pub mod rate_limit;
 pub mod redteam;
 pub mod threat_intel;
