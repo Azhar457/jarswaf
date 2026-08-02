@@ -19,15 +19,21 @@ echo -e "${CYAN}${BOLD}  🛡️  jarsWAF Interactive Development Launcher  🛡
 echo -e "${BLUE}${BOLD}===================================================${NC}"
 echo
 
-# 1. Interactive Inputs
-read -p "$(echo -e "${BOLD}Masukkan Port Controller (API/Dashboard) [Default: 8080]: ${NC}")" CTRL_PORT
-CTRL_PORT=${CTRL_PORT:-8080}
+# 1. Inputs (Interactive & Non-Interactive safe)
+if [ -t 0 ]; then
+    read -p "$(echo -e "${BOLD}Masukkan Port Controller (API/Dashboard) [Default: 8080]: ${NC}")" CTRL_PORT || CTRL_PORT=""
+    CTRL_PORT=${CTRL_PORT:-8080}
 
-read -p "$(echo -e "${BOLD}Masukkan Port Agent WAF Proxy [Default: 8000]: ${NC}")" AGENT_PORT
-AGENT_PORT=${AGENT_PORT:-8000}
+    read -p "$(echo -e "${BOLD}Masukkan Port Agent WAF Proxy [Default: 8000]: ${NC}")" AGENT_PORT || AGENT_PORT=""
+    AGENT_PORT=${AGENT_PORT:-8000}
 
-read -p "$(echo -e "${BOLD}Masukkan Target Backend (IP:Port) [Default: 127.0.0.1:8081]: ${NC}")" BACKEND_TARGET
-BACKEND_TARGET=${BACKEND_TARGET:-127.0.0.1:8081}
+    read -p "$(echo -e "${BOLD}Masukkan Target Backend (IP:Port) [Default: 127.0.0.1:8081]: ${NC}")" BACKEND_TARGET || BACKEND_TARGET=""
+    BACKEND_TARGET=${BACKEND_TARGET:-127.0.0.1:8081}
+else
+    CTRL_PORT=${CTRL_PORT:-8080}
+    AGENT_PORT=${AGENT_PORT:-8000}
+    BACKEND_TARGET=${BACKEND_TARGET:-127.0.0.1:8081}
+fi
 
 echo -e "\n${BLUE}[INFO] Menyiapkan konfigurasi...${NC}"
 
