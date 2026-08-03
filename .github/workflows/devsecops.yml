@@ -20,6 +20,13 @@ on:
       - 'xtask/**'
       - '.github/workflows/devsecops.yml'
 
+# Least-privilege: default to read-only for the whole workflow; individual jobs that
+# need more (codeql: security-events: write) declare it explicitly. Prevents the
+# repo-default GITHUB_TOKEN (often contents: write on older repos) from leaking into
+# unscoped steps of sast/dast jobs that run third-party actions.
+permissions:
+  contents: read
+
 jobs:
   # -------------------------------------------------------------
   # Job 1: SAST - Static Code Analysis & Dependency Audits

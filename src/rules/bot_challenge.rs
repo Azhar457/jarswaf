@@ -10,8 +10,38 @@ use uuid::Uuid;
 pub static CHALLENGE_SECRET: once_cell::sync::Lazy<String> =
     once_cell::sync::Lazy::new(|| Uuid::new_v4().to_string());
 
+/// Escape a string for safe embedding inside a JavaScript double-quoted string literal,
+/// and neutralize `</script>` so an attacker-controlled value cannot break out of the
+/// inline `<script>` block. Returns a value safe to interpolate as `"...{escaped}..."`.
+/// `ponytail:` only what's needed for inline JS-in-HTML; for JSON use serde_json instead.
+fn js_str_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\'' => out.push_str("\\'"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '/' => out.push_str("\\/"),
+            '<' => out.push_str("\\u003c"),
+            '>' => out.push_str("\\u003e"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Generate the JS injection HTML challenge.
 pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> String {
+    // Escape all interpolated values before embedding them in inline JS string literals to
+    // prevent stored XSS via the challenge page. original_path is attacker-controlled (the
+    // inbound request path/query); client_ip/salt are server-derived but escaped too as
+    // defense-in-depth.
+    let client_ip_js = js_str_escape(client_ip);
+    let salt_js = js_str_escape(salt);
+    let original_path_js = js_str_escape(original_path);
     format!(
         r#"<!DOCTYPE html>
 <html>
@@ -121,9 +151,9 @@ pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> S
     </script>
 </body>
 </html>"#,
-        client_ip = client_ip,
-        salt = salt,
-        original_path = original_path
+        client_ip = client_ip_js,
+        salt = salt_js,
+        original_path = original_path_js
     )
 }
 

@@ -1,9 +1,10 @@
 #!/bin/bash
+set -uo pipefail
 # ================================================================
 #  jarsWAF — Zero-Shot Installer (Binary Download)
 # ================================================================
 #  Usage:
-#    sudo bash -c "$(curl -fsSLk https://raw.githubusercontent.com/Azhar457/jarswaf/main/install.sh)"
+#    sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Azhar457/jarswaf/main/install.sh)"
 #
 #  What this does:
 #    1. Detects OS/arch
@@ -65,7 +66,22 @@ DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST}/jarswaf-${L
 TMP_TAR="/tmp/jarswaf-linux-${ARCH}.tar.gz"
 
 echo -e "${CYAN}${BOLD}⬇️  Downloading ${LATEST} (linux-${ARCH})...${NC}"
-curl -fsSLk -o "$TMP_TAR" "$DOWNLOAD_URL"
+curl --fail --retry 3 -fsSL -o "$TMP_TAR" "$DOWNLOAD_URL"
+
+# Verify integrity if a checksum is published alongside the release.
+# The release workflow emits jarswaf-${LATEST#v}-musl.tar.gz.sha256 in the same directory.
+CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
+if curl --fail --retry 2 -fsSL -o /tmp/jarswaf.tar.gz.sha256 "$CHECKSUM_URL" 2>/dev/null; then
+    if command -v sha256sum &>/dev/null; then
+        echo -e "${CYAN}🔐 Verifying checksum...${NC}"
+        ( cd /tmp && sha256sum -c /tmp/jarswaf.tar.gz.sha256 2>/dev/null >/dev/null ) \
+            || { echo -e "${RED}❌ Checksum verification failed — possible corruption or tampering.${NC}"; exit 1; }
+    else
+        echo -e "${YELLOW}⚠️  sha256sum not found — skipped checksum verification.${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠️  No checksum published for ${LATEST} — verify manually if this concerns you.${NC}"
+fi
 
 echo -e "${CYAN}${BOLD}📦 Extracting...${NC}"
 mkdir -p "$INSTALL_DIR"
@@ -83,7 +99,7 @@ if [ ! -f "${INSTALL_DIR}/config.toml" ]; then
     echo -e "${CYAN}${BOLD}⚙️  Creating default config...${NC}"
 
     # Try download from repo, fallback to inline
-    if ! curl -fsSLk -o "${INSTALL_DIR}/config.toml" \
+    if ! curl --fail -fsSL -o "${INSTALL_DIR}/config.toml" \
         "https://raw.githubusercontent.com/${REPO}/main/config.standalone.toml" 2>/dev/null; then
         cat > "${INSTALL_DIR}/config.toml" << 'TOML'
 certificates = []
@@ -127,6 +143,16 @@ fi
 
 # ── Create Systemd Service ───────────────────────────────────────
 echo -e "${CYAN}${BOLD}🚀 Installing systemd service...${NC}"
+
+# Run as a dedicated non-root system user. The WAF has no need for root; port 80/443
+# binding is granted via AmbientCapabilities=CAP_NET_BIND_SERVICE. `ponytail:` if you reuse
+# ports <1024 and the kernel ignores ambient caps on some distros, fall back to setcap on
+# the binary (`setcap 'cap_net_bind_service=+ep' ${INSTALL_DIR}/controller`).
+if ! id -u jarswaf &>/dev/null; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin jarswaf 2>/dev/null || true
+fi
+chown -R jarswaf:jarswaf "${INSTALL_DIR}" 2>/dev/null || true
+
 cat > "/etc/systemd/system/jarswaf.service" << SERVICE
 [Unit]
 Description=jarsWAF — Web Application Firewall
@@ -134,11 +160,15 @@ After=network.target
 
 [Service]
 Type=simple
+User=jarswaf
+Group=jarswaf
 ExecStart=${INSTALL_DIR}/controller --port 8080 --config ${INSTALL_DIR}/config.toml
 WorkingDirectory=${INSTALL_DIR}
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
