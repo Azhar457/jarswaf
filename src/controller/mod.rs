@@ -34,7 +34,11 @@ pub struct BlockCommand {
 /// Exposed so integration tests can spin up the API without spinning up
 /// gRPC, SQLite, or the threat intel scraper.
 pub fn build_router(state: ControllerState) -> Router {
-    // CORS Configuration for local Svelte dashboard
+    // CORS Configuration for local Svelte dashboard. API auth is a Bearer header (not
+    // cookies) so permissive CORS is not a direct CSRF vector; the controller now binds
+    // loopback by default (see run_controller), which is the primary exposure control.
+    // `ponytail:` lock CORS to an allowlist in frontend/prod by setting JARSWAF_CORS_ORIGINS
+    // (comma-separated) once a multi-origin list is actually required.
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_headers(Any)
@@ -279,7 +283,18 @@ pub async fn run_controller(port: u16, config_path: String) {
 
     let app = build_router(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // Bind loopback by default: the controller API + dashboard carry admin credentials and
+    // must not be exposed to untrusted networks. Cross-host access should go through a
+    // reverse proxy (with TLS + auth) in front of the WAF. Override only when an operator
+    // deliberately exposes it, e.g. JARSWAF_BIND=0.0.0.0. Previously this hard-bound
+    // 0.0.0.0 and defaulted the API to the public interface (audit H-02).
+    let bind_host = std::env::var("JARSWAF_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let addr = match bind_host.parse::<std::net::IpAddr>() {
+        Ok(ip) => SocketAddr::from((ip, port)),
+        Err(_) => {
+            panic!("Invalid JARSWAF_BIND value: {bind_host}");
+        }
+    };
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Cannot bind Controller port");
