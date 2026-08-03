@@ -1,15 +1,26 @@
 # Cargo Audit configuration
-# Ignores upstream advisories in third-party framework dependencies (Pingora 0.4, Wasmtime 29 & protobuf)
+#
+# SECURITY REVIEW (2026-08-03): The ignores below blanket-suppress cargo-audit failures for
+# dependencies that ship with KNOWN advisories. Shipping a WAF built on top of explicitly
+# known-vulnerable/closed-advisory dependencies (pingora 0.4, wasmtime 29) is a material
+# supply-chain finding. Each entry below should have an owner + an expiry (target bump date)
+# and be removed the moment the underlying crate is bumped to a fixed version.
+#
+# TODO (P0 supply-chain):
+#   - bump pingora 0.4 -> 0.5+ and remove the Pingora block
+#   - bump wasmtime 29 -> 30+ and remove the Wasmtime block
+#   - replace serde_yaml (deprecated 2024) with serde_yml in src/rule_engine/mod.rs
+# Last reviewed: 2026-08-03. Re-review before every release cut.
 [advisories]
 ignore = [
-    # Pingora Upstream Advisories
+    # Pingora Upstream Advisories — bump pingora to 0.5+ to clear
     "RUSTSEC-2025-0037",
     "RUSTSEC-2025-0070",
     "RUSTSEC-2026-0033",
     "RUSTSEC-2026-0034",
     "RUSTSEC-2026-0035",
 
-    # Wasmtime Upstream Advisories
+    # Wasmtime Upstream Advisories — bump wasmtime to 30+ to clear
     "RUSTSEC-2025-0046",
     "RUSTSEC-2025-0118",
     "RUSTSEC-2026-0006",
@@ -28,8 +39,9 @@ ignore = [
     "RUSTSEC-2026-0096",
     "RUSTSEC-2026-0222",
 
-    # Protobuf / Time / Crossbeam
+    # Protobuf / Time / Crossbeam — re-check on next dependency refresh
     "RUSTSEC-2024-0437",
     "RUSTSEC-2026-0009",
     "RUSTSEC-2026-0204",
 ]
+

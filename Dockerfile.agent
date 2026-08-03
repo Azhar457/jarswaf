@@ -41,12 +41,20 @@ RUN apt-get update && \
 # Copy binary
 COPY --from=builder /app/jarswaf-bin /app/jarswaf
 
-# Copy standalone config if not mounted
-COPY config.standalone.toml /app/config.toml
-
+# NOTE: config.standalone.toml is deliberately NOT baked in — it carried a committed
+# admin_token hash into the image. First boot generates its own credential via
+# ensure_admin_credentials. Mount a config with --volume if you need a specific setup.
 EXPOSE 80 443
 
 ENV RUST_LOG=info
+
+# Non-root runtime. Binds 80/443 via the ambient capability instead of root.
+# `ponytail:` if the kernel/runtime ignores ambient caps for the CMD binary, fall back
+# to `setcap 'cap_net_bind_service=+ep' /app/jarswaf` in a RUN step and drop USER.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin jarswaf && \
+    mkdir -p /app/logs /app/certs /var/log/jarswaf && \
+    chown -R jarswaf:jarswaf /app /var/log/jarswaf
+USER jarswaf
 
 # Run as Agent (no controller flag = standalone mode)
 CMD ["/app/jarswaf", "agent", "--config", "/app/config.toml"]

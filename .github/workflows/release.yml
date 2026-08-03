@@ -52,8 +52,19 @@ jobs:
           cp target/x86_64-unknown-linux-musl/release/controller dist/jarswaf-controller-linux-amd64-musl
           tar -czf dist/jarswaf-linux-amd64.tar.gz -C dist jarswaf-linux-amd64 agent controller
           tar -czf jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz -C dist jarswaf-linux-amd64-musl jarswaf-agent-linux-amd64-musl jarswaf-controller-linux-amd64-musl
+          tar -czf dist/jarswaf-linux-amd64.tar.gz -C dist jarswaf-linux-amd64 agent controller
+          tar -czf jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz -C dist jarswaf-linux-amd64-musl jarswaf-agent-linux-amd64-musl jarswaf-controller-linux-amd64-musl
           cp jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf dist/jarswaf-ebpf
-
+      # Emit checksums so installers can verify integrity over the network (see install.sh
+      # checksum verification). Publish one .sha256 per artifact.
+      - name: Generate Checksums
+        run: |
+          cd dist
+          sha256sum jarswaf-linux-amd64* jarswaf-agent-linux-amd64* jarswaf-controller-linux-amd64* jarswaf-ebpf > jarswaf-checksums.txt
+          # Emit per-tarball checksum for the standalone installer to fetch (<tarball>.sha256)
+          sha256sum jarswaf-linux-amd64.tar.gz > jarswaf-linux-amd64.tar.gz.sha256
+          cd ..
+          sha256sum jarswaf-*-musl.tar.gz > jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz.sha256
       - name: Upload Binaries to Release
         uses: softprops/action-gh-release@v2
         with:
@@ -66,6 +77,8 @@ jobs:
             dist/jarswaf-controller-linux-amd64-musl
             dist/jarswaf-ebpf
             jarswaf-*-musl.tar.gz
+            dist/jarswaf-linux-amd64.tar.gz.sha256
+            jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz.sha256
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           prerelease: false

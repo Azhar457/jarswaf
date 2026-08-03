@@ -835,7 +835,32 @@ impl ProxyHttp for JarsWafProxy {
             // Strip matrix parameters (RFC 3986 / Spring-Boot style `/path;jsessionid=x`)
             // so rule evaluation sees the canonical path. `;` separates matrix params.
             let raw_path = req_header.uri.path();
-            let path = raw_path.split(';').next().unwrap_or(raw_path).to_string();
+            let stripped = raw_path.split(';').next().unwrap_or(raw_path);
+            // Normalize the path used for WAF rule/vhost/rate-limit inspection:
+            // percent-decode (so `%2fwp-admin` matches `/wp-admin`) and collapse repeated
+            // slashes (`//admin` → `/admin`). Defensive only — does NOT alter the path forwarded
+            // upstream (Pingora forwards req_header original). `ponytail:` no unicode/NFKC
+            // normalization; add if bypass via IIS %uXXXX or extended normalization observed.
+            // One decode pass only (mirrors OWASP CRS REQUEST-920).
+            let path: String = {
+                let decoded = urlencoding::decode(stripped)
+                    .unwrap_or_else(|_| stripped.into())
+                    .into_owned();
+                let mut norm = String::with_capacity(decoded.len());
+                let mut prev_slash = false;
+                for ch in decoded.chars() {
+                    if ch == '/' {
+                        if !prev_slash {
+                            norm.push('/');
+                        }
+                        prev_slash = true;
+                    } else {
+                        norm.push(ch);
+                        prev_slash = false;
+                    }
+                }
+                norm
+            };
             let query_str = req_header.uri.query().unwrap_or("").to_string();
             let host = req_header
                 .headers
