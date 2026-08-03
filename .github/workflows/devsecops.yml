@@ -113,10 +113,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Spin up jarsWAF and Dashboard via Docker Compose for testing
+      # Spin up WAF and Dashboard via Docker Compose for testing
       - name: Spin up Docker Services
         run: |
-          docker-compose up -d --build
+          docker compose up -d --build || docker-compose up -d --build
           # Wait for services to be fully healthy and listening on port 8080
           sleep 15
 
