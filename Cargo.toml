@@ -24,6 +24,9 @@ tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+# TODO(P0 supply-chain): serde_yaml was deprecated by its maintainer in 2024. Migrate the 10
+# usages in src/rule_engine/mod.rs to `serde_yml` (API differs — requires adapting Value/error
+# paths). Not done in this audit pass to avoid a blind API break of the rule loader.
 serde_yaml = "0.9"
 regex = "1"
 dashmap = "5"
@@ -81,5 +84,10 @@ protoc-bin-vendored = "3.0.0"
 nix = { version = "0.27", features = ["user"] } # for privilege dropping
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# TODO(P0 supply-chain): pin both `aya` and the `aya-ebpf`/`aya-log-ebpf` deps in
+# jarswaf-ebpf/Cargo.toml to the SAME `rev` (by full SHA). Currently the main workspace
+# resolves aya to commit a47f99a0 while jarswaf-ebpf resolves to 773ca715 — different
+# commits of the same repo, risking BPF map/userspace struct-ABI drift. `branch="main"`
+# floats further; pin a rev once a single compatible commit is verified across both crates.
 aya = { git = "https://github.com/aya-rs/aya", branch = "main" }
 aya-log = { git = "https://github.com/aya-rs/aya", branch = "main" }

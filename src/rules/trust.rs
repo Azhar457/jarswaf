@@ -143,7 +143,34 @@ pub fn check_identity_token(
     };
 
     // Parse as JSON manually (avoid serde dependency for this simple check)
-    let identity_verified = true; // token structure is valid
+    //
+    // SECURITY: We do NOT verify the JWT signature here. A token with a valid 3-part
+    // structure, non-none alg, non-empty signature, valid (unexpired) exp, and a
+    // trusted/allowed issuer counts toward the trust score — but `identity_verified`
+    // is deliberately held to false until real signature verification (jsonwebtoken +
+    // JWKS/HMAC secret) is wired in. Treating an unsigned-or-unverified token as a
+    // verified identity would let any attacker with knowledge of `allowed_issuers`
+    // forge a token and max out the Zero-Trust score (the original C-01 bypass).
+    //
+    // What we DO reject up front (defense-in-depth), since these are never legitimate:
+    let identity_verified = false;
+
+    // Reject alg:none and empty signatures — even before full verification these must
+    // never count as a verified identity.
+    let header_b64 = parts[0];
+    let header_padded = match header_b64.len() % 4 {
+        2 => format!("{}==", header_b64),
+        3 => format!("{}=", header_b64),
+        _ => header_b64.to_string(),
+    };
+    let alg_is_none = base64_url_decode(&header_padded)
+        .and_then(|b| String::from_utf8(b).ok())
+        .and_then(|h| extract_json_string(&h, "alg"))
+        .map(|a| a.eq_ignore_ascii_case("none"))
+        .unwrap_or(true);
+    if alg_is_none || parts[2].trim().is_empty() {
+        return (false, false);
+    }
 
     // Check expiry: look for "exp":NUMBER
     let expired = if let Some(exp_val) = extract_json_number(payload_str, "exp") {
@@ -303,8 +330,10 @@ mod tests {
     use super::*;
 
     fn make_jwt(payload_json: &str) -> String {
-        // header: {"alg":"none","typ":"JWT"}
-        let header = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0";
+        // header: {"alg":"HS256","typ":"JWT"} — a real-looking (signed-looking) JWT header.
+        // The structure-check path does not verify the signature (see C-01 note in
+        // check_identity_token), but it must no longer accept `alg:none`.
+        let header = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
         let payload = base64_url_encode(payload_json.as_bytes());
         let sig = "signature";
         format!("{}.{}.{}", header, payload, sig)
@@ -402,7 +431,10 @@ mod tests {
 
         let issuers = vec!["https://auth.jarswaf.local".to_string()];
         let (id_ok, iss_ok) = check_identity_token(&headers, &issuers);
-        assert!(id_ok);
+        // Signature is not verified (see check_identity_token security note), so
+        // identity_verified is held false regardless of structural validity. The issuer
+        // is still parsed and trusted if it is in the allowlist.
+        assert!(!id_ok);
         assert!(iss_ok);
     }
 
@@ -437,7 +469,8 @@ mod tests {
 
         let issuers = vec!["https://auth.jarswaf.local".to_string()];
         let (id_ok, iss_ok) = check_identity_token(&headers, &issuers);
-        assert!(id_ok); // structure valid
+        // identity_verified is false until signature verification is implemented (C-01 fix).
+        assert!(!id_ok);
         assert!(!iss_ok); // issuer not in allowed list
     }
 
@@ -447,6 +480,55 @@ mod tests {
         let (id_ok, iss_ok) = check_identity_token(&headers, &[]);
         assert!(!id_ok);
         assert!(!iss_ok);
+    }
+
+    #[test]
+    fn test_identity_token_alg_none_rejected() {
+        // C-01 regression guard: a token with alg:none must never be treated as verified,
+        // even with a valid-looking payload and non-empty signature. Previously the
+        // structure-only check accepted alg:none and set identity_verified=true.
+        let future_exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 3600;
+        let payload = format!(
+            r#"{{"sub":"user1","iss":"https://auth.jarswaf.local","exp":{}}}"#,
+            future_exp
+        );
+        // header: {"alg":"none","typ":"JWT"}
+        let none_header = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0";
+        let body = base64_url_encode(payload.as_bytes());
+        let token = format!("{}.{}.{}", none_header, body, "sig");
+
+        let mut headers = AHashMap::new();
+        headers.insert("authorization".to_string(), format!("Bearer {}", token));
+        let issuers = vec!["https://auth.jarswaf.local".to_string()];
+        let (id_ok, iss_ok) = check_identity_token(&headers, &issuers);
+        assert!(!id_ok);
+        assert!(!iss_ok);
+    }
+
+    #[test]
+    fn test_identity_token_empty_signature_rejected() {
+        // An empty signature part is never a legitimate JWT — reject up front.
+        let future_exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 3600;
+        let payload = format!(
+            r#"{{"sub":"user1","iss":"https://auth.local","exp":{}}}"#,
+            future_exp
+        );
+        let token = format!(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{}.",
+            base64_url_encode(payload.as_bytes())
+        );
+        let mut headers = AHashMap::new();
+        headers.insert("authorization".to_string(), format!("Bearer {}", token));
+        let (id_ok, _) = check_identity_token(&headers, &[]);
+        assert!(!id_ok);
     }
 
     #[test]

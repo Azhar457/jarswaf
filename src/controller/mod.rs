@@ -217,11 +217,18 @@ pub async fn run_controller(port: u16, config_path: String) {
     logging::init_sqlite_db(&db_path).expect("Failed to initialize SQLite DB");
     handlers::start_threat_intel_scraper(db_path.clone());
 
-    let grpc_token = cfg
-        .global
-        .grpc_token
-        .clone()
-        .unwrap_or_else(|| "default_token".to_string());
+    // Generate a random gRPC token at startup when none is configured, and persist it back
+    // to config so agents can be registered against it. Never fall back to a hardcoded
+    // "default_token" — that left the gRPC management port open with a public constant.
+    let grpc_token = cfg.global.grpc_token.clone().unwrap_or_else(|| {
+        let generated = uuid::Uuid::new_v4().simple().to_string();
+        if let Ok(mut c) = config::load_config(&config_path) {
+            c.global.grpc_token = Some(generated.clone());
+            let _ = config::save_config(&config_path, &c);
+        }
+        info!("No grpc_token configured — generated a random one (persisted to config).");
+        generated
+    });
     tokio::spawn(async move {
         if let Err(e) = crate::grpc::server::run_manager_server(9000, grpc_token).await {
             tracing::error!("gRPC Manager Server error: {}", e);
