@@ -134,7 +134,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${INSTALL_DIR}/jarswaf controller --config ${INSTALL_DIR}/config.toml --port 8080
+ExecStart=${INSTALL_DIR}/controller --port 8080 --config ${INSTALL_DIR}/config.toml
 WorkingDirectory=${INSTALL_DIR}
 Restart=always
 RestartSec=5
@@ -154,20 +154,23 @@ echo -e "  ${CYAN}📂 Binary:${NC}    ${INSTALL_DIR}/agent"
 echo -e "  ${CYAN}🛠️  CLI:${NC}      ${CLI_LINK} (or: jarswaf)"
 echo -e "  ${CYAN}⚙️  Config:${NC}    ${INSTALL_DIR}/config.toml"
 echo ""
-echo -ne "${BOLD}▶  Start jarsWAF now? (Y/n): ${NC}"
-read -r answer
+answer="y"
+if [ -t 0 ]; then
+    echo -ne "${BOLD}▶  Start jarsWAF now? (Y/n): ${NC}"
+    read -r answer || answer="y"
+fi
+
 if [[ "$answer" != "n" && "$answer" != "N" ]]; then
-    systemctl start jarswaf
+    systemctl start jarswaf 2>/dev/null || true
     sleep 2
-    if systemctl is-active --quiet jarswaf; then
+    if systemctl is-active --quiet jarswaf 2>/dev/null; then
         echo -e "${GREEN}${BOLD}✅ jarsWAF is running!${NC}"
     else
-        # Fallback: direct start
+        # Fallback: direct start (Controller + Agent)
         mkdir -p "${INSTALL_DIR}/logs"
-        nohup "${INSTALL_DIR}/agent" --config "${INSTALL_DIR}/config.toml" \
-            > "${INSTALL_DIR}/agent.log" 2>&1 &
-        echo -e "${YELLOW}⚠️  systemd start failed, started via nohup (PID $!)${NC}"
-        echo -e "${YELLOW}   Check: journalctl -u jarswaf --no-pager -n 30${NC}"
+        nohup "${INSTALL_DIR}/controller" --port 8080 --config "${INSTALL_DIR}/config.toml" > "${INSTALL_DIR}/controller.log" 2>&1 &
+        nohup "${INSTALL_DIR}/agent" --config "${INSTALL_DIR}/config.toml" -u "http://localhost:8080" > "${INSTALL_DIR}/agent.log" 2>&1 &
+        echo -e "${YELLOW}⚠️  Started via background nohup processes (Controller & Agent)${NC}"
     fi
 else
     echo -e "${CYAN}→ Start manually: sudo jarswaf start${NC}"
