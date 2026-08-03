@@ -99,6 +99,60 @@ fn check_cmdi_002(req: &RequestInfo) -> bool {
     matches_payload(req, &CMDI_002_REGEX)
 }
 
+/// True when an Origin/Referer header is present and its host does not match the request's
+/// Host header — i.e. a genuine cross-origin request (classic CSRF signal).
+///
+/// Absence of Origin/Referer is deliberately NOT treated as an attack: many legitimate
+/// clients (curl, server-to-server, privacy browsers that strip Referer) omit them, and
+/// blocking on absence caused mass false-positive self-DoS (audit H-05). Only an explicit
+/// cross-origin match blocks. `ponytail:` this is a heuristic; real CSRF defense belongs in
+/// the app (SameSite cookies, CSRF tokens). The WAF layer just rejects the clearest case.
+fn is_cross_origin(req: &RequestInfo) -> bool {
+    let host = req
+        .headers
+        .get("host")
+        .map(|s| s.as_str())
+        .unwrap_or("")
+        .trim();
+    if host.is_empty() {
+        return false; // no host to compare against — pass
+    }
+
+    // Normalize a URL/header value to just the host:port authority.
+    fn authority(v: &str) -> String {
+        let v = v.trim();
+        let v = v
+            .strip_prefix("http://")
+            .or_else(|| v.strip_prefix("https://"))
+            .unwrap_or(v);
+        let end = v.find(['/', '?', '#']).unwrap_or(v.len());
+        v[..end].to_string()
+    }
+
+    for cand_auth in [req.headers.get("origin"), req.headers.get("referer")]
+        .into_iter()
+        .flatten()
+        .map(|v| authority(v.trim()))
+        .filter(|v| !v.is_empty())
+    {
+        // Exact host equality (ignoring default-port normalization) = same-origin.
+        if cand_auth == host {
+            continue;
+        }
+        // Allow `scheme://host:port` vs `host:port` when ports are default.
+        let cand_no_default = cand_auth.trim_end_matches(":80").trim_end_matches(":443");
+        let host_no_default = host.trim_end_matches(":80").trim_end_matches(":443");
+        if cand_auth == host_no_default
+            || cand_no_default == host
+            || cand_no_default == host_no_default
+        {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
 fn check_csrf_001(req: &RequestInfo) -> bool {
     if !matches!(req.method, "POST" | "PUT" | "PATCH" | "DELETE") {
         return false;
@@ -114,9 +168,7 @@ fn check_csrf_001(req: &RequestInfo) -> bool {
     {
         return false;
     }
-    let origin = req.headers.get("origin");
-    let referer = req.headers.get("referer");
-    origin.is_none() && referer.is_none()
+    is_cross_origin(req)
 }
 
 fn check_csrf_002(req: &RequestInfo) -> bool {
@@ -128,8 +180,10 @@ fn check_csrf_002(req: &RequestInfo) -> bool {
         .get("content-type")
         .map(|s| s.as_str())
         .unwrap_or("");
-    let origin = req.headers.get("origin");
-    content_type.contains("application/json") && origin.is_none()
+    if !content_type.contains("application/json") {
+        return false;
+    }
+    is_cross_origin(req)
 }
 
 fn check_upload_001(req: &RequestInfo) -> bool {
@@ -701,5 +755,70 @@ mod tests {
         // Benign: no pollution
         let benign = make_req(r#"{"username":"admin"}"#, "");
         assert!(!check_proto_001(&benign));
+    }
+
+    fn make_req_with_headers<'a>(headers: &'a AHashMap<String, String>) -> RequestInfo<'a> {
+        RequestInfo {
+            method: "POST",
+            path: "/submit",
+            query: "",
+            headers,
+            body: "",
+            ip: None,
+        }
+    }
+
+    #[test]
+    fn test_csrf_origin_mismatch_blocks() {
+        let mut h = AHashMap::new();
+        h.insert("host".into(), "app.example.com".into());
+        h.insert("origin".into(), "https://evil.example.com".into());
+        h.insert(
+            "content-type".into(),
+            "application/x-www-form-urlencoded".into(),
+        );
+        assert!(check_csrf_001(&make_req_with_headers(&h)));
+
+        let mut j = AHashMap::new();
+        j.insert("host".into(), "app.example.com".into());
+        j.insert("referer".into(), "https://evil.example.com/steal".into());
+        j.insert("content-type".into(), "application/json".into());
+        assert!(check_csrf_002(&make_req_with_headers(&j)));
+    }
+
+    #[test]
+    fn test_csrf_same_origin_passes() {
+        let mut h = AHashMap::new();
+        h.insert("host".into(), "app.example.com".into());
+        h.insert("origin".into(), "https://app.example.com".into());
+        h.insert(
+            "content-type".into(),
+            "application/x-www-form-urlencoded".into(),
+        );
+        assert!(!check_csrf_001(&make_req_with_headers(&h)));
+
+        let mut j = AHashMap::new();
+        j.insert("host".into(), "app.example.com".into());
+        j.insert("origin".into(), "https://app.example.com:443".into());
+        j.insert("content-type".into(), "application/json".into());
+        assert!(!check_csrf_002(&make_req_with_headers(&j)));
+    }
+
+    #[test]
+    fn test_csrf_absent_origin_passes() {
+        // Absence of Origin/Referer is NOT an attack (curl, server-to-server, privacy
+        // browsers) — must not block (audit H-05 regression guard).
+        let mut h = AHashMap::new();
+        h.insert("host".into(), "app.example.com".into());
+        h.insert(
+            "content-type".into(),
+            "application/x-www-form-urlencoded".into(),
+        );
+        assert!(!check_csrf_001(&make_req_with_headers(&h)));
+
+        let mut j = AHashMap::new();
+        j.insert("host".into(), "app.example.com".into());
+        j.insert("content-type".into(), "application/json".into());
+        assert!(!check_csrf_002(&make_req_with_headers(&j)));
     }
 }
