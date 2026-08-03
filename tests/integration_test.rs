@@ -77,6 +77,7 @@ async fn spawn_test_server(
         rate_limited: Arc::new(AtomicU64::new(0)),
         config_tx,
         config_lock: Arc::new(tokio::sync::Mutex::new(())),
+        sessions: Arc::new(std::sync::RwLock::new(Default::default())),
     };
 
     let app = build_router(state);
