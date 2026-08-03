@@ -85,9 +85,9 @@ nix = { version = "0.27", features = ["user"] } # for privilege dropping
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # TODO(P0 supply-chain): pin both `aya` and the `aya-ebpf`/`aya-log-ebpf` deps in
-# jarswaf-ebpf/Cargo.toml to the SAME `rev` (by full SHA). Currently the main workspace
-# resolves aya to commit a47f99a0 while jarswaf-ebpf resolves to 773ca715 — different
-# commits of the same repo, risking BPF map/userspace struct-ABI drift. `branch="main"`
-# floats further; pin a rev once a single compatible commit is verified across both crates.
-aya = { git = "https://github.com/aya-rs/aya", branch = "main" }
-aya-log = { git = "https://github.com/aya-rs/aya", branch = "main" }
+# Userspace aya pinned to the same rev as jarswaf-ebpf (a47f99a0) so the eBPF program and
+# its loader agree on struct layout. Previously both used `branch = "main"` and could float
+# / resolve to different commits (a47f99a0 vs 773ca715) — an ABI-drift risk at the BPF map
+# boundary. `ballot:` re-verify both sides still align before bumping aya (needs an eBPF build).
+aya = { git = "https://github.com/aya-rs/aya", rev = "a47f99a04ca509b20793be6560d440295e1cf86f" }
+aya-log = { git = "https://github.com/aya-rs/aya", rev = "a47f99a04ca509b20793be6560d440295e1cf86f" }

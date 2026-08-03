@@ -154,19 +154,40 @@ pub async fn login_handler(
 
     if verify_password(&payload.password, &stored_token) {
         info!("Successful admin login to jarsWAF Controller");
-        // TODO(P1 session): returning the plaintext password as the bearer token means it
-        // cannot be revoked without a password change and is replayable from any captured
-        // header/log. Replace with a server-generated session token (UUID) stored with TTL
-        // in SQLite/config so the dashboard sends the session id, not the password itself.
+        // Issue a revocable session token. The client sends THIS (not the password) as the
+        // bearer token; `auth_middleware` checks it against the in-memory session store and
+        // clears it on expiry/password change. The admin password is never returned again.
+        // `ponytail:` sessions are in-memory (lost on restart) and per-controller; swap in a
+        // SQLite-backed store if multi-restart persistence or multi-controller revocation is
+        // required.
+        let session_id = uuid::Uuid::new_v4().simple().to_string();
+        let ttl_secs: i64 = 24 * 3600; // 24h
+        let expiry = chrono::Utc::now().timestamp() + ttl_secs;
+        {
+            let mut sessions = state.sessions.write().unwrap();
+            sessions.insert(session_id.clone(), expiry);
+        }
+        info!("Issued revocable session token (expires in {ttl_secs}s)");
         Ok(Json(LoginResponse {
             status: "success".into(),
-            token: payload.password.clone(),
+            token: session_id,
             message: "Authentication successful".into(),
         }))
     } else {
         warn!("Failed admin login attempt to jarsWAF Controller");
         Err((StatusCode::UNAUTHORIZED, "Invalid admin password"))
     }
+}
+
+/// Returns true when `candidate` is a currently-valid session token in `store` (present and
+/// not expired). Uses a constant-time compare per entry to avoid a timing oracle on session
+/// ids. Callers should already hold the sessions read lock; expired-entry cleanup is handled
+/// opportunistically by `auth_middleware` under the write lock.
+pub fn is_valid_session(store: &std::collections::HashMap<String, i64>, candidate: &str) -> bool {
+    let now = chrono::Utc::now().timestamp();
+    store
+        .iter()
+        .any(|(k, &exp)| exp >= now && constant_time_eq(k.as_bytes(), candidate.as_bytes()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,7 +226,10 @@ pub async fn change_password_handler(
     config::save_config(&state.config_path, &cfg)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Config write error"))?;
 
-    info!("Admin password updated successfully");
+    // Password changed → revoke ALL previously issued sessions so the old credential
+    // (and any stolen bearer token minted from it) stops working immediately.
+    state.sessions.write().unwrap().clear();
+    info!("Admin password updated successfully — all existing sessions revoked");
     Ok(Json(serde_json::json!({
         "status": "success",
         "message": "Password updated successfully"
@@ -237,13 +261,22 @@ pub async fn auth_middleware(
             let mut auth_valid = false;
 
             let check_token = |token: &str| -> bool {
-                // 1. Verify the supplied token against the stored (hashed) admin_token via
-                //    constant-time compare. Handles both hashed and legacy plaintext storage.
+                // 1. Revocable session token (issued by /auth/login). Preferred path.
+                {
+                    let sessions = state.sessions.read().unwrap();
+                    if is_valid_session(&sessions, token) {
+                        return true;
+                    }
+                }
+
+                // 2. Legacy: verify the supplied token against the stored (hashed) admin_token
+                //    via constant-time compare (hashed or plaintext storage). Kept for the
+                //    current dashboard/agent enrollment flows that send the raw password.
                 if verify_password(token, &expected_token) {
                     return true;
                 }
 
-                // 2. Stateless Machine ID Binding: <MachineID>.<Hash>
+                // 3. Stateless Machine ID Binding: <MachineID>.<Hash>
                 //    hash = sha256(machine_id:expected_token). Compared constant-time.
                 if let Some((machine_id, hash)) = token.split_once('.') {
                     let mut hasher = Sha256::new();

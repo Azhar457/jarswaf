@@ -279,6 +279,7 @@ pub async fn run_controller(port: u16, config_path: String) {
         rate_limited: Arc::new(AtomicU64::new(initial_stats.rate_limited as u64)),
         config_tx,
         config_lock: Arc::new(tokio::sync::Mutex::new(())),
+        sessions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     };
 
     let app = build_router(state);
