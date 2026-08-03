@@ -228,13 +228,14 @@ pub async fn run_controller(port: u16, config_path: String) {
         }
     });
 
-    // Spawn embedded Pingora WAF Agent Proxy inside Controller so it includes full Agent capabilities
+    // Spawn embedded Pingora WAF Agent Proxy inside Controller so it includes full Standalone WAF capabilities
     let agent_cfg = config_path.clone();
-    let controller_url = format!("http://127.0.0.1:{}", port);
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        info!("🛡️  Embedded WAF Agent Engine initializing inside Controller...");
-        crate::agent::run_agent(&agent_cfg, Some(controller_url), None, "rules").await;
+        info!(
+            "🛡️  Embedded WAF Agent Engine initializing inside Controller (Standalone WAF Mode)..."
+        );
+        crate::agent::run_agent(&agent_cfg, None, None, "rules").await;
     });
 
     // Initialize broadcast channel for live logs

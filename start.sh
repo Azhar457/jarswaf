@@ -19,15 +19,21 @@ echo -e "${CYAN}${BOLD}  🛡️  jarsWAF Interactive Development Launcher  🛡
 echo -e "${BLUE}${BOLD}===================================================${NC}"
 echo
 
-# 1. Interactive Inputs
-read -p "$(echo -e "${BOLD}Masukkan Port Controller (API/Dashboard) [Default: 8080]: ${NC}")" CTRL_PORT
-CTRL_PORT=${CTRL_PORT:-8080}
+# 1. Inputs (Interactive & Non-Interactive safe)
+if [ -t 0 ]; then
+    read -p "$(echo -e "${BOLD}Masukkan Port Controller (API/Dashboard) [Default: 8080]: ${NC}")" CTRL_PORT || CTRL_PORT=""
+    CTRL_PORT=${CTRL_PORT:-8080}
 
-read -p "$(echo -e "${BOLD}Masukkan Port Agent WAF Proxy [Default: 8000]: ${NC}")" AGENT_PORT
-AGENT_PORT=${AGENT_PORT:-8000}
+    read -p "$(echo -e "${BOLD}Masukkan Port Agent WAF Proxy [Default: 8000]: ${NC}")" AGENT_PORT || AGENT_PORT=""
+    AGENT_PORT=${AGENT_PORT:-8000}
 
-read -p "$(echo -e "${BOLD}Masukkan Target Backend (IP:Port) [Default: 127.0.0.1:8081]: ${NC}")" BACKEND_TARGET
-BACKEND_TARGET=${BACKEND_TARGET:-127.0.0.1:8081}
+    read -p "$(echo -e "${BOLD}Masukkan Target Backend (IP:Port) [Default: 127.0.0.1:8081]: ${NC}")" BACKEND_TARGET || BACKEND_TARGET=""
+    BACKEND_TARGET=${BACKEND_TARGET:-127.0.0.1:8081}
+else
+    CTRL_PORT=${CTRL_PORT:-8080}
+    AGENT_PORT=${AGENT_PORT:-8000}
+    BACKEND_TARGET=${BACKEND_TARGET:-127.0.0.1:8081}
+fi
 
 echo -e "\n${BLUE}[INFO] Menyiapkan konfigurasi...${NC}"
 
@@ -77,20 +83,12 @@ print(token)
 ' "$AGENT_PORT" "$BACKEND_TARGET" "$CTRL_PORT")
 
 PID_CNTR=0
-PID_AGENT=0
 PID_VITE=0
 
 cleanup() {
     echo
     echo -e "${YELLOW}Stopping jarsWAF processes...${NC}"
     if [ "$PID_CNTR" -ne 0 ]; then kill "$PID_CNTR" 2>/dev/null || true; fi
-    if [ "$PID_AGENT" -ne 0 ]; then
-        if [ "$AGENT_PORT" -lt 1024 ]; then
-            sudo kill "$PID_AGENT" 2>/dev/null || true
-        else
-            kill "$PID_AGENT" 2>/dev/null || true
-        fi
-    fi
     if [ "$PID_VITE" -ne 0 ]; then kill "$PID_VITE" 2>/dev/null || true; fi
     exit
 }
@@ -100,38 +98,25 @@ echo -e "${GREEN}[ OK ] Konfigurasi diperbarui.${NC}"
 echo -e "${MAGENTA}Admin Token: ${YELLOW}$TOKEN${NC}\n"
 
 echo -e "${BLUE}Compiling jarsWAF binaries...${NC}"
-cargo build --bin controller --bin agent
+cargo build --bin controller
 
-# Check if port is privileged
-SUDO_CMD=""
-if [ "$AGENT_PORT" -lt 1024 ]; then
-    echo -e "${YELLOW}[WARN] Port Agent $AGENT_PORT < 1024. Memerlukan hak akses administrator (sudo) untuk menjalankan Agent.${NC}"
-    SUDO_CMD="sudo"
-fi
-
-echo -e "${BLUE}Step 1: Starting Controller (API server) on port $CTRL_PORT...${NC}"
+echo -e "\n${BLUE}Step 1: Starting Standalone jarsWAF Engine (API: $CTRL_PORT, WAF Proxy: $AGENT_PORT)...${NC}"
 ./target/debug/controller --port "$CTRL_PORT" --config "$CONFIG" &
 PID_CNTR=$!
 
 sleep 3
 
-echo -e "\n${BLUE}Step 2: Starting Agent (WAF proxy) on port $AGENT_PORT...${NC}"
-$SUDO_CMD ./target/debug/agent -c "$CONFIG" -u "http://localhost:$CTRL_PORT" -t "$TOKEN" &
-PID_AGENT=$!
-
-sleep 2
-
-echo -e "\n${BLUE}Step 3: Starting Dashboard (Vite dev server)...${NC}"
+echo -e "\n${BLUE}Step 2: Starting Dashboard (Vite dev server)...${NC}"
 cd dashboard && npm run dev &
 PID_VITE=$!
 cd "$SCRIPT_DIR"
 
 echo
 echo -e "${GREEN}${BOLD}===================================================${NC}"
-echo -e "${GREEN}${BOLD}  jarsWAF Berhasil Dijalankan!${NC}"
+echo -e "${GREEN}${BOLD}  jarsWAF Standalone Berhasil Dijalankan!${NC}"
 echo -e "  Dashboard UI   → ${BOLD}http://localhost:5173/${NC}"
 echo -e "  Controller API → ${BOLD}http://localhost:$CTRL_PORT/${NC}"
-echo -e "  WAF Agent Port → ${BOLD}http://localhost:$AGENT_PORT/${NC} (Bypass ke WAF)"
+echo -e "  WAF Proxy Port → ${BOLD}http://localhost:$AGENT_PORT/${NC} (WAF Inspection Point)"
 echo -e "  Backend Target → ${BOLD}http://$BACKEND_TARGET/${NC}"
 echo -e "${YELLOW}  Tekan Ctrl+C untuk menghentikan semua proses.${NC}"
 echo -e "${GREEN}${BOLD}===================================================${NC}"
