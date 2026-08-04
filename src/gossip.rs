@@ -293,6 +293,22 @@ mod tests {
         assert_ne!(key1, key3);
     }
 
+    #[tokio::test]
+    async fn test_gossip_start_fails_closed_on_empty_psk() {
+        // CIA (Integrity/Availability): with gossip enabled but an empty PSK, start() must
+        // return Err BEFORE binding a socket — it must not run with the public key
+        // SHA256("") that lets anyone on the multicast group forge threat-intel.
+        let cfg = crate::config::GossipConfig {
+            enabled: true,
+            bind_addr: "127.0.0.1:0".to_string(),
+            seeds: vec![],
+            psk: "".to_string(),
+            node_id: "test".to_string(),
+        };
+        let mut node = GossipNode::new(cfg);
+        assert!(node.start().await.is_err());
+    }
+
     #[test]
     fn test_gossip_anti_replay_fifo_eviction() {
         const MAX: usize = 100;
