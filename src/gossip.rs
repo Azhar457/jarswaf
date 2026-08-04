@@ -43,6 +43,8 @@ pub struct GossipNode {
 
 impl GossipNode {
     pub fn new(config: GossipConfig) -> Self {
+        // NOTE: JARSWAF_GOSSIP_PSK env override lives ONLY in config.rs::load_config
+        // (single source of truth). Do not re-apply here — SIGHUP reload would diverge.
         Self {
             config,
             socket: None,
@@ -91,6 +93,16 @@ impl GossipNode {
         Ok(())
     }
 
+    fn derive_gossip_key(psk: &[u8]) -> Key {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(psk);
+        let hash = hasher.finalize();
+        let mut key_bytes = [0u8; 32];
+        key_bytes.copy_from_slice(&hash);
+        Key::from(key_bytes)
+    }
+
     pub async fn broadcast_threat_intel(&self, msg: ThreatIntelMessage) {
         if !self.config.enabled {
             return;
@@ -100,10 +112,7 @@ impl GossipNode {
             return;
         };
 
-        let mut psk_bytes = [0u8; 32];
-        let psk_len = self.config.psk.len().min(32);
-        psk_bytes[..psk_len].copy_from_slice(&self.config.psk.as_bytes()[..psk_len]);
-        let key = Key::from(psk_bytes);
+        let key = Self::derive_gossip_key(self.config.psk.as_bytes());
         let cipher = ChaCha20Poly1305::new(&key);
 
         let mut nonce_bytes = [0u8; 12];
@@ -168,13 +177,12 @@ impl GossipNode {
         running: Arc<Mutex<bool>>,
     ) {
         let mut buf = [0u8; 2048];
-        let mut psk_bytes = [0u8; 32];
-        let psk_len = psk.len().min(32);
-        psk_bytes[..psk_len].copy_from_slice(&psk[..psk_len]);
-        let key = Key::from(psk_bytes);
+        let key = Self::derive_gossip_key(&psk);
         let cipher = ChaCha20Poly1305::new(&key);
 
-        let mut seen_nonces = std::collections::HashSet::new();
+        const MAX_SEEN_NONCES: usize = 10_000;
+        let mut seen_nonces = std::collections::HashSet::with_capacity(MAX_SEEN_NONCES);
+        let mut nonce_order = std::collections::VecDeque::with_capacity(MAX_SEEN_NONCES);
 
         loop {
             if !*running.lock().await {
@@ -197,15 +205,20 @@ impl GossipNode {
                     nonce_bytes.copy_from_slice(&buf[4..4 + NONCE_LEN]);
 
                     // Anti-replay: drop duplicate nonces
-                    if !seen_nonces.insert(nonce_bytes) {
+                    if seen_nonces.contains(&nonce_bytes) {
                         debug!("Gossip: replay detected (duplicate nonce) from {src}");
                         continue;
                     }
 
-                    // Keep cache bounded
-                    if seen_nonces.len() > 10_000 {
-                        seen_nonces.clear();
+                    // Bounded FIFO eviction: evict only the oldest nonce when capacity is reached
+                    if nonce_order.len() >= MAX_SEEN_NONCES {
+                        if let Some(oldest) = nonce_order.pop_front() {
+                            seen_nonces.remove(&oldest);
+                        }
                     }
+
+                    seen_nonces.insert(nonce_bytes);
+                    nonce_order.push_back(nonce_bytes);
 
                     let nonce = Nonce::from(nonce_bytes);
                     let ciphertext_len =
@@ -247,5 +260,67 @@ impl GossipNode {
         }
 
         debug!("Gossip receive loop ended");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gossip_key_derivation_deterministic() {
+        let psk1 = b"my-super-secret-psk-123456789012";
+        let key1 = GossipNode::derive_gossip_key(psk1);
+        let key2 = GossipNode::derive_gossip_key(psk1);
+        assert_eq!(key1, key2);
+
+        let psk2 = b"different-psk-123456789012345678";
+        let key3 = GossipNode::derive_gossip_key(psk2);
+        assert_ne!(key1, key3);
+    }
+
+    #[test]
+    fn test_gossip_anti_replay_fifo_eviction() {
+        const MAX: usize = 100;
+        let mut seen = std::collections::HashSet::with_capacity(MAX);
+        let mut order = std::collections::VecDeque::with_capacity(MAX);
+
+        for i in 0..MAX {
+            let mut nonce = [0u8; 12];
+            nonce[0] = (i & 0xff) as u8;
+            nonce[1] = ((i >> 8) & 0xff) as u8;
+
+            assert!(!seen.contains(&nonce));
+            seen.insert(nonce);
+            order.push_back(nonce);
+        }
+
+        // Verify duplicates are rejected
+        let mut duplicate_nonce = [0u8; 12];
+        duplicate_nonce[0] = 50;
+        assert!(seen.contains(&duplicate_nonce));
+
+        // Push 1 more beyond MAX
+        let mut new_nonce = [0u8; 12];
+        new_nonce[0] = 255;
+        new_nonce[1] = 255;
+
+        if order.len() >= MAX {
+            if let Some(oldest) = order.pop_front() {
+                seen.remove(&oldest);
+            }
+        }
+        seen.insert(new_nonce);
+        order.push_back(new_nonce);
+
+        // Oldest nonce (i=0) was evicted
+        let mut oldest_nonce = [0u8; 12];
+        oldest_nonce[0] = 0;
+        assert!(!seen.contains(&oldest_nonce));
+
+        // Nonce i=50 is still retained!
+        assert!(seen.contains(&duplicate_nonce));
+        // New nonce is present
+        assert!(seen.contains(&new_nonce));
     }
 }

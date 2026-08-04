@@ -1,0 +1,65 @@
+{
+  "title": "jarsWAF",
+  "uid": "jarswaf",
+  "tags": ["jarswaf", "waf"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "panels": [
+    {
+      "title": "Requests / sec",
+      "type": "graph",
+      "datasource": "prometheus",
+      "targets": [{"expr": "rate(jarswaf_requests_total[1m])", "legendFormat": "requests"}],
+      "fieldConfig": { "defaults": { "unit": "rps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "title": "Blocked %",
+      "type": "graph",
+      "datasource": "prometheus",
+      "targets": [{"expr": "rate(jarswaf_blocked_total[1m]) / rate(jarswaf_requests_total[1m]) * 100", "legendFormat": "blocked %"}],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100 } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "title": "Active Agents",
+      "type": "stat",
+      "datasource": "prometheus",
+      "targets": [{"expr": "jarswaf_agents_connected", "legendFormat": "agents"}],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 8 }
+    },
+    {
+      "title": "Memory (MB)",
+      "type": "gauge",
+      "datasource": "prometheus",
+      "targets": [{"expr": "process_resident_memory_bytes / 1e6", "legendFormat": "RSS"}],
+      "fieldConfig": { "defaults": { "unit": "MB", "min": 0, "max": 512, "thresholds": { "steps": [{"value": 0, "color": "green"}, {"value": 256, "color": "yellow"}, {"value": 400, "color": "red"}] } } },
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 8 }
+    },
+    {
+      "title": "Blocklist Size",
+      "type": "stat",
+      "datasource": "prometheus",
+      "targets": [{"expr": "jarswaf_blocklist_size", "legendFormat": "entries"}],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 8 }
+    },
+    {
+      "title": "Top Blocked IPs (last 1h)",
+      "type": "table",
+      "datasource": "prometheus",
+      "targets": [{"expr": "topk(10, sum by(ip) (rate(jarswaf_blocked_ip_total[1h])))", "legendFormat": "{{ip}}"}],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 }
+    },
+    {
+      "title": "Cache Hit Ratio (reputation)",
+      "type": "graph",
+      "datasource": "prometheus",
+      "targets": [{"expr": "rate(jarswaf_reputation_cache_hits[5m]) / (rate(jarswaf_reputation_cache_hits[5m]) + rate(jarswaf_reputation_cache_misses[5m])) * 100", "legendFormat": "hit %"}],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100 } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 }
+    }
+  ]
+}

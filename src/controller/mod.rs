@@ -151,6 +151,7 @@ pub fn build_router(state: ControllerState) -> Router {
             delete(handlers::delete_ssl_certificate_handler),
         )
         .route("/api/v1/ssl/renew", post(handlers::post_ssl_renew_handler))
+        .route("/metrics", get(handlers::get_metrics_handler))
         .route("/ws/dashboard", get(websocket::ws_dashboard_handler))
         .route("/ws/agent", get(websocket::ws_agent_handler))
         .layer(axum::middleware::from_fn_with_state(
@@ -158,7 +159,7 @@ pub fn build_router(state: ControllerState) -> Router {
             auth::auth_middleware,
         ));
 
-    Router::new()
+    let router = Router::new()
         .route("/health", get(health_handler))
         .route("/install.sh", get(handlers::serve_install_script))
         .route(
@@ -169,11 +170,35 @@ pub fn build_router(state: ControllerState) -> Router {
             "/api/v1/proxy-unmask/verify",
             post(handlers::verify_proxy_unmask_handler),
         )
-        .route("/metrics", get(handlers::get_metrics_handler))
-        .merge(api_routes)
-        .fallback_service(tower_http::services::ServeDir::new("dashboard/dist"))
+        .merge(api_routes);
+
+    // Honor installer-set path first (single source of truth), probe fallbacks for dev.
+    // Env: JARSWAF_STATIC_DIR — set by install.sh so the binary doesn't need 3 hardcoded probes.
+    let static_dir: String = if let Ok(p) = std::env::var("JARSWAF_STATIC_DIR") {
+        if !p.trim().is_empty() {
+            p
+        } else {
+            probe_static_dir()
+        }
+    } else {
+        probe_static_dir()
+    };
+
+    router
+        .fallback_service(tower_http::services::ServeDir::new(&static_dir))
         .layer(cors)
         .with_state(state)
+}
+
+/// Probe candidate dashboard dist paths. Returns the first that exists, else the dev default.
+fn probe_static_dir() -> String {
+    const CANDIDATES: &[&str] = &["/opt/jarswaf/dashboard/dist", "dashboard/dist", "dist"];
+    for c in CANDIDATES {
+        if std::path::Path::new(c).exists() {
+            return (*c).to_string();
+        }
+    }
+    "dashboard/dist".to_string()
 }
 
 pub async fn run_controller(port: u16, config_path: String) {
