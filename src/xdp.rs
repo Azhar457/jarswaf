@@ -167,6 +167,32 @@ impl XdpManager {
         }
     }
 
+    pub fn block_ip_v6(&mut self, _ip: std::net::Ipv6Addr) -> Result<(), String> {
+        #[cfg(target_os = "linux")]
+        {
+            let bpf = match self.bpf.as_mut() {
+                Some(b) => b,
+                None => return Ok(()),
+            };
+            let mut blocklist: HashMap<_, [u8; 16], u8> = HashMap::try_from(
+                bpf.map_mut("BLOCKLIST_V6")
+                    .ok_or_else(|| "eBPF map 'BLOCKLIST_V6' not found".to_string())?,
+            )
+            .map_err(|e| format!("{}", e))?;
+            let ip_octets = _ip.octets();
+            blocklist
+                .insert(ip_octets, 1, 0)
+                .map_err(|e| format!("{}", e))?;
+            info!("IPv6 {} added to XDP blocklist", _ip);
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(())
+        }
+    }
+
     pub fn attach_rasp(
         &mut self,
         rasp_tx: Option<tokio::sync::mpsc::Sender<()>>,

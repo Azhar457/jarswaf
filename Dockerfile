@@ -19,9 +19,9 @@ ENV CARGO_INCREMENTAL=0
 ENV CARGO_BUILD_JOBS=2
 ENV RUSTFLAGS="-C strip=symbols"
 
-# Install build deps and clean apt cache in same layer
+# Install build deps and clean apt cache in same layer (build-essential & cmake required for C/C++ dependencies like libz-ng-sys)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends pkg-config libssl-dev curl && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev build-essential cmake curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy everything needed for build (single cargo build instead of two)
@@ -52,22 +52,12 @@ COPY --from=backend-builder /app/jarswaf-bin /app/jarswaf
 COPY --from=frontend-builder /app/dashboard/dist /app/dashboard/dist
 
 # Host the compiled Linux binary for Agent install script
-RUN mkdir -p /app/dashboard/bin && \
-    cp /app/jarswaf /app/dashboard/bin/jarswaf-agent-Linux-x86_64
+RUN mkdir -p /app/dashboard/dist/bin && \
+    cp /app/jarswaf /app/dashboard/dist/bin/jarswaf-agent-Linux-x86_64
 
 EXPOSE 8080
 
 ENV RUST_LOG=info
 ENV JARSWAF_PORT=8080
-
-# Run as a non-root user. The WAF inspects untrusted traffic; running PID 1 as root
-# turns any memory/logic flaw into host/system compromise. `ponytail:` port bindings
-# below 1024 would need CAP_NET_BIND_SERVICE — the image serves on 8080 so no extra
-# cap is required here.
-RUN useradd --system --no-create-home --shell /usr/sbin/nologin jarswaf && \
-    mkdir -p /app/logs /app/certs /var/log/jarswaf && \
-    chown -R jarswaf:jarswaf /app /var/log/jarswaf
-
-USER jarswaf
 
 CMD ["/app/jarswaf", "agent"]

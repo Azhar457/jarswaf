@@ -31,7 +31,8 @@ impl WafManagerService {
                     .strip_prefix("Bearer ")
                     .unwrap_or(token_str)
                     .trim();
-                if token == self.auth_token {
+                // Constant-time comparison to avoid timing side-channels.
+                if constant_time_eq(token.as_bytes(), self.auth_token.as_bytes()) {
                     Ok(())
                 } else {
                     Err(Status::unauthenticated("Invalid gRPC authorization token"))
@@ -40,6 +41,18 @@ impl WafManagerService {
             None => Err(Status::unauthenticated("Missing authorization metadata")),
         }
     }
+}
+
+/// Constant-time byte comparison (avoids timing side-channels for token checks).
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 #[tonic::async_trait]
