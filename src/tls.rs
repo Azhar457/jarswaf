@@ -45,7 +45,7 @@ impl LocalCA {
         let cert = params.self_signed(&key_pair)?;
 
         fs::write(&self.cert_path, cert.pem())?;
-        fs::write(&self.key_path, key_pair.serialize_pem())?;
+        write_secure_private_key(&self.key_path, &key_pair.serialize_pem())?;
 
         println!("Local CA generated at: {}", self.cert_path);
         println!("Install this CA on your devices to trust jarsWAF certificates");
@@ -104,8 +104,47 @@ impl LocalCA {
         let server_cert = server_params.signed_by(&server_key, &ca)?;
 
         fs::write(cert_path, server_cert.pem())?;
-        fs::write(key_path, server_key.serialize_pem())?;
+        write_secure_private_key(key_path, &server_key.serialize_pem())?;
 
         Ok(())
+    }
+}
+
+/// Securely writes private key to filesystem with 0o600 permissions (Unix) to prevent unauthorized local reads
+fn write_secure_private_key(path: &str, content: &str) -> std::io::Result<()> {
+    fs::write(path, content)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        let _ = fs::set_permissions(path, perms);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_local_ca_generation_and_key_permissions() {
+        let tmp_dir = std::env::temp_dir().join(format!("jarswaf_tls_test_{}", std::process::id()));
+        let ca = LocalCA::new(tmp_dir.to_str().unwrap());
+        let res = ca.ensure_ca();
+        assert!(res.is_ok());
+
+        assert!(Path::new(&ca.cert_path).exists());
+        assert!(Path::new(&ca.key_path).exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = fs::metadata(&ca.key_path).expect("get key metadata");
+            let mode = metadata.permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "Private key permissions should be 0o600");
+        }
+
+        // Cleanup
+        let _ = fs::remove_dir_all(tmp_dir);
     }
 }

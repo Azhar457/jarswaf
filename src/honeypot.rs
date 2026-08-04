@@ -42,7 +42,7 @@ pub struct HoneypotConfig {
 fn default_enabled() -> bool {
     false
 }
-fn default_honeypot_upstream() -> String {
+pub fn default_honeypot_upstream() -> String {
     "127.0.0.1:9999".to_string()
 }
 fn default_delay_ms() -> u64 {

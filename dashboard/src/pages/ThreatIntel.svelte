@@ -6,6 +6,8 @@
   import Badge from "../components/ui/Badge.svelte";
   import IpDetailModal from "../components/IpDetailModal.svelte";
 
+  import { token } from "../lib/stores";
+
   let selectedIp: string | null = null;
   let selectedCountry = "ID";
   let showModal = false;
@@ -32,20 +34,25 @@
   let loading = true;
   let pollInterval: any;
 
-  function formatCount(count: number, country: string): string {
-    let multiplier = 120;
-    if (country === "ID") multiplier = 850;
-    if (country === "US") multiplier = 450;
-    let finalCount = count * multiplier;
-    if (finalCount >= 1000) {
-      return `${(finalCount / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  function formatCount(count: number): string {
+    if (count >= 1000000) {
+      return `${(count / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
     }
-    return finalCount.toString();
+    if (count >= 1000) {
+      return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+    }
+    return count.toString();
   }
 
   async function fetchThreats() {
     try {
-      const res = await fetch("http://localhost:8080/api/v1/threat-intel/events");
+      const apiBase =
+        typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
+      const headers: Record<string, string> = {};
+      if ($token) {
+        headers["Authorization"] = `Bearer ${$token}`;
+      }
+      const res = await fetch(`${apiBase}/api/v1/threat-intel/events`, { headers });
       if (res.ok) {
         events = await res.json();
         const aggregated = new Map<string, ThreatEvent & { count: number }>();
@@ -86,7 +93,7 @@
             size: 0.05 + e.count * 0.015,
             action: actionLabel,
             count: e.count,
-            countFormatted: formatCount(e.count, e.country),
+            countFormatted: formatCount(e.count),
             country: e.country,
             color: dotColor,
             colorClass: actionColorClass,

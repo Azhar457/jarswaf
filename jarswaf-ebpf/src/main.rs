@@ -11,7 +11,7 @@ use aya_ebpf::{
 use core::mem;
 use network_types::{
     eth::{EthHdr, EtherType},
-    ip::Ipv4Hdr,
+    ip::{Ipv4Hdr, Ipv6Hdr},
 };
 
 #[repr(C)]
@@ -22,9 +22,11 @@ pub struct ExecveEvent {
     pub command: [u8; 128],
 }
 
-
 #[map(name = "BLOCKLIST")]
-static BLOCKLIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(10240, 0);
+static BLOCKLIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(100000, 0);
+
+#[map(name = "BLOCKLIST_V6")]
+static BLOCKLIST_V6: HashMap<[u8; 16], u8> = HashMap::<[u8; 16], u8>::with_max_entries(100000, 0);
 
 #[map(name = "RASP_EVENTS")]
 static RASP_EVENTS: PerfEventArray<ExecveEvent> = PerfEventArray::new(0);
@@ -53,15 +55,23 @@ fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
 fn try_jarswaf_ebpf(ctx: XdpContext) -> Result<u32, ()> {
     let ethhdr: *const EthHdr = ptr_at(&ctx, 0)?;
     match unsafe { (*ethhdr).ether_type } {
-        EtherType::Ipv4 => {}
+        EtherType::Ipv4 => {
+            let ipv4hdr: *const Ipv4Hdr = ptr_at(&ctx, EthHdr::LEN)?;
+            let source_ip = unsafe { (*ipv4hdr).src_addr }; // network byte order
+
+            if unsafe { BLOCKLIST.get(&source_ip) }.is_some() {
+                return Ok(xdp_action::XDP_DROP);
+            }
+        }
+        EtherType::Ipv6 => {
+            let ipv6hdr: *const Ipv6Hdr = ptr_at(&ctx, EthHdr::LEN)?;
+            let source_ip = unsafe { (*ipv6hdr).src_addr.in6_u.u6_addr8 };
+
+            if unsafe { BLOCKLIST_V6.get(&source_ip) }.is_some() {
+                return Ok(xdp_action::XDP_DROP);
+            }
+        }
         _ => return Ok(xdp_action::XDP_PASS),
-    }
-
-    let ipv4hdr: *const Ipv4Hdr = ptr_at(&ctx, EthHdr::LEN)?;
-    let source_ip = unsafe { (*ipv4hdr).src_addr }; // network byte order
-
-    if unsafe { BLOCKLIST.get(&source_ip) }.is_some() {
-        return Ok(xdp_action::XDP_DROP);
     }
 
     Ok(xdp_action::XDP_PASS)
