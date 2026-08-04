@@ -19,12 +19,13 @@ ENV CARGO_INCREMENTAL=0
 ENV CARGO_BUILD_JOBS=2
 ENV RUSTFLAGS="-C strip=symbols"
 
-# Install build deps and clean apt cache in same layer. cmake + a full C/C++ toolchain are
-# required: libz-ng-sys (pulled via the ONNX/tract dependency chain) invokes cmake and needs
-# `c++` (g++) on PATH — `build-essential` alone has been flaky here ("failed to find tool
-# c++", "is cmake not installed?"), so install gcc/g++/make explicitly.
+# Install only the build toolchain actually needed to compile the binary and its transitive
+# C deps: cmake/g++/make for libz-ng-sys (ONNX/tract chain), pkg-config + libssl-dev for
+# openssl-sys headers. `curl` was previously listed but the build never uses it — omitted.
+# `build-essential` alone proved flaky here ("failed to find tool c++"), so gcc/g++/make are
+# installed explicitly and verified before building.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends pkg-config libssl-dev build-essential cmake gcc g++ make curl && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev build-essential cmake gcc g++ make && \
     command -v cmake && command -v c++ && \
     rm -rf /var/lib/apt/lists/*
 
@@ -46,8 +47,12 @@ RUN cargo build --release && \
 FROM debian:bookworm-slim
 WORKDIR /app
 
+# Minimal runtime: only what the binary actually needs. `ldd` on the release binary shows
+# it links libc/libm/libgcc_s only — rustls uses `ring` (bundled crypto), so libssl3 is NOT
+# required. curl is not used at runtime. ca-certificates IS needed for reqwest/rustls TLS
+# root verification (threat-intel pull, webhooks). Everything else is omitted.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libssl3 curl && \
+    apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy compiled Rust binary
@@ -64,5 +69,12 @@ EXPOSE 8080
 
 ENV RUST_LOG=info
 ENV JARSWAF_PORT=8080
+
+# Run as non-root. The WAF inspects untrusted traffic; PID 1 as root turns any logic flaw
+# into host compromise. Serves on 8080 so no NET_BIND_SERVICE cap is needed here.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin jarswaf && \
+    chown -R jarswaf:jarswaf /app /app/dashboard/dist
+
+USER jarswaf
 
 CMD ["/app/jarswaf", "agent"]
