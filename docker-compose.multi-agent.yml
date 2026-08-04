@@ -11,14 +11,19 @@ services:
       - "9000:9000"
     environment:
       - RUST_LOG=info
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # eBPF loading needs only BPF + NET_ADMIN on modern kernels (5.8+). CAP_SYS_ADMIN
+    # ("the new root") and the shared /sys/fs/bpf bind were a cross-tenant tamper / privesc
+    # surface (audit I-C2) — removed. BPF maps live in kernel memory per agent (aya default);
+    # no shared pin dir is needed, which also removes the cross-container tamper vector.
     cap_add:
       - CAP_BPF
       - CAP_NET_ADMIN
-      - CAP_SYS_ADMIN
-      - CAP_SYS_RESOURCE
     volumes:
       - ./config.toml:/app/config.toml
-      - /sys/fs/bpf:/sys/fs/bpf:rw
     restart: unless-stopped
 
   # Agent 2: Exposed on host port 9001 to avoid collision
@@ -31,13 +36,14 @@ services:
       - "9001:9000" # Mapped to 9001 on the host
     environment:
       - RUST_LOG=info
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     cap_add:
       - CAP_BPF
       - CAP_NET_ADMIN
-      - CAP_SYS_ADMIN
-      - CAP_SYS_RESOURCE
     volumes:
       # Use a separate config file if needed, e.g. different backend mappings
-      - ./config.agent2.toml:/app/config.toml 
-      - /sys/fs/bpf:/sys/fs/bpf:rw
+      - ./config.agent2.toml:/app/config.toml
     restart: unless-stopped

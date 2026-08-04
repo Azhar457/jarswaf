@@ -20,6 +20,13 @@ on:
       - 'xtask/**'
       - '.github/workflows/devsecops.yml'
 
+# Least-privilege: default to read-only for the whole workflow; individual jobs that
+# need more (codeql: security-events: write) declare it explicitly. Prevents the
+# repo-default GITHUB_TOKEN (often contents: write on older repos) from leaking into
+# unscoped steps of sast/dast jobs that run third-party actions.
+permissions:
+  contents: read
+
 jobs:
   # -------------------------------------------------------------
   # Job 1: SAST - Static Code Analysis & Dependency Audits
@@ -29,16 +36,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.x.x
 
       # Setup Rust Environment
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: clippy, rustfmt
 
       - name: Rust Cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2.x.x
 
       # Check Rust Code Formatting
       - name: Run Cargo Fmt
@@ -56,7 +63,7 @@ jobs:
 
       # Setup Node.js Environment (Dashboard)
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.x.x
         with:
           node-version: 20
           cache: 'npm'
@@ -86,21 +93,21 @@ jobs:
       contents: read
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.x.x
 
       # Initialize CodeQL
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@eb3cef721752a3421fe144a742539281bdf4df1a # v3.x.x
         with:
           languages: javascript, typescript, rust
 
       # Autobuild Rust and Frontend
       - name: Autobuild CodeQL
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@eb3cef721752a3421fe144a742539281bdf4df1a # v3.x.x
 
       # Perform CodeQL Analysis
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@eb3cef721752a3421fe144a742539281bdf4df1a # v3.x.x
 
   # -------------------------------------------------------------
   # Job 3: DAST - Dynamic Application Security Testing (OWASP ZAP)
@@ -111,7 +118,7 @@ jobs:
     needs: [sast_audit]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.x.x
 
       # Spin up WAF and Dashboard via Docker Compose for testing
       - name: Spin up Docker Services
@@ -122,7 +129,7 @@ jobs:
 
       # Run OWASP ZAP Baseline scan against jarsWAF Controller/Dashboard
       - name: OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.13.0
+        uses: zaproxy/action-baseline@4dbc7854a9ad12686198001f786c09768ab9f9ac # v0.13.0
         with:
           target: 'http://localhost:8080/'
           rules_file_name: '.zap/rules.tsv'
