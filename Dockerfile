@@ -75,7 +75,8 @@ ENV JARSWAF_PORT=8080
 # The entrypoint runs as root ONLY to chown mounted volumes (logs/certs/db) then drops to
 # the jarswaf user via `su` — so named volumes that start root-owned still work.
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin jarswaf && \
-    chown -R jarswaf:jarswaf /app /app/dashboard/dist
+    mkdir -p /app/logs /app/certs /var/log/jarswaf && \
+    chown -R jarswaf:jarswaf /app /app/dashboard/dist /app/logs /app/certs /var/log/jarswaf
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh

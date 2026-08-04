@@ -8,8 +8,11 @@
 
 set -eu
 
-# Fix ownership on every writable runtime dir the server may touch.
-chown -R jarswaf:jarswaf /app/logs /app/certs /var/log/jarswaf 2>/dev/null || true
+# Ensure writable runtime dirs exist, then fix ownership (run as root). This is essential
+# for named volumes that Docker bootstraps empty/root-owned from a dir not present in the
+# image — without it the unprivileged server cannot create its SQLite db.
+mkdir -p /app/logs /app/certs /var/log/jarswaf
+chown -R jarswaf:jarswaf /app/logs /app/certs /var/log/jarswaf
 
 # Drop to the jarswaf user and exec the real command (CMD from the image).
 #
