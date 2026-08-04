@@ -6,11 +6,24 @@ description = "Pure Layer 7 WAF - Homelab Edition"
 
 [workspace]
 members = [
+    ".",
     "xtask",
 ]
 exclude = [
     "jarswaf-ebpf",
 ]
+
+[[bin]]
+name = "jarswaf"
+path = "src/main.rs"
+
+[[bin]]
+name = "controller"
+path = "src/bin/controller.rs"
+
+[[bin]]
+name = "agent"
+path = "src/bin/agent.rs"
 
 [dependencies]
 axum = { version = "0.7", features = ["macros", "ws"] }
