@@ -2,7 +2,10 @@ name: Release Precompiled Binary
 
 on:
   release:
-    types: [created]
+    types: [published, created]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -83,6 +86,7 @@ jobs:
             jarswaf-*-musl.tar.gz
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
+          make_latest: true
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
