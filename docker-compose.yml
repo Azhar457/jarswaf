@@ -10,6 +10,10 @@ services:
       - "8080:8080"
     environment:
       - RUST_LOG=info
+      # The controller binds loopback by default (hardening); inside a container that would
+      # make it unreachable from the host, so compose exposes it explicitly for the DAST/ZAP
+      # scan. In production you'd front it with a reverse proxy instead.
+      - JARSWAF_BIND=0.0.0.0
     security_opt:
       - no-new-privileges:true
     cap_drop:
