@@ -126,6 +126,9 @@ jobs:
     name: DAST (OWASP ZAP Scan)
     runs-on: ubuntu-latest
     needs: [sast_audit]
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.x.x
@@ -166,6 +169,7 @@ jobs:
           target: 'http://localhost:8080/'
           rules_file_name: '.zap/rules.tsv'
           fail_action: false # Report findings without breaking builds immediately
+          allow_issue_writing: false
 
   # -------------------------------------------------------------
   # Job 4: CD - Auto Deploy to VM via SSH
