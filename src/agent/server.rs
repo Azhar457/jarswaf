@@ -31,7 +31,7 @@ pub async fn run_server(cfg: &config::Config, state: AppState) {
     };
 
     // Store config in ArcSwap for lock-free reads in Pingora
-    proxy_engine::GLOBAL_CONFIG.store(Arc::new(cfg.clone()));
+    proxy_engine::update_global_config(cfg.clone());
 
     let mut proxy_service = http_proxy_service(&server.configuration, proxy);
 

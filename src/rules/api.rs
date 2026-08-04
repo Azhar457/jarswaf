@@ -99,7 +99,7 @@ pub fn check_jwt_token(headers: &AHashMap<String, String>) -> Option<String> {
     }
 
     // Decode and parse payload (part 2)
-    let payload_decoded = match base64_url_decode(parts[1]) {
+    let payload_decoded = match crate::utils::base64_url_decode(parts[1]) {
         Ok(bytes) => bytes,
         Err(_) => return Some("Malformed JWT: invalid base64url payload".to_string()),
     };
@@ -125,37 +125,7 @@ pub fn check_jwt_token(headers: &AHashMap<String, String>) -> Option<String> {
     None
 }
 
-fn base64_url_decode(input: &str) -> Result<Vec<u8>, &'static str> {
-    let mut alphabet = [0u8; 256];
-    let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    for (i, &c) in chars.iter().enumerate() {
-        alphabet[c as usize] = i as u8;
-    }
-    alphabet[b'+' as usize] = 62;
-    alphabet[b'/' as usize] = 63;
-
-    let mut bytes = Vec::new();
-    let mut buffer = 0u32;
-    let mut bits = 0;
-
-    for &c in input.as_bytes() {
-        if c == b'=' {
-            break;
-        }
-        let val = alphabet[c as usize];
-        if val == 0 && c != b'A' {
-            continue;
-        }
-        buffer = (buffer << 6) | (val as u32);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            bytes.push((buffer >> bits) as u8);
-        }
-    }
-
-    Ok(bytes)
-}
+// Base64url decode now lives in crate::utils (shared with trust.rs, dlp.rs).
 
 #[cfg(test)]
 mod tests {

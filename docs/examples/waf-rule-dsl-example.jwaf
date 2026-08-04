@@ -1,0 +1,37 @@
+// jarsWAF DSL — contoh syntax rule yang lu bisa bikin sendiri
+// Ibaratnya SecLang tapi pake syntax sendiri
+
+rule "Detect SQL Injection" {
+    phase: request_body
+    severity: critical
+    paranoia: 2
+
+    match {
+        any {
+            body contains "union select",
+            body ~ r"'.*or\s+'1'\s*=\s*'1",
+            args contains "' --",
+            cookies matches r"\b(select|union|insert)\b"
+        }
+    }
+
+    action {
+        score: 50
+        block: true
+        log: true
+        response: "SQL Injection detected"
+    }
+}
+
+rule "Rate Limit Login" {
+    phase: request_headers
+    match {
+        ip.requests > 10 in "1 minute",
+        path == "/api/login"
+    }
+    action {
+        block: true
+        status: 429
+        retry_after: 60
+    }
+}

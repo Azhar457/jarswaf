@@ -66,6 +66,7 @@ pub async fn run_agent(
 
     // Start background memory cleanup for rate limiter & reputation counters
     rules::start_rate_limiter_cleanup();
+    crate::proxy_engine::ensure_background_services_started();
 
     // Attach eBPF XDP if an interface is configured
     if let Some(interface) = &cfg.global.xdp_interface {
@@ -166,7 +167,7 @@ pub async fn run_agent(
                         match config::load_config(&config_path_clone) {
                             Ok(new_cfg) => {
                                 // Atomic update via ArcSwap — no RwLock race window
-                                crate::proxy_engine::GLOBAL_CONFIG.store(Arc::new(new_cfg));
+                                crate::proxy_engine::update_global_config(new_cfg);
                                 info!(
                                     "Configuration reloaded successfully from {}",
                                     config_path_clone

@@ -165,7 +165,7 @@ export function initGlobalStore(controllerUrl: string) {
     const wsToken = get(token);
     const wsUrl = controllerUrl.replace(/^http/, "ws") + "/ws/dashboard";
 
-    ws = wsToken ? new WebSocket(wsUrl, [wsToken]) : new WebSocket(wsUrl);
+    ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       connectionStatus.set("online");
