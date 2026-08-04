@@ -9,7 +9,7 @@
 # TODO (P0 supply-chain):
 #   - bump pingora 0.4 -> 0.5+ and remove the Pingora block
 #   - bump wasmtime 29 -> 30+ and remove the Wasmtime block
-#   - replace serde_yaml (deprecated 2024) with serde_yml in src/rule_engine/mod.rs
+#   - [DONE] replaced serde_yaml (deprecated 2024) with serde_yaml_ng in src/rule_engine/mod.rs
 # Last reviewed: 2026-08-03. Re-review before every release cut.
 [advisories]
 ignore = [
