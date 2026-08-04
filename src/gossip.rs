@@ -63,6 +63,20 @@ impl GossipNode {
             return Ok(());
         }
 
+        // Fail-closed on an empty PSK: a blank pre-shared key means the gossip key is
+        // SHA256("") — a public constant — so ANY host on the multicast group can forge
+        // threat-intel messages (poison blocklist) or decrypt/alloy them (CIA: integrity +
+        // availability + confidentiality all break). Refusing to start is safer than running
+        // with an open control channel. Operators must set gossip.psk or JARSWAF_GOSSIP_PSK.
+        if self.config.psk.trim().is_empty() {
+            return Err(
+                "gossip.psk is empty but gossip is enabled — refusing to start. \
+                 Set gossip.psk (or JARSWAF_GOSSIP_PSK) to a strong shared secret, \
+                 or disable gossip."
+                    .to_string(),
+            );
+        }
+
         let bind_addr = &self.config.bind_addr;
         let socket = UdpSocket::bind(bind_addr)
             .await

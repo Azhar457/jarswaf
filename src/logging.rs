@@ -39,9 +39,15 @@ pub fn build_client() -> reqwest::Client {
         headers.insert("X-ClickHouse-User", val);
     }
 
-    let pass = std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "jarswaf".to_string());
-    if let Ok(val) = HeaderValue::from_str(&pass) {
-        headers.insert("X-ClickHouse-Key", val);
+    // No default password: sending a known-public credential (previously "jarswaf") would
+    // let anyone who can reach ClickHouse read WAF logs (confidentiality). Operators must
+    // set CLICKHOUSE_PASSWORD explicitly; absent it, only the user header is sent.
+    if let Ok(pass) = std::env::var("CLICKHOUSE_PASSWORD") {
+        if !pass.is_empty() {
+            if let Ok(val) = HeaderValue::from_str(&pass) {
+                headers.insert("X-ClickHouse-Key", val);
+            }
+        }
     }
 
     reqwest::Client::builder()
