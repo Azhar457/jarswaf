@@ -319,7 +319,7 @@ pub struct Condition {
     pub field: String,    // body, args, path, method, headers.<name>, cookies
     pub operator: String, // rx, pm, contains, equals, starts_with, ends_with
     #[serde(default)]
-    pub value: serde_yaml::Value,
+    pub value: serde_yaml_ng::Value,
     #[serde(default)]
     pub negate: bool,
 }
@@ -673,12 +673,12 @@ pub fn load_rules_from_yaml<P: AsRef<Path>>(path: P) -> Result<Vec<CompiledRule>
         .map_err(|e| format!("cannot read {}: {}", path.as_ref().display(), e))?;
 
     // Try loading as single rule or list of rules
-    if let Ok(rule) = serde_yaml::from_str::<RawRule>(&content) {
+    if let Ok(rule) = serde_yaml_ng::from_str::<RawRule>(&content) {
         let compiled = compile_rule(rule)?;
         return Ok(vec![compiled]);
     }
 
-    if let Ok(rules) = serde_yaml::from_str::<Vec<RawRule>>(&content) {
+    if let Ok(rules) = serde_yaml_ng::from_str::<Vec<RawRule>>(&content) {
         let mut compiled = Vec::new();
         for raw in rules {
             compiled.push(compile_rule(raw)?);
@@ -780,7 +780,8 @@ pub struct RuleProfileConfig {
 pub fn load_profiles(path: &Path) -> Result<RuleProfileConfig, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read profiles {:?}: {}", path, e))?;
-    serde_yaml::from_str(&content).map_err(|e| format!("cannot parse profiles {:?}: {}", path, e))
+    serde_yaml_ng::from_str(&content)
+        .map_err(|e| format!("cannot parse profiles {:?}: {}", path, e))
 }
 
 pub fn get_active_profile<'a>(
@@ -855,7 +856,7 @@ action: block
 anomaly_score: 50
 enabled: true
 "#;
-        let raw: RawRule = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawRule = serde_yaml_ng::from_str(yaml).unwrap();
         let compiled = compile_rule(raw).unwrap();
         let req = make_request();
 
@@ -883,7 +884,7 @@ action: anomaly
 anomaly_score: 30
 enabled: true
 "#;
-        let raw: RawRule = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawRule = serde_yaml_ng::from_str(yaml).unwrap();
         let compiled = compile_rule(raw).unwrap();
         let req = make_request();
 
@@ -911,7 +912,7 @@ action: block
 anomaly_score: 100
 enabled: true
 "#;
-        let raw: RawRule = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawRule = serde_yaml_ng::from_str(yaml).unwrap();
         let compiled = compile_rule(raw).unwrap();
         let req = make_request();
 
@@ -938,7 +939,7 @@ action: block
 anomaly_score: 50
 enabled: true
 "#;
-        let raw: RawRule = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawRule = serde_yaml_ng::from_str(yaml).unwrap();
         let compiled = compile_rule(raw).unwrap();
         let req = make_request();
         // body gak contain .php, jadi harus false
@@ -1003,7 +1004,7 @@ match:
 action: block
 enabled: true
 "#;
-        let raw: Result<RawRule, _> = serde_yaml::from_str(yaml);
+        let raw: Result<RawRule, _> = serde_yaml_ng::from_str(yaml);
         assert!(raw.is_ok(), "yaml parsing should succeed");
 
         let compiled = compile_rule(raw.unwrap());
@@ -1017,7 +1018,7 @@ enabled: true
     #[allow(dead_code)]
     fn parse_and_test(yaml: &str, req: &RequestData, should_match: bool, desc: &str) {
         let raw: RawRule =
-            serde_yaml::from_str(yaml).unwrap_or_else(|_| panic!("parse {}: yaml", desc));
+            serde_yaml_ng::from_str(yaml).unwrap_or_else(|_| panic!("parse {}: yaml", desc));
         let compiled = compile_rule(raw).unwrap_or_else(|_| panic!("parse {}: compile", desc));
         let result = evaluate_rule(&compiled, req);
         assert_eq!(
@@ -1334,7 +1335,7 @@ action: anomaly
 anomaly_score: 10
 enabled: true
 "#;
-        let raw: RawRule = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawRule = serde_yaml_ng::from_str(yaml).unwrap();
         let rule = compile_rule(raw).unwrap();
         let scanners = ["sqlmap/1.8", "nikto/2.5", "nmap", "BurpSuite/2024"];
         for ua in &scanners {
@@ -1405,7 +1406,7 @@ action: anomaly
 anomaly_score: 5
 enabled: true
 "#;
-        let raw: RawRule = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawRule = serde_yaml_ng::from_str(yaml).unwrap();
         let rule = compile_rule(raw).unwrap();
 
         // GET ke login should NOT match (cuma POST)
@@ -1533,7 +1534,7 @@ action: anomaly
 anomaly_score: 20
 enabled: true
 "#;
-        let raw: RawRule = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawRule = serde_yaml_ng::from_str(yaml).unwrap();
         let rule = compile_rule(raw).unwrap();
         assert_eq!(rule.action, RuleAction::Anomaly);
         assert_eq!(rule.anomaly_score, 20);
