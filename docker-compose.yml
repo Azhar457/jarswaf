@@ -20,10 +20,13 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE   # if the controller ever binds <1024; 8080 needs none
-      # The entrypoint drops privileges via `su`, which needs SETGID+SETUID. Without these
-      # (cap_drop: ALL) the container fails at startup with "su: cannot set groups".
+      # The entrypoint is root ONLY to chown mounted volumes, then drops privileges via
+      # `setpriv` — which needs SETGID+SETUID, and the chown needs CHOWN. Without these
+      # (cap_drop: ALL) startup fails: "su: cannot set groups" / "chown: Operation not
+      # permitted", leaving the volume root-owned so the non-root server can't open SQLite.
       - SETGID
       - SETUID
+      - CHOWN
     volumes:
       # config.toml is intentionally read-write: the controller persists generated
       # credentials/config on first boot (ensure_admin_credentials). Logs use a named
