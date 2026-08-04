@@ -29,7 +29,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy everything needed for build (single cargo build instead of two)
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
+COPY proto/ ./proto/
 COPY xtask/ ./xtask/
 COPY src/ ./src/
 
