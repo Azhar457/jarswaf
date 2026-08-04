@@ -1,38 +1,86 @@
-# Rust build artifacts
-/target
-**/*.rs.bk
-*.swp
-*.swo
+# ==============================================================================
+# jarsWAF Project .gitignore
+# High-Performance Layer 7 WAF (Rust + eBPF + Svelte Dashboard)
+# ==============================================================================
 
-# External reference repos — cloned for research, not part of source
-/external/
+# ------------------------------------------------------------------------------
+# 1. Rust & eBPF Build Artifacts & Temporary Dumps
+# ------------------------------------------------------------------------------
+/target/
+/jarswaf-ebpf/target/
+/xtask/target/
+**/*.rs.bk
+*.tmp
+*.tmp*
+*.rlib
+*.rmeta
+*.so
+*.dylib
+*.dll
+*.a
+*.o
+*.d
+
+# ------------------------------------------------------------------------------
+# 2. Frontend & Dashboard (Svelte / Vite / Node)
+# ------------------------------------------------------------------------------
 /node_modules/
 /dashboard/node_modules/
 /dashboard/dist/
-/jarswaf-ebpf/target/
+/dashboard/.svelte-kit/
+/dashboard/.vite/
+/dashboard/build/
+package-lock.json.bak
+*.tsbuildinfo
 
-# WAF logs, databases & certificates
+# ------------------------------------------------------------------------------
+# 3. WAF Runtime State, Databases, Logs & Backups
+# ------------------------------------------------------------------------------
 /logs/
-/certs/
 /config_backups/
+*.log
 *.db
 *.db-shm
 *.db-wal
-*.log
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
-.claude/
-# Document & Env
-docs/
+*.sqlite
+*.sqlite3
+blocklist.json
+
+# ------------------------------------------------------------------------------
+# 4. Security, TLS Certificates & Secrets
+# ------------------------------------------------------------------------------
+/certs/
+*.pem
+*.crt
+*.key
+*.csr
+*.pfx
+*.p12
 .env
 .env.*
+!.env.example
 secrets.toml
-*.pem
-*.key
-*.crt
-IDEA.md
-config_backups/
+pentest_lab.toml
+pentest*.toml
+redteam_lab*.toml
+
+# ------------------------------------------------------------------------------
+# 5. External Research / Vendored Sub-repositories
+# ------------------------------------------------------------------------------
+/external/
 __pycache__/
 *.pyc
+*.pyo
+
+# ------------------------------------------------------------------------------
+# 6. IDEs, Editors & System Metadata
+# ------------------------------------------------------------------------------
+.vscode/
+.idea/
+.claude/
+.gemini/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+IDEA.md

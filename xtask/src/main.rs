@@ -12,6 +12,20 @@ async fn main() -> anyhow::Result<()> {
 
     match command {
         "ebpf" => build_ebpf()?,
+        "clean" => clean_all()?,
+        "check" => check_all()?,
+        "build-all" => {
+            println!("Building eBPF and WAF binaries...");
+            build_ebpf()?;
+            let status = Command::new("cargo")
+                .args(["build", "--release"])
+                .status()
+                .context("Failed to build main workspace")?;
+            if !status.success() {
+                anyhow::bail!("Main workspace compilation failed");
+            }
+            println!("All binaries compiled successfully!");
+        }
         "redteam" => {
             let target = args
                 .get(2)
@@ -31,10 +45,40 @@ async fn main() -> anyhow::Result<()> {
             report::generate_report(log_path, output_path);
         }
         _ => {
-            println!("Unknown command. Use 'ebpf', 'redteam', or 'generate-report'.");
-            std::process::exit(1);
+            println!("jarsWAF xtask runner - Available commands:");
+            println!(
+                "  cargo xtask ebpf            - Build eBPF XDP probe (bpfel-unknown-none target)"
+            );
+            println!("  cargo xtask build-all       - Compile eBPF + Main WAF workspace release binaries");
+            println!(
+                "  cargo xtask check           - Run static analysis & type check across crates"
+            );
+            println!("  cargo xtask clean           - Deep clean target build artifacts across all crates");
+            println!("  cargo xtask redteam <URL>   - Run automated Sec/WAF attack benchmark");
+            println!("  cargo xtask generate-report - Generate security compliance report");
         }
     }
+    Ok(())
+}
+
+fn clean_all() -> anyhow::Result<()> {
+    println!("Cleaning main cargo workspace...");
+    let _ = Command::new("cargo").arg("clean").status();
+    println!("Cleaning eBPF workspace...");
+    let _ = Command::new("cargo")
+        .args(["clean", "--manifest-path", "jarswaf-ebpf/Cargo.toml"])
+        .status();
+    println!("Clean completed.");
+    Ok(())
+}
+
+fn check_all() -> anyhow::Result<()> {
+    println!("Checking main workspace...");
+    let status = Command::new("cargo").arg("check").status()?;
+    if !status.success() {
+        anyhow::bail!("Cargo check failed");
+    }
+    println!("All checks passed cleanly.");
     Ok(())
 }
 
