@@ -137,7 +137,12 @@ jobs:
           # later with a confusing "docker-compose: command not found").
           docker info >/dev/null 2>&1 || { echo "docker daemon not ready"; exit 1; }
           docker compose version || { echo "docker compose (V2) plugin missing"; exit 1; }
-          docker compose up -d --build
+          # Build fresh (no cache): stale BuildKit layers caused the image to run WITHOUT the
+          # entrypoint / recent Dockerfile changes, producing the confusing "CannotOpen
+          # /var/log/jarswaf/jarswaf.db" at controller startup even after the fix was proven
+          # locally. --no-cache guarantees CI tests the exact Dockerfile in the repo.
+          docker compose build --no-cache
+          docker compose up -d
           # Wait for the controller to be reachable (liveness endpoint) instead of a blind
           # sleep — first boot may need a few seconds to generate TLS certs and start.
           echo "Waiting for controller /health on :8080..."
