@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya-ebpf = { git = "https://github.com/aya-rs/aya", branch = "main" }
-aya-log-ebpf = { git = "https://github.com/aya-rs/aya", branch = "main" }
+# Pinned to the same rev as the userspace `aya`/`aya-log` deps in the main workspace
+# (Cargo.lock a47f99a0) so both sides of the BPF map boundary compile against the same
+# struct definitions — the previous branch="main" float let the two subcrates resolve to
+# different commits (a47f99a0 vs 773ca715), risking ABI drift between the eBPF program and
+# its userspace loader.
+aya-ebpf = { git = "https://github.com/aya-rs/aya", rev = "a47f99a04ca509b20793be6560d440295e1cf86f" }
+aya-log-ebpf = { git = "https://github.com/aya-rs/aya", rev = "a47f99a04ca509b20793be6560d440295e1cf86f" }
 network-types = "0.0.5"
 
 [[bin]]

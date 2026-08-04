@@ -51,7 +51,6 @@
   <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
     <Topbar
       systemStatus="online"
-      on:deploy
       on:toggleMobileSidebar={() => (isMobileSidebarOpen = !isMobileSidebarOpen)}
     />
 

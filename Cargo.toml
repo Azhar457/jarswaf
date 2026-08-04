@@ -16,6 +16,9 @@ exclude = [
 axum = { version = "0.7", features = ["macros", "ws"] }
 tokio = { version = "1", features = ["full"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# ring is already in the tree via rustls; declared directly for JWT HS256 verification
+# (src/rules/trust.rs) — no new download, same version as the rustls transitive dep.
+ring = "0.17"
 rustls-pemfile = "2"
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
@@ -24,6 +27,9 @@ tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+# TODO(P0 supply-chain): serde_yaml was deprecated by its maintainer in 2024. Migrate the 10
+# usages in src/rule_engine/mod.rs to `serde_yml` (API differs — requires adapting Value/error
+# paths). Not done in this audit pass to avoid a blind API break of the rule loader.
 serde_yaml = "0.9"
 regex = "1"
 dashmap = "5"
@@ -81,5 +87,10 @@ protoc-bin-vendored = "3.0.0"
 nix = { version = "0.27", features = ["user"] } # for privilege dropping
 
 [target.'cfg(target_os = "linux")'.dependencies]
-aya = { git = "https://github.com/aya-rs/aya", branch = "main" }
-aya-log = { git = "https://github.com/aya-rs/aya", branch = "main" }
+# TODO(P0 supply-chain): pin both `aya` and the `aya-ebpf`/`aya-log-ebpf` deps in
+# Userspace aya pinned to the same rev as jarswaf-ebpf (a47f99a0) so the eBPF program and
+# its loader agree on struct layout. Previously both used `branch = "main"` and could float
+# / resolve to different commits (a47f99a0 vs 773ca715) — an ABI-drift risk at the BPF map
+# boundary. `ballot:` re-verify both sides still align before bumping aya (needs an eBPF build).
+aya = { git = "https://github.com/aya-rs/aya", rev = "a47f99a04ca509b20793be6560d440295e1cf86f" }
+aya-log = { git = "https://github.com/aya-rs/aya", rev = "a47f99a04ca509b20793be6560d440295e1cf86f" }
