@@ -134,8 +134,21 @@ jobs:
           docker info >/dev/null 2>&1 || { echo "docker daemon not ready"; exit 1; }
           docker compose version || { echo "docker compose (V2) plugin missing"; exit 1; }
           docker compose up -d --build
-          # Wait for services to be fully healthy and listening on port 8080
-          sleep 15
+          # Wait for the controller to be reachable (liveness endpoint) instead of a blind
+          # sleep — first boot may need a few seconds to generate TLS certs and start.
+          echo "Waiting for controller /health on :8080..."
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null "http://localhost:8080/health" 2>/dev/null; then
+              echo "Controller is up after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "Controller did not become ready — container logs:"
+              docker compose logs --tail=40 || true
+              exit 1
+            fi
+            sleep 2
+          done
 
       # Run OWASP ZAP Baseline scan against jarsWAF Controller/Dashboard
       - name: OWASP ZAP Baseline Scan
