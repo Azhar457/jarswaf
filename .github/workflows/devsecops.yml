@@ -11,6 +11,8 @@ on:
       - 'xtask/**'
       - '.github/workflows/devsecops.yml'
       - 'Dockerfile*'
+      - 'docker-compose*.yml'
+      - 'docker-entrypoint.sh'
       - 'build.rs'
       - 'proto/**'
   pull_request:
@@ -23,6 +25,8 @@ on:
       - 'xtask/**'
       - '.github/workflows/devsecops.yml'
       - 'Dockerfile*'
+      - 'docker-compose*.yml'
+      - 'docker-entrypoint.sh'
       - 'build.rs'
       - 'proto/**'
 
