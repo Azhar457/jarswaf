@@ -37,20 +37,31 @@ RUN cargo build --release && \
 FROM debian:bookworm-slim
 WORKDIR /app
 
+# Minimal runtime: the release binary links libc/libm/libgcc_s only (ring bundles crypto),
+# so libssl3 is not needed; curl is unused at runtime. ca-certificates is kept for TLS root
+# verification. Create runtime dirs here.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libssl3 curl && \
+    apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /var/log/jarswaf /app/certs
 
 # Copy binary
 COPY --from=builder /app/jarswaf-bin /app/jarswaf
 
-# Copy standalone config if not mounted
-COPY config.standalone.toml /app/config.toml
+# NOTE: config.standalone.toml is deliberately NOT baked in — it carries a committed
+# admin_token hash into every image. First boot generates its own credential via
+# ensure_admin_credentials. Mount one explicitly (--volume) if a fixed setup is required.
+
+# Run as non-root. Binds 80/443 via the ambient capability; the image would need
+# `--cap-add=NET_BIND_SERVICE` at runtime for that. `ponytail:` if the runtime ignores
+# ambient caps for the CMD binary, setcap the binary instead and drop USER.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin jarswaf && \
+    chown -R jarswaf:jarswaf /app /var/log/jarswaf /app/certs
+USER jarswaf
 
 EXPOSE 80 443
 
 ENV RUST_LOG=info
 
 # Run as Agent (no controller flag = standalone mode)
-CMD ["/app/jarswaf", "agent", "--config", "/app/config.toml"]
+CMD ["/app/jarswaf", "agent"]
