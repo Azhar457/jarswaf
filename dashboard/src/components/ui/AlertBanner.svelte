@@ -53,7 +53,7 @@
       </div>
       <button
         type="button"
-        class="text-slate-400 hover:text-white transition-colors"
+        class="text-slate-400 hover:text-white transition-colors cursor-pointer bg-transparent border-none"
         on:click={() => dispatch("dismiss")}
       >
         ✕

@@ -77,6 +77,7 @@ async fn spawn_test_server(
         rate_limited: Arc::new(AtomicU64::new(0)),
         config_tx,
         config_lock: Arc::new(tokio::sync::Mutex::new(())),
+        sessions: Arc::new(std::sync::RwLock::new(Default::default())),
     };
 
     let app = build_router(state);
@@ -169,12 +170,12 @@ async fn test_api_endpoint_wrong_token_rejected() {
     assert_eq!(resp.status(), 401);
 }
 
-/// Test 5: When admin_token is NOT configured, auth middleware is a no-op
+/// Test 5: When admin_token is NOT configured, auth middleware fails closed (401)
 #[tokio::test]
 async fn test_no_admin_token_allows_all() {
     let (addr, _handle) = spawn_test_server(None).await;
 
-    // No token configured → register endpoint should succeed
+    // No token configured → register endpoint should fail closed (401)
     let url = format!("http://{}/api/v1/agents/register", addr);
     let client = reqwest::Client::new();
     let resp = client
@@ -188,16 +189,43 @@ async fn test_no_admin_token_allows_all() {
         .send()
         .await
         .expect("request no token configured");
-    assert_eq!(resp.status(), 201);
+    assert_eq!(resp.status(), 401);
 }
 
-/// Test 6: GET /metrics endpoint is reachable
+/// Test 6: GET /metrics requires auth when admin_token is configured, and succeeds with valid token
 #[tokio::test]
 async fn test_metrics_endpoint_reachable() {
-    let (addr, _handle) = spawn_test_server(None).await;
+    let token = format!("test_metrics_token_{}", std::process::id());
+    let (addr, _handle) = spawn_test_server(Some(token.clone())).await;
 
     let url = format!("http://{}/metrics", addr);
-    let resp = reqwest::get(&url).await.expect("request metrics");
-    // /metrics is outside auth middleware (registered directly, not via api_routes)
-    assert_eq!(resp.status(), 200);
+    let client = reqwest::Client::new();
+
+    // 1. Without auth -> 401
+    let resp_unauth = client
+        .get(&url)
+        .send()
+        .await
+        .expect("request unauth metrics");
+    assert_eq!(resp_unauth.status(), 401);
+
+    // 2. With Bearer token -> 200
+    let resp_bearer = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .expect("request metrics with bearer");
+    assert_eq!(resp_bearer.status(), 200);
+    let body = resp_bearer.text().await.expect("read metrics body");
+    assert!(body.contains("jarswaf_total_requests"));
+
+    // 3. With X-Metrics-Token header -> 200
+    let resp_custom = client
+        .get(&url)
+        .header("X-Metrics-Token", &token)
+        .send()
+        .await
+        .expect("request metrics with custom header");
+    assert_eq!(resp_custom.status(), 200);
 }

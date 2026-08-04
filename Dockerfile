@@ -19,9 +19,13 @@ ENV CARGO_INCREMENTAL=0
 ENV CARGO_BUILD_JOBS=2
 ENV RUSTFLAGS="-C strip=symbols"
 
-# Install build deps and clean apt cache in same layer
+# Install build deps and clean apt cache in same layer. cmake + a full C/C++ toolchain are
+# required: libz-ng-sys (pulled via the ONNX/tract dependency chain) invokes cmake and needs
+# `c++` (g++) on PATH — `build-essential` alone has been flaky here ("failed to find tool
+# c++", "is cmake not installed?"), so install gcc/g++/make explicitly.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends pkg-config libssl-dev curl && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev build-essential cmake gcc g++ make curl && \
+    command -v cmake && command -v c++ && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy everything needed for build (single cargo build instead of two)

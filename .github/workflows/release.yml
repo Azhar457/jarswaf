@@ -28,6 +28,11 @@ jobs:
         with:
           components: rust-src
 
+      - name: Configure Rust Defaults & Targets
+        run: |
+          rustup default stable
+          rustup target add x86_64-unknown-linux-musl --toolchain stable
+
       - name: Install dependencies & bpf-linker
         run: |
           sudo apt-get update
@@ -38,21 +43,31 @@ jobs:
         run: cargo +nightly run --package xtask
 
       - name: Build Release Binaries (glibc)
-        run: cargo build --release --workspace
-
-      - name: Build MUSL Static Binary
         run: |
-          cargo build --release --target x86_64-unknown-linux-musl
+          cargo +stable build --release --workspace
           mkdir -p dist
           cp target/release/jarswaf dist/jarswaf-linux-amd64
           cp target/release/agent dist/jarswaf-agent-linux-amd64
           cp target/release/controller dist/jarswaf-controller-linux-amd64
+
+      - name: Build MUSL Static Binary
+        run: |
+          cargo +stable build --release --target x86_64-unknown-linux-musl --workspace
           cp target/x86_64-unknown-linux-musl/release/jarswaf dist/jarswaf-linux-amd64-musl
           cp target/x86_64-unknown-linux-musl/release/agent dist/jarswaf-agent-linux-amd64-musl
           cp target/x86_64-unknown-linux-musl/release/controller dist/jarswaf-controller-linux-amd64-musl
-          tar -czf dist/jarswaf-linux-amd64.tar.gz -C dist jarswaf-linux-amd64 agent controller
-          tar -czf jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz -C dist jarswaf-linux-amd64-musl jarswaf-agent-linux-amd64-musl jarswaf-controller-linux-amd64-musl
-          cp jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf dist/jarswaf-ebpf
+          
+          # Create standardized tarball for musl (containing jarswaf, agent, controller)
+          mkdir -p dist/musl-pkg
+          cp target/x86_64-unknown-linux-musl/release/jarswaf dist/musl-pkg/jarswaf
+          cp target/x86_64-unknown-linux-musl/release/agent dist/musl-pkg/agent
+          cp target/x86_64-unknown-linux-musl/release/controller dist/musl-pkg/controller
+          tar -czf jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz -C dist/musl-pkg jarswaf agent controller
+          tar -czf jarswaf-latest-musl.tar.gz -C dist/musl-pkg jarswaf agent controller
+
+          if [ -f "jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf" ]; then
+            cp jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf dist/jarswaf-ebpf
+          fi
 
       - name: Upload Binaries to Release
         uses: softprops/action-gh-release@v2

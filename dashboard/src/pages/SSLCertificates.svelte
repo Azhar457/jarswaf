@@ -9,6 +9,19 @@
   import ConfirmationModal from "../components/ui/ConfirmationModal.svelte";
   import AddCertificateModal from "../components/ui/AddCertificateModal.svelte";
 
+  import { token } from "../lib/stores";
+
+  const controllerUrl =
+    typeof window !== "undefined" ? window.location.origin : "";
+
+  function getHeaders(): Record<string, string> {
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if ($token) {
+      h["Authorization"] = `Bearer ${$token}`;
+    }
+    return h;
+  }
+
   interface SslCert {
     domain: string;
     issuer: string;
@@ -31,7 +44,9 @@
   async function fetchCerts() {
     try {
       loading = true;
-      const res = await fetch("http://localhost:8080/api/v1/ssl/certificates");
+      const res = await fetch(`${controllerUrl}/api/v1/ssl/certificates`, {
+        headers: getHeaders(),
+      });
       if (res.ok) {
         certs = await res.json();
       }
@@ -52,16 +67,15 @@
     toast.info(`Initiating ACME renewal for ${domain}...`);
 
     try {
-      const res = await fetch("http://localhost:8080/api/v1/ssl/renew", {
+      const res = await fetch(`${controllerUrl}/api/v1/ssl/renew`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify({ domain }),
       });
 
       const data = await res.json();
       if (res.ok) {
         toast.success(data.message || `Successfully requested renewal for ${domain}`);
-        // Optionally refetch certificates after a delay
         setTimeout(fetchCerts, 3000);
       } else {
         toast.error(`Renewal failed: ${data.message || "Unknown error"}`);
@@ -83,9 +97,9 @@
     event: CustomEvent<{ domain: string; provider: string; email: string }>,
   ) {
     try {
-      const res = await fetch("http://localhost:8080/api/v1/ssl/certificates", {
+      const res = await fetch(`${controllerUrl}/api/v1/ssl/certificates`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify(event.detail),
       });
 
@@ -111,8 +125,9 @@
     if (!certToRevoke) return;
 
     try {
-      const res = await fetch(`http://localhost:8080/api/v1/ssl/certificates/${certToRevoke}`, {
+      const res = await fetch(`${controllerUrl}/api/v1/ssl/certificates/${certToRevoke}`, {
         method: "DELETE",
+        headers: getHeaders(),
       });
 
       const data = await res.json();
