@@ -16,6 +16,9 @@ exclude = [
 axum = { version = "0.7", features = ["macros", "ws"] }
 tokio = { version = "1", features = ["full"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# ring is already in the tree via rustls; declared directly for JWT HS256 verification
+# (src/rules/trust.rs) — no new download, same version as the rustls transitive dep.
+ring = "0.17"
 rustls-pemfile = "2"
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
