@@ -84,7 +84,7 @@ wasmtime = "29"
 anyhow = "1"
 base64 = "0.22"
 nom = "7"
-tract-onnx = "0.21.7"
+tract-onnx = "0.21.17"
 
 # gRPC & Redis (Phase 10)
 tonic = "0.11"
