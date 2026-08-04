@@ -365,7 +365,7 @@
     cancelEdit();
   }
 
-  function runSimulation() {
+  async function runSimulation() {
     if (!testPayload) {
       toast.warning("Please enter a test payload.");
       return;
@@ -373,59 +373,43 @@
 
     simulationResult = { status: "testing" };
 
-    setTimeout(() => {
-      // Basic signature-based client-side simulator
-      const payloadLower = testPayload.toLowerCase();
-      let triggeredRule = "";
-
-      // SQLI
-      if (
-        payloadLower.includes("select") ||
-        payloadLower.includes("union") ||
-        payloadLower.includes("insert") ||
-        payloadLower.includes("' or") ||
-        payloadLower.includes("1=1")
-      ) {
-        triggeredRule = "SQLI-001 (SQL Injection Pattern Detected)";
-      }
-      // XSS
-      else if (
-        payloadLower.includes("<script") ||
-        payloadLower.includes("onerror") ||
-        payloadLower.includes("onload=") ||
-        payloadLower.includes("javascript:")
-      ) {
-        triggeredRule = "XSS-001 (Cross-Site Scripting Pattern Detected)";
-      }
-      // CMDI
-      else if (
-        payloadLower.includes("curl ") ||
-        payloadLower.includes("wget ") ||
-        payloadLower.includes("sh ") ||
-        payloadLower.includes("bash ") ||
-        payloadLower.includes("whoami")
-      ) {
-        triggeredRule = "CMDI-001 (OS Command Execution Pattern Detected)";
-      }
-      // Custom Rules
-      else {
-        for (const rule of $customRulesList) {
-          if (!rule.enabled || !isRuleBound(rule.id)) continue;
-          if (rule.condition_type === "body" && testPayload.includes(rule.condition_value)) {
-            triggeredRule = `${rule.id} (${rule.name})`;
-            break;
-          }
-        }
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if ($token) {
+        headers["Authorization"] = `Bearer ${$token}`;
       }
 
-      if (triggeredRule) {
-        simulationResult = { status: "triggered", ruleName: triggeredRule };
-        toast.error(`WAF Triggered: Request blocked by ${triggeredRule}`);
+      const res = await fetch(`${controllerUrl}/api/v1/redteam/simulate`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          payload: testPayload,
+          content_type: "application/x-www-form-urlencoded",
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Simulation API error (${res.status})`);
+      }
+
+      const data = await res.json();
+      if (data.action === "BLOCK" || (data.matched_rules && data.matched_rules.length > 0)) {
+        const ruleNames = (data.matched_rules && data.matched_rules.length > 0)
+          ? data.matched_rules.join(", ")
+          : (data.reasons && data.reasons.length > 0)
+            ? data.reasons.join(", ")
+            : "WAF Rule Triggered";
+        simulationResult = { status: "triggered", ruleName: `${ruleNames} [Score: ${data.waf_score || 100}]` };
+        toast.error(`WAF Blocked: ${ruleNames}`);
       } else {
         simulationResult = { status: "passed" };
-        toast.success("Request passed successfully.");
+        toast.success("Request passed WAF inspection successfully.");
       }
-    }, 800);
+    } catch (e: any) {
+      console.error("Simulation failed:", e);
+      toast.error(e.message || "Failed to execute server-side payload simulation.");
+      simulationResult = { status: "idle" };
+    }
   }
 </script>
 

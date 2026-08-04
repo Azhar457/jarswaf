@@ -14,9 +14,12 @@ ENV CARGO_INCREMENTAL=0
 ENV CARGO_BUILD_JOBS=2
 ENV RUSTFLAGS="-C strip=symbols"
 
-# Install build deps
+# Install build deps. cmake + a full C/C++ toolchain are required: libz-ng-sys invokes cmake
+# and needs `c++` (g++) on PATH. Install gcc/g++/make explicitly — build-essential alone has
+# been flaky here ("failed to find tool c++", "is cmake not installed?").
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends pkg-config libssl-dev && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev build-essential cmake gcc g++ make && \
+    command -v cmake && command -v c++ && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy source

@@ -10,8 +10,38 @@ use uuid::Uuid;
 pub static CHALLENGE_SECRET: once_cell::sync::Lazy<String> =
     once_cell::sync::Lazy::new(|| Uuid::new_v4().to_string());
 
+/// Escape a string for safe embedding inside a JavaScript double-quoted string literal,
+/// and neutralize `</script>` so an attacker-controlled value cannot break out of the
+/// inline `<script>` block. Returns a value safe to interpolate as `"...{escaped}..."`.
+/// `ponytail:` only what's needed for inline JS-in-HTML; for JSON use serde_json instead.
+fn js_str_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\'' => out.push_str("\\'"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '/' => out.push_str("\\/"),
+            '<' => out.push_str("\\u003c"),
+            '>' => out.push_str("\\u003e"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Generate the JS injection HTML challenge.
 pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> String {
+    // Escape all interpolated values before embedding them in inline JS string literals to
+    // prevent stored XSS via the challenge page. original_path is attacker-controlled (the
+    // inbound request path/query); client_ip/salt are server-derived but escaped too as
+    // defense-in-depth.
+    let client_ip_js = js_str_escape(client_ip);
+    let salt_js = js_str_escape(salt);
+    let original_path_js = js_str_escape(original_path);
     format!(
         r#"<!DOCTYPE html>
 <html>
@@ -34,10 +64,54 @@ pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> S
     </div>
     <script>
         async function sha256(message) {{
-            const msgBuffer = new TextEncoder().encode(message);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {{
+                try {{
+                    const msgBuffer = new TextEncoder().encode(message);
+                    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+                    const hashArray = Array.from(new Uint8Array(hashBuffer));
+                    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                }} catch(e) {{}}
+            }}
+            var K = [
+                0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+                0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+                0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+                0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+                0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+                0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+                0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef4a9f7, 0xc67178f2
+            ];
+            var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+            var bytes = new TextEncoder().encode(message);
+            var l = bytes.length;
+            var w = new Uint8Array(((l + 9 + 63) >> 6) << 6);
+            w.set(bytes);
+            w[l] = 0x80;
+            var view = new DataView(w.buffer);
+            view.setUint32(w.length - 4, l * 8, false);
+            for (var i = 0; i < w.length; i += 64) {{
+                var W = new Uint32Array(64);
+                for (var j = 0; j < 16; j++) W[j] = view.getUint32(i + j * 4, false);
+                for (var j = 16; j < 64; j++) {{
+                    var s0 = ((W[j-15]>>>7)|(W[j-15]<<25)) ^ ((W[j-15]>>>18)|(W[j-15]<<14)) ^ (W[j-15]>>>3);
+                    var s1 = ((W[j-2]>>>17)|(W[j-2]<<15)) ^ ((W[j-2]>>>19)|(W[j-2]<<13)) ^ (W[j-2]>>>10);
+                    W[j] = (W[j-16] + s0 + W[j-7] + s1) | 0;
+                }}
+                var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+                for (var j = 0; j < 64; j++) {{
+                    var S1 = ((e>>>6)|(e<<26)) ^ ((e>>>11)|(e<<21)) ^ ((e>>>25)|(e<<7));
+                    var ch = (e & f) ^ ((~e) & g);
+                    var temp1 = (h + S1 + ch + K[j] + W[j]) | 0;
+                    var S0 = ((a>>>2)|(a<<30)) ^ ((a>>>13)|(a<<19)) ^ ((a>>>22)|(a<<10));
+                    var maj = (a & b) ^ (a & c) ^ (b & c);
+                    var temp2 = (S0 + maj) | 0;
+                    h = g; g = f; f = e; e = (d + temp1) | 0; d = c; c = b; b = a; a = (temp1 + temp2) | 0;
+                }}
+                H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+                H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+            }}
+            return H.map(function(v) {{ return ('0000000' + (v >>> 0).toString(16)).slice(-8); }}).join('');
         }}
         async function getFingerprints() {{
             // 1. Canvas Fingerprint
@@ -84,16 +158,17 @@ pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> S
             const salt = "{salt}";
             const target_prefix = "000";
             
-            // Wait for 3 mouse movements to prove human interaction
+            // Wait for mouse movement or auto-resolve after 800ms
             let mouseMoves = 0;
             const mousePromise = new Promise(resolve => {{
+                const timer = setTimeout(() => resolve(), 800);
                 window.addEventListener('mousemove', () => {{
                     mouseMoves++;
-                    if (mouseMoves >= 3) resolve();
+                    if (mouseMoves >= 2) {{ clearTimeout(timer); resolve(); }}
                 }});
-                // Fallback for mobile (touch)
                 window.addEventListener('touchstart', () => {{
-                    mouseMoves += 3;
+                    mouseMoves += 2;
+                    clearTimeout(timer);
                     resolve();
                 }});
             }});
@@ -121,9 +196,9 @@ pub fn get_challenge_html(client_ip: &str, salt: &str, original_path: &str) -> S
     </script>
 </body>
 </html>"#,
-        client_ip = client_ip,
-        salt = salt,
-        original_path = original_path
+        client_ip = client_ip_js,
+        salt = salt_js,
+        original_path = original_path_js
     )
 }
 

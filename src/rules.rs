@@ -102,7 +102,8 @@ pub struct RuleEngine {
     pub wasm_engine: Option<crate::wasm::WasmPluginEngine>,
     pub zt_min_score: f64,
     pub zt_allowed_issuers: Vec<String>,
-    pub scoring_mode: String,
+    pub zt_jwt_secret: Option<String>,
+    pub scoring_mode: crate::config::ScoringMode,
     pub anomaly_threshold: u32,
     /// AST safe-profile auto-learning gate. Disabled by default — see
     /// learn_safe_ast_profile for the poisoning rationale.
@@ -182,19 +183,26 @@ pub fn record_block(ip: IpAddr) -> bool {
             let duration_clone = duration;
             tokio::spawn(async move {
                 let mut xdp = crate::XDP_MANAGER.lock().await;
-                if let IpAddr::V4(v4) = ip_clone {
-                    let _ = xdp.block_ip(v4);
+                match ip_clone {
+                    IpAddr::V4(v4) => {
+                        let _ = xdp.block_ip(v4);
 
-                    // Broadcast via Gossip
-                    let gossip_lock = crate::GOSSIP_MANAGER.lock().await;
-                    if let Some(gossip) = gossip_lock.as_ref() {
-                        let msg = crate::gossip::ThreatIntelMessage {
-                            ip: v4,
-                            score: 100.0,
-                            ttl_secs: duration_clone as u32,
-                            source_node: "jarswaf".to_string(), // can be hostname
-                        };
-                        gossip.broadcast_threat_intel(msg).await;
+                        // Broadcast via Gossip
+                        let gossip_lock = crate::GOSSIP_MANAGER.lock().await;
+                        if let Some(gossip) = gossip_lock.as_ref() {
+                            let msg = crate::gossip::ThreatIntelMessage {
+                                ip: v4,
+                                score: 100.0,
+                                ttl_secs: duration_clone as u32,
+                                source_node: "jarswaf".to_string(),
+                            };
+                            gossip.broadcast_threat_intel(msg).await;
+                        }
+                    }
+                    // Wire up the previously-dead IPv6 path: add to the XDP
+                    // BLOCKLIST_V6 map (block_ip_v6 is already implemented).
+                    IpAddr::V6(v6) => {
+                        let _ = xdp.block_ip_v6(v6);
                     }
                 }
             });
@@ -459,6 +467,11 @@ impl RuleEngine {
             wasm_engine,
             zt_min_score: cfg.zero_trust.min_trust_score,
             zt_allowed_issuers: cfg.zero_trust.allowed_issuers.clone(),
+            zt_jwt_secret: if cfg.zero_trust.shared_secret.is_empty() {
+                None
+            } else {
+                Some(cfg.zero_trust.shared_secret.clone())
+            },
             scoring_mode: cfg.global.scoring_mode.clone(),
             anomaly_threshold: cfg.global.anomaly_threshold,
             ast_learning_enabled: cfg.global.ast_learning_enabled,
@@ -508,7 +521,7 @@ impl RuleEngine {
 
         // Phase 0.5: Tool Exclusion / Whitelist Check (OWASP CRS REQUEST-905-TOOL-EXCLUSION)
         if let Some(ua) = headers.get("user-agent") {
-            if crate::rules::whitelist::is_whitelisted_bot(ua) {
+            if crate::rules::whitelist::is_whitelisted_bot_ctx(ua) {
                 tracing::debug!(
                     "WHITELIST-PASS: Whitelisted bot User-Agent [{}] — bypassing WAF",
                     ua
@@ -523,7 +536,7 @@ impl RuleEngine {
             score: u32,
         }
 
-        let is_anomaly_mode = self.scoring_mode == "anomaly";
+        let is_anomaly_mode = self.scoring_mode == crate::config::ScoringMode::Anomaly;
         let mut anomaly_matches = Vec::new();
 
         let mut process_match =
@@ -616,6 +629,7 @@ impl RuleEngine {
                 false, // tls — not available at rule engine level
                 &self.zt_allowed_issuers,
                 self.zt_min_score,
+                self.zt_jwt_secret.as_deref().unwrap_or(""),
             ) {
                 if let Some(res) = process_match(
                     "ZT-TRUST-SCORE".to_string(),
@@ -1098,7 +1112,9 @@ fn is_rule_enabled(rule_id: &str, enabled_rules: &[String]) -> bool {
         || rule_id.starts_with("HEADLESS-")
         || rule_id.starts_with("CANARY-")
         || rule_id.starts_with("NOSQL-")
-        || rule_id.starts_with("PROTO-");
+        || rule_id.starts_with("PROTO-")
+        || rule_id.starts_with("MULTIPART-")
+        || rule_id.starts_with("UPLOAD-");
 
     if !is_toggled_category {
         return true;
@@ -1894,13 +1910,14 @@ mod tests {
                 manager_url: None,
                 grpc_token: None,
                 admin_token: None,
+                must_change_password: None,
                 waf_enabled: true,
                 webhooks: vec![],
                 metrics_push_url: None,
                 metrics_push_interval_secs: 60,
                 xdp_interface: None,
                 ebpf: Default::default(),
-                scoring_mode: "immediate".to_string(),
+                scoring_mode: crate::config::ScoringMode::default(),
                 anomaly_threshold: 5,
                 ast_learning_enabled: false,
             },
@@ -2129,6 +2146,15 @@ mod tests {
         assert!(is_rule_enabled("BOT-001", &["BOT-001".to_string()]));
         // Non-matching
         assert!(!is_rule_enabled("LFI-001", &["SQLI-*".to_string()]));
+        // Multipart category toggled matching
+        assert!(is_rule_enabled(
+            "MULTIPART-PART-LIMIT",
+            &["MULTIPART-*".to_string()]
+        ));
+        assert!(!is_rule_enabled(
+            "MULTIPART-PART-LIMIT",
+            &["SQLI-*".to_string()]
+        ));
         // Non-toggled category always enabled
         assert!(is_rule_enabled("OTHER-RULE", &["SQLI-*".to_string()]));
     }
@@ -2411,7 +2437,7 @@ mod tests {
     #[test]
     fn test_anomaly_scoring_mode_accumulate() {
         let mut cfg = test_config();
-        cfg.global.scoring_mode = "anomaly".to_string();
+        cfg.global.scoring_mode = crate::config::ScoringMode::Anomaly;
         cfg.global.anomaly_threshold = 5;
         let engine = RuleEngine::new(&cfg);
         let headers = HashMap::new();
@@ -2459,7 +2485,7 @@ mod tests {
     #[test]
     fn test_anomaly_scoring_mode_immediate() {
         let mut cfg = test_config();
-        cfg.global.scoring_mode = "immediate".to_string();
+        cfg.global.scoring_mode = crate::config::ScoringMode::Immediate;
         let engine = RuleEngine::new(&cfg);
         let headers = HashMap::new();
 

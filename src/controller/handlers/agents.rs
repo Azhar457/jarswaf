@@ -82,6 +82,26 @@ pub async fn receive_metrics_handler(
 
 pub async fn get_agents_handler(State(state): State<ControllerState>) -> impl IntoResponse {
     let mut agents = Vec::new();
+
+    // Auto-populate local embedded agent node for Standalone mode
+    let is_standalone = {
+        if let Ok(cfg) = crate::config::load_config(&state.config_path) {
+            cfg.global.mode == "standalone"
+        } else {
+            true
+        }
+    };
+
+    if is_standalone {
+        // Use shared, cached local-node collector (single source of truth,
+        // avoids full sysinfo inventory on every 5s poll).
+        let local_node = crate::agent::metrics::collect_local_agent_info(5);
+
+        if let Ok(mut lock) = state.agent_registry.write() {
+            lock.insert(local_node.hostname.clone(), local_node);
+        }
+    }
+
     if let Ok(lock) = state.agent_registry.read() {
         let now = std::time::Instant::now();
         for info in lock.values() {
