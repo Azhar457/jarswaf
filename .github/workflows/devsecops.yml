@@ -123,6 +123,10 @@ jobs:
       # Spin up WAF and Dashboard via Docker Compose for testing
       - name: Spin up Docker Services
         run: |
+          # Validate the docker + compose V2 setup up front (a missing plugin/daemon fails
+          # later with a confusing "docker-compose: command not found").
+          docker info >/dev/null 2>&1 || { echo "docker daemon not ready"; exit 1; }
+          docker compose version || { echo "docker compose (V2) plugin missing"; exit 1; }
           docker compose up -d --build
           # Wait for services to be fully healthy and listening on port 8080
           sleep 15
