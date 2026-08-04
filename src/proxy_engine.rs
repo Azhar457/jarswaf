@@ -4,15 +4,46 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::prelude::*;
 use pingora_http::ResponseHeader;
+use std::net::IpAddr;
 use std::sync::Arc;
 
-// Global Lock-Free Config
-pub static GLOBAL_CONFIG: once_cell::sync::Lazy<arc_swap::ArcSwap<Config>> =
-    once_cell::sync::Lazy::new(|| arc_swap::ArcSwap::from_pointee(Config::default()));
+// Single atomic state holding both Config and RuleEngine together.
+// Prevents torn reads during SIGHUP reload: a request always sees a
+// consistent (config, rule_engine) pair built from the same Config snapshot.
+pub struct EngineState {
+    pub config: Arc<Config>,
+    pub rule_engine: Arc<crate::rules::RuleEngine>,
+}
+
+impl EngineState {
+    fn new(config: Arc<Config>) -> Self {
+        let rule_engine = Arc::new(crate::rules::RuleEngine::new(config.as_ref()));
+        Self {
+            config,
+            rule_engine,
+        }
+    }
+}
+
+pub static GLOBAL_ENGINE: once_cell::sync::Lazy<arc_swap::ArcSwap<EngineState>> =
+    once_cell::sync::Lazy::new(|| {
+        let cfg = Arc::new(Config::default());
+        arc_swap::ArcSwap::from_pointee(EngineState::new(cfg))
+    });
+
+pub fn update_global_config(new_config: Config) {
+    let cfg = Arc::new(new_config);
+    let engine_state = EngineState::new(cfg);
+    GLOBAL_ENGINE.store(Arc::new(engine_state));
+}
 
 // We need a context to pass data between Pingora request phases
 pub struct JarsWafCtx {
     pub client_ip: Option<std::net::IpAddr>,
+    /// The actual TCP peer address (never spoofable). Used for trusted-proxy
+    /// checks in later phases (body inspection) where client_ip may be a
+    /// header-derived visitor IP.
+    pub peer_ip: Option<std::net::IpAddr>,
     pub vhost_backend: Option<String>,
     pub vhost_name: Option<String>,
     pub body_buffer: Vec<u8>,
@@ -54,8 +85,22 @@ pub const BLOCKLIST_MAX_ENTRIES: usize = 100_000;
 /// proxy in front of jarsWAF). Otherwise they are stripped before the rule
 /// engine sees them — spoofing X-Forwarded-For to bypass IP reputation /
 /// rate limiting is a real attack (and was a confirmed lab bypass).
-const SPOOFABLE_PROXY_HEADERS: [&str; 4] =
-    ["x-forwarded-for", "x-real-ip", "client-ip", "forwarded"];
+const SPOOFABLE_PROXY_HEADERS: [&str; 6] = [
+    "x-forwarded-for",
+    "x-real-ip",
+    "client-ip",
+    "forwarded",
+    "cf-connecting-ip",
+    "true-client-ip",
+];
+
+/// Check if the direct peer IP is in the configured trusted_proxies list.
+fn is_peer_trusted(config: &crate::config::Config, peer_ip: std::net::IpAddr) -> bool {
+    let trusted = config.global.trusted_proxies.as_deref().unwrap_or(&[]);
+    trusted
+        .iter()
+        .any(|t| t.parse::<std::net::IpAddr>() == Ok(peer_ip))
+}
 
 /// Strip spoofable proxy headers from a request header map unless the direct
 /// connection peer is a configured trusted proxy.
@@ -64,11 +109,7 @@ fn sanitize_proxy_headers(
     peer_ip: std::net::IpAddr,
     config: &crate::config::Config,
 ) {
-    let trusted = config.global.trusted_proxies.as_deref().unwrap_or(&[]);
-    let peer_trusted = trusted
-        .iter()
-        .any(|t| t.parse::<std::net::IpAddr>() == Ok(peer_ip));
-    if peer_trusted {
+    if is_peer_trusted(config, peer_ip) {
         return; // trusted proxy — keep headers as-is
     }
     for h in SPOOFABLE_PROXY_HEADERS.iter() {
@@ -129,7 +170,7 @@ pub fn start_config_hot_reload(config_path: String) {
             tracing::info!("SIGHUP received — reloading config from {}", config_path);
             match crate::config::load_config(&config_path) {
                 Ok(new_config) => {
-                    GLOBAL_CONFIG.store(Arc::new(new_config));
+                    update_global_config(new_config);
                     tracing::info!("Config hot-reloaded successfully");
                 }
                 Err(e) => {
@@ -158,8 +199,6 @@ pub fn start_memory_cleanup() {
             // SAFE_AST_PROFILES is bounded inside learn_safe_ast_profile
             // (cap per path + global clear) — belt and suspenders:
             crate::rules::trim_ast_profiles();
-            ACTIVE_CONNECTIONS.retain(|_, _| false);
-            BACKEND_ACTIVE_REQUESTS.retain(|_, _| false);
         }
     });
 }
@@ -524,8 +563,9 @@ async fn handle_secure_websocket_tunnel(
     let client_write_for_backend = client_write_lock.clone();
 
     let client_to_backend = async {
-        let config = GLOBAL_CONFIG.load();
-        let rule_engine = crate::rules::RuleEngine::new(&config);
+        let engine = GLOBAL_ENGINE.load();
+        let _config = engine.config.clone();
+        let rule_engine = engine.rule_engine.clone();
         while let Some(msg_res) = client_read.next().await {
             let msg = msg_res?;
             match &msg {
@@ -608,6 +648,15 @@ pub static ROUND_ROBIN_COUNTERS: once_cell::sync::Lazy<
 pub static ACME_CHALLENGES: once_cell::sync::Lazy<dashmap::DashMap<String, String>> =
     once_cell::sync::Lazy::new(dashmap::DashMap::new);
 
+pub fn ensure_background_services_started() {
+    static HEALTH_CHECKER_STARTED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    if !HEALTH_CHECKER_STARTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        start_health_checker(tokio_util::sync::CancellationToken::new());
+        start_websocket_security_proxy();
+    }
+}
+
 pub fn start_health_checker(cancel: tokio_util::sync::CancellationToken) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
@@ -669,6 +718,7 @@ impl ProxyHttp for JarsWafProxy {
     fn new_ctx(&self) -> Self::CTX {
         JarsWafCtx {
             client_ip: None,
+            peer_ip: None,
             vhost_backend: None,
             vhost_name: None,
             body_buffer: Vec::new(),
@@ -702,7 +752,7 @@ impl ProxyHttp for JarsWafProxy {
         }
 
         // ── Security Headers & Fingerprint Masking ──────────────────────
-        let config = GLOBAL_CONFIG.load();
+        let config = GLOBAL_ENGINE.load().config.clone();
         if let Some(vhost_name) = ctx.vhost_name.as_deref() {
             if let Some(vhost_cfg) = config.vhosts.iter().find(|v| v.name == vhost_name) {
                 if let Some(ref mask) = vhost_cfg.server_header_mask {
@@ -816,7 +866,9 @@ impl ProxyHttp for JarsWafProxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
-        let client_ip = match session.client_addr() {
+        let engine = GLOBAL_ENGINE.load();
+        let config = engine.config.clone();
+        let peer_ip = match session.client_addr() {
             Some(cs) => {
                 if let Some(ip) = cs.as_inet() {
                     ip.ip()
@@ -826,7 +878,25 @@ impl ProxyHttp for JarsWafProxy {
             }
             None => return Ok(false),
         };
+        let mut client_ip = peer_ip;
+
+        // Extract real visitor IP if behind Cloudflare / Reverse Proxy (only if peer_ip is trusted)
+        let is_peer_trusted = is_peer_trusted(&config, peer_ip);
+
+        if is_peer_trusted {
+            if let Some(cf_ip) = session
+                .get_header("CF-Connecting-IP")
+                .or_else(|| session.get_header("X-Real-IP"))
+            {
+                if let Ok(ip_str) = cf_ip.to_str() {
+                    if let Ok(parsed) = ip_str.trim().parse::<IpAddr>() {
+                        client_ip = parsed;
+                    }
+                }
+            }
+        }
         ctx.client_ip = Some(client_ip);
+        ctx.peer_ip = Some(peer_ip);
 
         // Extract req_header fields early to avoid hold-borrow of session
         let (req_method, path, query_str, host, mut headers_map, cl_values, te_present) = {
@@ -835,7 +905,32 @@ impl ProxyHttp for JarsWafProxy {
             // Strip matrix parameters (RFC 3986 / Spring-Boot style `/path;jsessionid=x`)
             // so rule evaluation sees the canonical path. `;` separates matrix params.
             let raw_path = req_header.uri.path();
-            let path = raw_path.split(';').next().unwrap_or(raw_path).to_string();
+            let stripped = raw_path.split(';').next().unwrap_or(raw_path);
+            // Normalize the path used for WAF rule/vhost/rate-limit inspection:
+            // percent-decode (so `%2fwp-admin` matches `/wp-admin`) and collapse repeated
+            // slashes (`//admin` → `/admin`). Defensive only — does NOT alter the path forwarded
+            // upstream (Pingora forwards req_header original). `ponytail:` no unicode/NFKC
+            // normalization; add if bypass via IIS %uXXXX or extended normalization observed.
+            // One decode pass only (mirrors OWASP CRS REQUEST-920).
+            let path: String = {
+                let decoded = urlencoding::decode(stripped)
+                    .unwrap_or_else(|_| stripped.into())
+                    .into_owned();
+                let mut norm = String::with_capacity(decoded.len());
+                let mut prev_slash = false;
+                for ch in decoded.chars() {
+                    if ch == '/' {
+                        if !prev_slash {
+                            norm.push('/');
+                        }
+                        prev_slash = true;
+                    } else {
+                        norm.push(ch);
+                        prev_slash = false;
+                    }
+                }
+                norm
+            };
             let query_str = req_header.uri.query().unwrap_or("").to_string();
             let host = req_header
                 .headers
@@ -934,7 +1029,7 @@ impl ProxyHttp for JarsWafProxy {
 
         // Sanitize spoofable proxy headers (X-Forwarded-For, Client-IP, ...)
         // unless the peer is a configured trusted proxy.
-        let config = GLOBAL_CONFIG.load();
+        let config = GLOBAL_ENGINE.load().config.clone();
         {
             let mut sanitized = headers_map.clone();
             sanitize_proxy_headers(&mut sanitized, client_ip, &config);
@@ -1143,8 +1238,16 @@ impl ProxyHttp for JarsWafProxy {
             let _ = self.log_tx.try_send(entry);
         }
 
-        // 0.3. Bot Challenge Check (Captive Portal PoW)
-        if vhost_cfg.bot_challenge_enabled {
+        // 0.3. Bot Challenge Check (Captive Portal PoW) - Bypass for verified search engine crawlers (SEO friendly)
+        let ua = headers_map
+            .get("user-agent")
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        // Use the strict, anchored regex whitelist (with scanner rejection)
+        // rather than a substring allowlist — closes the "sqlmap googlebot" spoof class.
+        let is_search_crawler = crate::rules::whitelist::is_whitelisted_bot_ctx(ua);
+
+        if vhost_cfg.bot_challenge_enabled && !is_search_crawler {
             if path == "/jarswaf-challenge-verify" {
                 let mut sol_str = None;
                 let mut orig_path = None;
@@ -1157,11 +1260,17 @@ impl ProxyHttp for JarsWafProxy {
                         if k == "sol" {
                             sol_str = Some(v.to_string());
                         } else if k == "r" {
-                            orig_path = Some(
-                                urlencoding::decode(v)
-                                    .unwrap_or_else(|_| v.into())
-                                    .into_owned(),
-                            );
+                            let decoded = urlencoding::decode(v)
+                                .unwrap_or_else(|_| v.into())
+                                .into_owned();
+                            if decoded.starts_with('/')
+                                && !decoded.starts_with("//")
+                                && !decoded.contains('\r')
+                                && !decoded.contains('\n')
+                                && !decoded.contains('\\')
+                            {
+                                orig_path = Some(decoded);
+                            }
                         } else if k == "m" {
                             mouse_moves = v.parse::<i32>().unwrap_or(0);
                         } else if k == "fp_c" {
@@ -1287,8 +1396,11 @@ impl ProxyHttp for JarsWafProxy {
             }
         }
 
-        // Lazily sync backends for this vhost in LOAD_BALANCER
-        if !LOAD_BALANCER.contains_key(&vhost_cfg.name) {
+        // Lazily sync backends for this vhost in LOAD_BALANCER atomically.
+        // Reconcile on every request: if config changed (reload), replace the
+        // stale list; if unchanged, keep existing entries (preserves health
+        // flags so the health checker isn't reset every 15s tick).
+        let desired_backends: Vec<Backend> = {
             let mut backends = Vec::new();
             if let Some(list) = &vhost_cfg.backends {
                 if !list.is_empty() {
@@ -1306,19 +1418,24 @@ impl ProxyHttp for JarsWafProxy {
                     healthy: Arc::new(std::sync::atomic::AtomicBool::new(true)),
                 });
             }
-            LOAD_BALANCER.insert(vhost_cfg.name.clone(), backends);
-            ROUND_ROBIN_COUNTERS
-                .entry(vhost_cfg.name.clone())
-                .or_insert_with(|| Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+            backends
+        };
+        {
+            let mut entry = LOAD_BALANCER.entry(vhost_cfg.name.clone()).or_default();
+            let stale = entry.len() != desired_backends.len()
+                || entry
+                    .iter()
+                    .zip(&desired_backends)
+                    .any(|(a, b)| a.addr != b.addr);
+            if stale {
+                *entry = desired_backends;
+            }
         }
+        ROUND_ROBIN_COUNTERS
+            .entry(vhost_cfg.name.clone())
+            .or_insert_with(|| Arc::new(std::sync::atomic::AtomicUsize::new(0)));
 
-        // Lazily start health checker & WS security proxy
-        static HEALTH_CHECKER_STARTED: std::sync::atomic::AtomicBool =
-            std::sync::atomic::AtomicBool::new(false);
-        if !HEALTH_CHECKER_STARTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            start_health_checker(tokio_util::sync::CancellationToken::new());
-            start_websocket_security_proxy();
-        }
+        ensure_background_services_started();
 
         // 0.4. Self-Healing Backend Health Check & Active Shielding
         let all_backends_unhealthy = if let Some(backends) = LOAD_BALANCER.get(&vhost_cfg.name) {
@@ -1486,7 +1603,7 @@ impl ProxyHttp for JarsWafProxy {
             }
         }
 
-        let rule_engine = crate::rules::RuleEngine::new(&config);
+        let rule_engine = GLOBAL_ENGINE.load().rule_engine.clone();
 
         // 2.5. Rate Limiting Check (independent of waf_enabled)
         // Priority: vhost rate_limit_tiers (path-specific) → global rate_limit_policies → vhost rate_limit → global default
@@ -1672,26 +1789,27 @@ impl ProxyHttp for JarsWafProxy {
             let _ = self.log_tx.try_send(entry);
 
             if vhost_cfg.deception_mode {
-                tracing::info!("Deception mode triggered for: {}", client_ip);
-                let fake_json = r#"{
-    "status": "success",
-    "data": {
-        "users": [
-            {"id": 1, "username": "admin", "role": "superuser", "last_login": "2023-10-14T08:00:00Z"},
-            {"id": 2, "username": "system", "role": "system", "last_login": "2023-10-14T08:05:00Z"}
-        ],
-        "debug_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fake_token"
-    }
-}"#;
-                let _ = respond_custom_error(
-                    session,
-                    200,
-                    "OK",
-                    fake_json,
-                    &client_ip.to_string(),
-                    &rule_id,
-                )
-                .await;
+                let delay = vhost_cfg.tarpit_delay_ms.unwrap_or(500);
+                tracing::info!(
+                    "Deception mode triggered for: {}, applying tarpit delay {}ms",
+                    client_ip,
+                    delay
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+
+                let hp_target = vhost_cfg
+                    .honeypot_upstream
+                    .clone()
+                    .unwrap_or_else(crate::honeypot::default_honeypot_upstream);
+
+                ctx.vhost_backend = Some(hp_target.clone());
+                tracing::info!(
+                    "Steering attacker {} to Honeypot Upstream Target: {}",
+                    client_ip,
+                    hp_target
+                );
+                ctx.is_blocked = false; // Allow request to pass through to honeypot upstream
+                return Ok(false);
             } else {
                 let _ = respond_custom_error(
                     session,
@@ -1702,8 +1820,8 @@ impl ProxyHttp for JarsWafProxy {
                     &rule_id,
                 )
                 .await;
+                return Ok(true);
             }
-            return Ok(true);
         }
 
         if let Some(ip) = ctx.client_ip {
@@ -1916,7 +2034,7 @@ impl ProxyHttp for JarsWafProxy {
         let req = session.req_header();
         let status = session.response_written().map_or(0, |r| r.status.as_u16());
 
-        let log_level = GLOBAL_CONFIG.load().global.log_level.to_lowercase();
+        let log_level = GLOBAL_ENGINE.load().config.global.log_level.to_lowercase();
         if log_level == "verbose"
             || log_level == "all"
             || (e.is_some() && (log_level == "errors" || log_level == "anomaly"))
@@ -1996,7 +2114,7 @@ impl ProxyHttp for JarsWafProxy {
         }
 
         if end_of_stream && !ctx.body_buffer.is_empty() {
-            let config = GLOBAL_CONFIG.load();
+            let config = GLOBAL_ENGINE.load().config.clone();
 
             // Skip WAF body inspection if globally disabled
             if !config.global.waf_enabled {
@@ -2030,7 +2148,9 @@ impl ProxyHttp for JarsWafProxy {
             };
 
             // Sanitize spoofable proxy headers for body inspection too.
-            if let Some(peer_ip) = ctx.client_ip {
+            // Trusted-proxy check MUST use the real TCP peer (never spoofable),
+            // not ctx.client_ip which may be a header-derived visitor IP.
+            if let Some(peer_ip) = ctx.peer_ip {
                 let mut sanitized = headers_map.clone();
                 sanitize_proxy_headers(&mut sanitized, peer_ip, &config);
                 headers_map = sanitized;
@@ -2066,7 +2186,7 @@ impl ProxyHttp for JarsWafProxy {
                     }
                 }
 
-                let rule_engine = crate::rules::RuleEngine::new(&config);
+                let rule_engine = GLOBAL_ENGINE.load().rule_engine.clone();
 
                 // Acquire semaphore — FAIL-CLOSED: if the semaphore is
                 // saturated, reject with 503 rather than letting the body

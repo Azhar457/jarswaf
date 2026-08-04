@@ -18,6 +18,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The agent runs non-root (Dockerfile.agent USER jarswaf); binding 80/443 needs
+    # NET_BIND_SERVICE. TLS certs are generated into ./certs at runtime — mount stays rw.
+    cap_add:
+      - NET_BIND_SERVICE
     volumes:
       - ./config.standalone.toml:/app/config.toml
       - ./certs:/app/certs

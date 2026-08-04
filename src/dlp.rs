@@ -52,9 +52,10 @@ pub fn scan_body(raw_body: &str, cfg: &crate::config::DlpConfig) -> Vec<DlpFindi
         return Vec::new();
     }
 
-    // Limit scanned body to first 1MB to prevent excessive memory/CPU usage
-    let scan_len = raw_body.len().min(1024 * 1024);
-    let body_slice = &raw_body[..scan_len];
+    // Limit scanned body to first 1MB to prevent excessive memory/CPU usage.
+    // safe_truncate keeps UTF-8 char boundaries (a raw byte min() would panic
+    // if 1MB lands mid-multibyte-char).
+    let body_slice = crate::utils::safe_truncate(raw_body, 1024 * 1024);
 
     // Quick allow-list check: if body contains any allowlisted string → skip
     for item in &cfg.allowlist {

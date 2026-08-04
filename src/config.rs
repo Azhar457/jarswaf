@@ -68,6 +68,8 @@ pub struct GlobalConfig {
     pub grpc_token: Option<String>,
     #[serde(default)]
     pub admin_token: Option<String>,
+    #[serde(default)]
+    pub must_change_password: Option<bool>,
     #[serde(default = "default_waf_enabled")]
     pub waf_enabled: bool,
     /// Alert webhooks — fired on blocked requests or reputation events.
@@ -87,7 +89,7 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub ebpf: EbpfConfig,
     #[serde(default = "default_scoring_mode")]
-    pub scoring_mode: String,
+    pub scoring_mode: ScoringMode,
     #[serde(default = "default_anomaly_threshold")]
     pub anomaly_threshold: u32,
     /// AST safe-profile auto-learning (opt-in). Default OFF — see
@@ -222,6 +224,10 @@ pub struct VHost {
     pub blacklists: Vec<BlacklistRule>,
     #[serde(default)]
     pub deception_mode: bool,
+    #[serde(default)]
+    pub honeypot_upstream: Option<String>,
+    #[serde(default)]
+    pub tarpit_delay_ms: Option<u64>,
     /// Security headers to inject into every response.
     /// Default: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy.
     #[serde(default)]
@@ -268,6 +274,8 @@ impl Default for VHost {
             allowlists: Vec::new(),
             blacklists: Vec::new(),
             deception_mode: false,
+            honeypot_upstream: None,
+            tarpit_delay_ms: None,
             security_headers: None,
             dlp: None,
             max_conns_per_ip: default_max_conns_per_ip(),
@@ -412,6 +420,7 @@ impl Default for Config {
                 manager_url: None,
                 grpc_token: None,
                 admin_token: None,
+                must_change_password: None,
                 waf_enabled: true,
                 metrics_push_url: None,
                 metrics_push_interval_secs: 60,
@@ -491,6 +500,13 @@ pub struct ZeroTrustConfig {
     /// Empty = trust all issuers.
     #[serde(default)]
     pub allowed_issuers: Vec<String>,
+    /// Shared HMAC-SHA256 secret for verifying HS256 identity JWT signatures (C-01 fix).
+    /// When non-empty, `identity_verified` becomes true only for tokens whose signature
+    /// verifies against this secret. When empty (default), no token is treated as verified —
+    /// Zero Trust stays fail-closed rather than trusting unsigned tokens. Configure this when
+    /// you have an HS256 identity provider; RSA/JWKS verification is a future extension.
+    #[serde(default)]
+    pub shared_secret: String,
 }
 
 fn default_min_trust_score() -> f64 {
@@ -502,6 +518,7 @@ impl Default for ZeroTrustConfig {
         Self {
             min_trust_score: default_min_trust_score(),
             allowed_issuers: Vec::new(),
+            shared_secret: String::new(),
         }
     }
 }
@@ -571,7 +588,15 @@ impl Default for ComponentsConfig {
 
 pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(path)?;
-    let cfg: Config = toml::from_str(&content)?;
+    let mut cfg: Config = toml::from_str(&content)?;
+
+    // Environment variable overrides for sensitive secrets
+    if let Ok(env_psk) = std::env::var("JARSWAF_GOSSIP_PSK") {
+        if !env_psk.trim().is_empty() {
+            cfg.gossip.psk = env_psk;
+        }
+    }
+
     Ok(cfg)
 }
 
@@ -786,8 +811,24 @@ fn default_dlp_enabled() -> bool {
 fn default_dlp_response_limit() -> usize {
     2 * 1024 * 1024
 }
-fn default_scoring_mode() -> String {
-    "immediate".to_string()
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ScoringMode {
+    #[default]
+    Immediate,
+    Anomaly,
+}
+
+impl ScoringMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ScoringMode::Immediate => "immediate",
+            ScoringMode::Anomaly => "anomaly",
+        }
+    }
+}
+fn default_scoring_mode() -> ScoringMode {
+    ScoringMode::default()
 }
 fn default_anomaly_threshold() -> u32 {
     5
