@@ -186,6 +186,10 @@ pub fn build_router(state: ControllerState) -> Router {
 
     router
         .fallback_service(tower_http::services::ServeDir::new(&static_dir))
+        // Bound the controller API request body (Availability: prevent a large JSON body —
+        // e.g. /api/v1/logs, /api/v1/vhosts — from exhausting memory). Independent of the
+        // Pingora proxy body limit, which covers upstream proxy traffic, not the control plane.
+        .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024)) // 2 MiB
         .layer(cors)
         .with_state(state)
 }
