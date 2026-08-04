@@ -57,7 +57,13 @@ COPY --from=builder /app/jarswaf-bin /app/jarswaf
 # ambient caps for the CMD binary, setcap the binary instead and drop USER.
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin jarswaf && \
     chown -R jarswaf:jarswaf /app /var/log/jarswaf /app/certs
-USER jarswaf
+
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+# Entrypoint chowns mounted volumes (as root) then drops to jarswaf for the app process.
+# Container default user stays root solely for the chown; the server runs as jarswaf.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 EXPOSE 80 443
 
