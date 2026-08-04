@@ -43,6 +43,11 @@ jobs:
           cargo install bpf-linker
 
       - name: Build eBPF Program
+        # eBPF is optional: the runtime disables kernel XDP drop cleanly when the binary is
+        # absent (see proxy_engine "Could not locate jarswaf-ebpf ... eBPF disabled"). Its
+        # nightly + build-std workspace setup has been flaky in CI, so don't let it block
+        # the main binary release. Fix the eBPF build separately; keep releasing working.
+        continue-on-error: true
         run: cargo +nightly run --package xtask
 
       - name: Build Release Binaries (glibc)
