@@ -12,5 +12,8 @@ set -eu
 chown -R jarswaf:jarswaf /app/logs /app/certs /var/log/jarswaf 2>/dev/null || true
 
 # Drop to the jarswaf user and exec the real command (CMD from the image).
-# `su --` forwards the remaining arguments verbatim as argv.
-exec su -s /bin/sh jarswaf -- "$@"
+#
+# NOTE: use `setpriv`, NOT `su`. `su` runs the target command via a shell, so an ELF binary
+# gets parsed as a shell script ("/app/jarswaf: 1: ELF...: not found"). setpriv execs the
+# command directly with no intermediate shell. Requires util-linux (present in bookworm-slim).
+exec setpriv --reuid jarswaf --regid jarswaf --init-groups --inh-caps=-all -- "$@"
