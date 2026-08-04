@@ -500,8 +500,11 @@ pub struct ZeroTrustConfig {
     /// Empty = trust all issuers.
     #[serde(default)]
     pub allowed_issuers: Vec<String>,
-    /// Shared HMAC-SHA256 secret for verifying identity token signatures.
-    /// If empty, signature verification is skipped (legacy insecure mode) — set it!
+    /// Shared HMAC-SHA256 secret for verifying HS256 identity JWT signatures (C-01 fix).
+    /// When non-empty, `identity_verified` becomes true only for tokens whose signature
+    /// verifies against this secret. When empty (default), no token is treated as verified —
+    /// Zero Trust stays fail-closed rather than trusting unsigned tokens. Configure this when
+    /// you have an HS256 identity provider; RSA/JWKS verification is a future extension.
     #[serde(default)]
     pub shared_secret: String,
 }

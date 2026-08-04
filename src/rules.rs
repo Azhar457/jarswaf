@@ -102,6 +102,7 @@ pub struct RuleEngine {
     pub wasm_engine: Option<crate::wasm::WasmPluginEngine>,
     pub zt_min_score: f64,
     pub zt_allowed_issuers: Vec<String>,
+    pub zt_jwt_secret: Option<String>,
     pub scoring_mode: crate::config::ScoringMode,
     pub anomaly_threshold: u32,
     /// AST safe-profile auto-learning gate. Disabled by default — see
@@ -466,6 +467,11 @@ impl RuleEngine {
             wasm_engine,
             zt_min_score: cfg.zero_trust.min_trust_score,
             zt_allowed_issuers: cfg.zero_trust.allowed_issuers.clone(),
+            zt_jwt_secret: if cfg.zero_trust.shared_secret.is_empty() {
+                None
+            } else {
+                Some(cfg.zero_trust.shared_secret.clone())
+            },
             scoring_mode: cfg.global.scoring_mode.clone(),
             anomaly_threshold: cfg.global.anomaly_threshold,
             ast_learning_enabled: cfg.global.ast_learning_enabled,
@@ -623,6 +629,7 @@ impl RuleEngine {
                 false, // tls — not available at rule engine level
                 &self.zt_allowed_issuers,
                 self.zt_min_score,
+                self.zt_jwt_secret.as_deref().unwrap_or(""),
             ) {
                 if let Some(res) = process_match(
                     "ZT-TRUST-SCORE".to_string(),
