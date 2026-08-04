@@ -396,7 +396,7 @@ mod tests {
         let mut headers = AHashMap::new();
         headers.insert("authorization".to_string(), format!("Bearer {}", token));
         let issuers = vec!["https://auth.jarswaf.local".to_string()];
-        let (id_ok, iss_ok) = check_identity_token(&headers, &issuers, Some(secret));
+        let (id_ok, iss_ok) = check_identity_token(&headers, &issuers, secret);
         assert!(id_ok);
         assert!(iss_ok);
     }
@@ -423,7 +423,7 @@ mod tests {
         let mut headers = AHashMap::new();
         headers.insert("authorization".to_string(), format!("Bearer {}", token));
         let issuers = vec!["https://auth.jarswaf.local".to_string()];
-        let (id_ok, _) = check_identity_token(&headers, &issuers, Some(secret));
+        let (id_ok, _) = check_identity_token(&headers, &issuers, secret);
         assert!(!id_ok);
     }
 
@@ -605,8 +605,7 @@ mod tests {
             true,
             &[], // no issuers configured = trust all
             0.50,
-            "",
-            None, // no JWT secret → identity_verified stays false
+            "", // no shared secret → identity_verified stays false
         );
         assert!(result.is_none()); // should pass (score 0.55 ≥ 0.50 even without identity)
     }
