@@ -72,9 +72,20 @@ ENV JARSWAF_PORT=8080
 
 # Run as non-root. The WAF inspects untrusted traffic; PID 1 as root turns any logic flaw
 # into host compromise. Serves on 8080 so no NET_BIND_SERVICE cap is needed here.
+# The entrypoint runs as root ONLY to chown mounted volumes (logs/certs/db) then drops to
+# the jarswaf user via `su` — so named volumes that start root-owned still work.
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin jarswaf && \
     chown -R jarswaf:jarswaf /app /app/dashboard/dist
 
-USER jarswaf
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
+# Container default user is root so the entrypoint can chown mounted volumes; it then drops
+# to the unprivileged jarswaf user for the actual server process. This is the standard
+# "root entrypoint, non-root app" pattern (PostgreSQL, n8n, etc.) — the long-running process
+# never runs as root.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
+# CMD runs as jarswaf (set by the entrypoint's `su`); keep the image default user as root
+# solely for the chown step.
 CMD ["/app/jarswaf", "agent"]
