@@ -170,9 +170,18 @@ jobs:
           rules_file_name: '.zap/rules.tsv'
           fail_action: false # Report findings without breaking builds immediately
           allow_issue_writing: false
-          # GitHub rejected the default artifact name ('zap_scan is not valid' — a current
-          # Actions artifact-name validation quirk). Use a clean, valid name.
-          artifact_name: 'dast-zap-baseline-report'
+        continue-on-error: true
+
+      - name: Upload ZAP Scan Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dast-zap-baseline-report
+          path: |
+            report_html.html
+            report_md.md
+            report_json.json
+            zap_scan.html
+          if-no-files-found: ignore
 
   # -------------------------------------------------------------
   # Job 4: CD - Auto Deploy to VM via SSH
