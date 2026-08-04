@@ -144,9 +144,37 @@ pub async fn post_config_rollback_handler(
     let parent = std::path::Path::new(&state.config_path)
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
-    let backup_path = parent.join("config_backups").join(&payload.filename);
+    let backups_dir = parent.join("config_backups");
 
-    if !backup_path.exists() {
+    // Defensive path-traversal guard: canonicalize both the backups dir and the
+    // requested backup path, then reject anything that escapes the backups dir or
+    // is absolute. Prevents `filename = "../config.toml"` (or arbitrary file) from
+    // being copied over the live config. Without this an authed caller could reset
+    // admin_token to a known hash or overwrite other writable files.
+    if payload.filename.is_empty()
+        || payload.filename.contains(std::path::MAIN_SEPARATOR)
+        || payload.filename.contains("..")
+        || std::path::Path::new(&payload.filename).is_absolute()
+    {
+        return (StatusCode::BAD_REQUEST, "Invalid backup filename").into_response();
+    }
+
+    let backup_path = backups_dir.join(&payload.filename);
+
+    // Resolve symlinks/`..` after junction and confirm the result stays inside backups_dir.
+    let backups_canon = match backups_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return (StatusCode::NOT_FOUND, "Backup file not found").into_response(),
+    };
+    let backup_canon = match backup_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return (StatusCode::NOT_FOUND, "Backup file not found").into_response(),
+    };
+    if !backup_canon.starts_with(&backups_canon) {
+        return (StatusCode::BAD_REQUEST, "Invalid backup filename").into_response();
+    }
+
+    if !backup_canon.exists() {
         return (StatusCode::NOT_FOUND, "Backup file not found").into_response();
     }
 

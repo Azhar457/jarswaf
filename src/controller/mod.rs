@@ -34,7 +34,11 @@ pub struct BlockCommand {
 /// Exposed so integration tests can spin up the API without spinning up
 /// gRPC, SQLite, or the threat intel scraper.
 pub fn build_router(state: ControllerState) -> Router {
-    // CORS Configuration for local Svelte dashboard
+    // CORS Configuration for local Svelte dashboard. API auth is a Bearer header (not
+    // cookies) so permissive CORS is not a direct CSRF vector; the controller now binds
+    // loopback by default (see run_controller), which is the primary exposure control.
+    // `ponytail:` lock CORS to an allowlist in frontend/prod by setting JARSWAF_CORS_ORIGINS
+    // (comma-separated) once a multi-origin list is actually required.
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_headers(Any)
@@ -217,11 +221,18 @@ pub async fn run_controller(port: u16, config_path: String) {
     logging::init_sqlite_db(&db_path).expect("Failed to initialize SQLite DB");
     handlers::start_threat_intel_scraper(db_path.clone());
 
-    let grpc_token = cfg
-        .global
-        .grpc_token
-        .clone()
-        .unwrap_or_else(|| "default_token".to_string());
+    // Generate a random gRPC token at startup when none is configured, and persist it back
+    // to config so agents can be registered against it. Never fall back to a hardcoded
+    // "default_token" — that left the gRPC management port open with a public constant.
+    let grpc_token = cfg.global.grpc_token.clone().unwrap_or_else(|| {
+        let generated = uuid::Uuid::new_v4().simple().to_string();
+        if let Ok(mut c) = config::load_config(&config_path) {
+            c.global.grpc_token = Some(generated.clone());
+            let _ = config::save_config(&config_path, &c);
+        }
+        info!("No grpc_token configured — generated a random one (persisted to config).");
+        generated
+    });
     tokio::spawn(async move {
         if let Err(e) = crate::grpc::server::run_manager_server(9000, grpc_token).await {
             tracing::error!("gRPC Manager Server error: {}", e);
@@ -268,11 +279,23 @@ pub async fn run_controller(port: u16, config_path: String) {
         rate_limited: Arc::new(AtomicU64::new(initial_stats.rate_limited as u64)),
         config_tx,
         config_lock: Arc::new(tokio::sync::Mutex::new(())),
+        sessions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     };
 
     let app = build_router(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // Bind loopback by default: the controller API + dashboard carry admin credentials and
+    // must not be exposed to untrusted networks. Cross-host access should go through a
+    // reverse proxy (with TLS + auth) in front of the WAF. Override only when an operator
+    // deliberately exposes it, e.g. JARSWAF_BIND=0.0.0.0. Previously this hard-bound
+    // 0.0.0.0 and defaulted the API to the public interface (audit H-02).
+    let bind_host = std::env::var("JARSWAF_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let addr = match bind_host.parse::<std::net::IpAddr>() {
+        Ok(ip) => SocketAddr::from((ip, port)),
+        Err(_) => {
+            panic!("Invalid JARSWAF_BIND value: {bind_host}");
+        }
+    };
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Cannot bind Controller port");

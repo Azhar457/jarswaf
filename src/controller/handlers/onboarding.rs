@@ -47,7 +47,10 @@ pub async fn post_complete_onboarding_handler(
 
     if let Some(new_pass) = payload.new_admin_password {
         if new_pass.trim().len() >= 8 {
-            cfg.global.admin_token = Some(new_pass);
+            // Hash the password before persisting — never store it in plaintext. This must
+            // match the hashing used by `change_password_handler` (`auth::hash_password`),
+            // which a prior version of this onboarding path bypassed (stored raw password).
+            cfg.global.admin_token = Some(crate::controller::auth::hash_password(&new_pass));
         }
     }
 
