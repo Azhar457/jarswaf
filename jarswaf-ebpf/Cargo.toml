@@ -3,6 +3,8 @@ name = "jarswaf-ebpf"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+
 [dependencies]
 # Pinned to the same rev as the userspace `aya`/`aya-log` deps in the main workspace
 # (Cargo.lock a47f99a0) so both sides of the BPF map boundary compile against the same

@@ -170,6 +170,7 @@ jobs:
           rules_file_name: '.zap/rules.tsv'
           fail_action: false # Report findings without breaking builds immediately
           allow_issue_writing: false
+          artifact_name: ''
         continue-on-error: true
 
       - name: Upload ZAP Scan Report
