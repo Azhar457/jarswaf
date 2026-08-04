@@ -47,6 +47,24 @@ enum Commands {
     },
     /// Print the local Machine ID
     MachineId,
+    /// Check jarsWAF service and runtime status
+    Status,
+    /// Start jarsWAF systemd service
+    Start,
+    /// Stop jarsWAF systemd service
+    Stop,
+    /// Restart jarsWAF systemd service
+    Restart,
+    /// Tail live jarsWAF logs
+    Logs {
+        /// Number of lines to view (default: 50)
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: usize,
+    },
+    /// Reload jarsWAF configuration
+    Reload,
+    /// Reset admin password to a new random password
+    ResetPassword,
     /// Automatically configure local /etc/hosts (or Windows hosts) for dev domain
     SetupHosts {
         /// Domain name to bind to 127.0.0.1 (default: dev-waf.local)
@@ -111,7 +129,27 @@ async fn main() {
             tokio::spawn(async move {
                 jarswaf::controller::run_controller(controller_port, config_path).await;
             });
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+            // Active readiness check instead of 1-second sleep hack
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_millis(500))
+                .build()
+                .unwrap();
+            let health_url = format!("http://127.0.0.1:{}/health", controller_port);
+            let mut ready = false;
+            for _ in 0..20 {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                if let Ok(res) = client.get(&health_url).send().await {
+                    if res.status().is_success() {
+                        ready = true;
+                        break;
+                    }
+                }
+            }
+            if !ready {
+                eprintln!("Warning: Controller did not become ready within 5 seconds, starting agent anyway.");
+            }
+
             jarswaf::agent::run_agent(
                 &cli.config,
                 Some(format!("http://127.0.0.1:{}", controller_port)),
@@ -143,6 +181,114 @@ async fn main() {
         }
         Commands::MachineId => {
             println!("{}", get_machine_id());
+        }
+        Commands::Status => {
+            println!("===============================================================");
+            println!("🛡️  jarsWAF Status Overview");
+            println!("===============================================================");
+            let is_systemd_active = std::process::Command::new("systemctl")
+                .args(["is-active", "--quiet", "jarswaf"])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+
+            if is_systemd_active {
+                println!("  Service Status:    ● ACTIVE (Running under systemd)");
+            } else {
+                println!("  Service Status:    ○ INACTIVE (Not running as systemd service)");
+            }
+
+            let opt_dir = std::path::Path::new("/opt/jarswaf");
+            if opt_dir.exists() {
+                println!("  Install Location:  /opt/jarswaf");
+            } else {
+                println!("  Install Location:  Local Workspace");
+            }
+
+            let config_path = if opt_dir.join("config.toml").exists() {
+                "/opt/jarswaf/config.toml"
+            } else {
+                &cli.config
+            };
+
+            if let Ok(cfg) = jarswaf::config::load_config(config_path) {
+                println!("  Config File:       {}", config_path);
+                println!(
+                    "  WAF Proxy Port:    http://0.0.0.0:{} (HTTP) / :{} (HTTPS)",
+                    cfg.global.port_http, cfg.global.port_https
+                );
+                println!("  Dashboard GUI:     http://0.0.0.0:9443");
+                println!("  Active VHosts:     {} domain(s)", cfg.vhosts.len());
+            } else {
+                println!("  Config File:       {}", config_path);
+                println!("  WAF Proxy Port:    http://0.0.0.0:80");
+                println!("  Dashboard GUI:     http://0.0.0.0:9443");
+            }
+            println!("===============================================================");
+        }
+        Commands::Start => {
+            println!("🚀 Memulai service jarsWAF...");
+            let res = std::process::Command::new("systemctl")
+                .args(["start", "jarswaf"])
+                .status();
+            if res.map(|s| s.success()).unwrap_or(false) {
+                println!("✅ [OK] Service jarsWAF berhasil dijalankan.");
+            } else {
+                eprintln!("❌ [ERROR] Gagal menjalankan service jarsWAF. Jalankan dengan sudo / periksa systemctl status jarswaf.");
+            }
+        }
+        Commands::Stop => {
+            println!("🛑 Menghentikan service jarsWAF...");
+            let res = std::process::Command::new("systemctl")
+                .args(["stop", "jarswaf"])
+                .status();
+            if res.map(|s| s.success()).unwrap_or(false) {
+                println!("✅ [OK] Service jarsWAF berhasil dihentikan.");
+            } else {
+                eprintln!("❌ [ERROR] Gagal menghentikan service jarsWAF.");
+            }
+        }
+        Commands::Restart => {
+            println!("🔄 Me-restart service jarsWAF...");
+            let res = std::process::Command::new("systemctl")
+                .args(["restart", "jarswaf"])
+                .status();
+            if res.map(|s| s.success()).unwrap_or(false) {
+                println!("✅ [OK] Service jarsWAF berhasil di-restart.");
+            } else {
+                eprintln!("❌ [ERROR] Gagal me-restart service jarsWAF.");
+            }
+        }
+        Commands::Reload => {
+            println!("♻️  Memuat ulang konfigurasi jarsWAF...");
+            let res = std::process::Command::new("systemctl")
+                .args(["restart", "jarswaf"])
+                .status();
+            if res.map(|s| s.success()).unwrap_or(false) {
+                println!("✅ [OK] Konfigurasi jarsWAF berhasil dimuat ulang.");
+            } else {
+                eprintln!("❌ [ERROR] Gagal memuat ulang service jarsWAF.");
+            }
+        }
+        Commands::Logs { lines } => {
+            println!("📜 Menampilkan live log jarsWAF (Tekan Ctrl+C untuk keluar)...");
+            let _ = std::process::Command::new("journalctl")
+                .args(["-u", "jarswaf", "-n", &lines.to_string(), "-f"])
+                .status();
+        }
+        Commands::ResetPassword => {
+            let config_file = if std::path::Path::new("/opt/jarswaf/config.toml").exists() {
+                "/opt/jarswaf/config.toml"
+            } else {
+                &cli.config
+            };
+            let new_pass = jarswaf::controller::auth::ensure_admin_credentials(config_file);
+            println!("===============================================================");
+            println!("🔐 Admin Password Berhasil Di-reset!");
+            println!("===============================================================");
+            println!("  Username      : admin");
+            println!("  Password Baru : {}", new_pass);
+            println!("===============================================================");
         }
         Commands::SetupHosts { domain, ip } => {
             let hosts_path = if cfg!(windows) {

@@ -9,6 +9,52 @@ pub struct WafManagerService {
     pub auth_token: String,
 }
 
+impl WafManagerService {
+    /// Verify the `authorization: Bearer <token>` metadata against the configured agent token.
+    /// Fail-closed: an empty configured token refuses ALL requests rather than granting
+    /// anonymous access to the control plane. Previously this returned Ok(()) on an empty
+    /// token, which combined with the `"default_token"` fallback in `controller/mod.rs`
+    /// left the gRPC management port effectively unauthenticated.
+    #[allow(clippy::result_large_err)] // tonic::Status is large by design; the error path is cold
+    fn verify_token<T>(&self, req: &Request<T>) -> Result<(), Status> {
+        if self.auth_token.is_empty() {
+            return Err(Status::unauthenticated(
+                "gRPC auth token not initialized — refusing request (fail-closed)",
+            ));
+        }
+        match req.metadata().get("authorization") {
+            Some(val) => {
+                let token_str = val
+                    .to_str()
+                    .map_err(|_| Status::unauthenticated("Invalid auth header"))?;
+                let token = token_str
+                    .strip_prefix("Bearer ")
+                    .unwrap_or(token_str)
+                    .trim();
+                // Constant-time comparison to avoid timing side-channels.
+                if constant_time_eq(token.as_bytes(), self.auth_token.as_bytes()) {
+                    Ok(())
+                } else {
+                    Err(Status::unauthenticated("Invalid gRPC authorization token"))
+                }
+            }
+            None => Err(Status::unauthenticated("Missing authorization metadata")),
+        }
+    }
+}
+
+/// Constant-time byte comparison (avoids timing side-channels for token checks).
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 #[tonic::async_trait]
 impl WafSync for WafManagerService {
     type SyncPoliciesStream =
@@ -18,6 +64,7 @@ impl WafSync for WafManagerService {
         &self,
         request: Request<PolicySyncRequest>,
     ) -> Result<Response<Self::SyncPoliciesStream>, Status> {
+        self.verify_token(&request)?;
         let req = request.into_inner();
         info!("Agent {} connected for policy sync.", req.agent_id);
 
@@ -44,6 +91,7 @@ impl WafSync for WafManagerService {
         &self,
         request: Request<tonic::Streaming<TelemetryEvent>>,
     ) -> Result<Response<TelemetryAck>, Status> {
+        self.verify_token(&request)?;
         let mut stream = request.into_inner();
 
         while let Some(event) = stream.message().await? {
@@ -61,7 +109,12 @@ pub async fn run_manager_server(
     port: u16,
     token: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let addr = format!("0.0.0.0:{}", port).parse()?;
+    // Bind loopback by default — the gRPC manager is a control plane and must not be
+    // exposed broadly. Cross-host deployments should front it with TLS/mTLS or a reverse
+    // proxy and set JARSWAF_GRPC_BIND explicitly (e.g. "0.0.0.0"). Never expose port 9000
+    // to untrusted networks with only a bearer token.
+    let bind_host = std::env::var("JARSWAF_GRPC_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let addr = format!("{}:{}", bind_host, port).parse()?;
     let service = WafManagerService { auth_token: token };
 
     info!("WAF Manager gRPC server listening on {}", addr);
