@@ -20,6 +20,10 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE   # if the controller ever binds <1024; 8080 needs none
+      # The entrypoint drops privileges via `su`, which needs SETGID+SETUID. Without these
+      # (cap_drop: ALL) the container fails at startup with "su: cannot set groups".
+      - SETGID
+      - SETUID
     volumes:
       # config.toml is intentionally read-write: the controller persists generated
       # credentials/config on first boot (ensure_admin_credentials). Logs use a named
