@@ -4,7 +4,7 @@ use regex::Regex;
 
 // SSTI Regexes
 static SSTI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(\{\{\s*[^}]+\s*\}\}|\$\{\s*[^}]+\s*\}|<%=\s*[^%]+\s*%>|\{\%\s*[^%]+\s*\%\}|\$\{.*\}|#\{.*\})"#).unwrap()
+    Regex::new(r#"(\{\{\s*[^}]+\s*\}\}|\$\{\s*[^}]+\s*\}|<%=\s*[^%]+\s*%>|\{\%\s*[^%]+\s*\%\}|\$\{[^}]+\}|#\{[^}]+\})"#).unwrap()
 });
 
 static SSTI_002_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -72,7 +72,12 @@ fn check_proto_001(req: &RequestInfo) -> bool {
 }
 
 fn matches_payload(req: &RequestInfo, regex: &Regex) -> bool {
-    regex.is_match(req.body) || regex.is_match(req.query) || regex.is_match(req.path)
+    // Enforce maximum inspection window of 128KB per field to prevent ReDoS / CPU exhaustion on huge payloads
+    const MAX_INSPECT_BYTES: usize = 131_072;
+    let b = crate::utils::safe_truncate(req.body, MAX_INSPECT_BYTES);
+    let q = crate::utils::safe_truncate(req.query, MAX_INSPECT_BYTES);
+    let p = crate::utils::safe_truncate(req.path, MAX_INSPECT_BYTES);
+    regex.is_match(b) || regex.is_match(q) || regex.is_match(p)
 }
 
 fn check_ssti_001(req: &RequestInfo) -> bool {
@@ -820,5 +825,27 @@ mod tests {
         j.insert("host".into(), "app.example.com".into());
         j.insert("content-type".into(), "application/json".into());
         assert!(!check_csrf_002(&make_req_with_headers(&j)));
+    }
+
+    #[test]
+    fn test_ssti_001_and_redos_safety() {
+        // Legitimate SSTI payloads
+        let req1 = make_req("${7*7}", "");
+        assert!(check_ssti_001(&req1));
+
+        let req2 = make_req("{{7*7}}", "");
+        assert!(check_ssti_001(&req2));
+
+        let req3 = make_req("#{7*7}", "");
+        assert!(check_ssti_001(&req3));
+
+        // Benign template-like non-eval expressions
+        let benign = make_req("normal text with {curly} braces", "");
+        assert!(!check_ssti_001(&benign));
+
+        // Large payload ReDoS resilience check (1MB string with unclosed syntax)
+        let large_unclosed = format!("${{{}", "a".repeat(1_000_000));
+        let req_large = make_req(&large_unclosed, "");
+        assert!(!check_ssti_001(&req_large));
     }
 }

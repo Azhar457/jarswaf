@@ -15,6 +15,7 @@ pub mod rule_engine;
 pub mod rules;
 pub mod tls;
 pub mod types;
+pub mod utils;
 pub mod vhost;
 pub mod wasm;
 pub mod webhook;

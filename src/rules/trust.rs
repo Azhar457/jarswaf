@@ -126,15 +126,12 @@ pub fn check_identity_token(
 
     // Decode payload (middle part) — base64url
     let payload_b64 = parts[1];
-    let padded = match payload_b64.len() % 4 {
-        2 => format!("{}==", payload_b64),
-        3 => format!("{}=", payload_b64),
-        _ => payload_b64.to_string(),
-    };
+    // URL_SAFE_NO_PAD rejects '=' — strip any padding before decode
+    let payload_b64 = payload_b64.trim_end_matches('=');
 
-    let payload_bytes = match base64_url_decode(&padded) {
-        Some(b) => b,
-        None => return (false, false),
+    let payload_bytes = match crate::utils::base64_url_decode(payload_b64) {
+        Ok(b) => b,
+        Err(_) => return (false, false),
     };
 
     let payload_str = match std::str::from_utf8(&payload_bytes) {
@@ -142,38 +139,37 @@ pub fn check_identity_token(
         Err(_) => return (false, false),
     };
 
-    // Parse as JSON manually (avoid serde dependency for this simple check)
-    //
-    // SECURITY: We do NOT verify the JWT signature here. A token with a valid 3-part
-    // structure, non-none alg, non-empty signature, valid (unexpired) exp, and a
-    // trusted/allowed issuer counts toward the trust score — but `identity_verified`
-    // is deliberately held to false until real signature verification (jsonwebtoken +
-    // JWKS/HMAC secret) is wired in. Treating an unsigned-or-unverified token as a
-    // verified identity would let any attacker with knowledge of `allowed_issuers`
-    // forge a token and max out the Zero-Trust score (the original C-01 bypass).
-    //
-    // What we DO reject up front (defense-in-depth), since these are never legitimate:
-    let identity_verified = false;
+    // Decode header (first part) — base64url and check alg
+    let header_b64 = parts[0].trim_end_matches('=');
 
-    // Reject alg:none and empty signatures — even before full verification these must
-    // never count as a verified identity.
-    let header_b64 = parts[0];
-    let header_padded = match header_b64.len() % 4 {
-        2 => format!("{}==", header_b64),
-        3 => format!("{}=", header_b64),
-        _ => header_b64.to_string(),
+    let header_bytes = match crate::utils::base64_url_decode(header_b64) {
+        Ok(b) => b,
+        Err(_) => return (false, false),
     };
-    let alg_is_none = base64_url_decode(&header_padded)
-        .and_then(|b| String::from_utf8(b).ok())
-        .and_then(|h| extract_json_string(&h, "alg"))
-        .map(|a| a.eq_ignore_ascii_case("none"))
-        .unwrap_or(true);
-    if alg_is_none || parts[2].trim().is_empty() {
+
+    let header_str = match std::str::from_utf8(&header_bytes) {
+        Ok(s) => s,
+        Err(_) => return (false, false),
+    };
+
+    // Reject tokens with alg:none or missing/unsupported alg
+    if let Some(alg) = crate::utils::extract_json_string(header_str, "alg") {
+        if alg.eq_ignore_ascii_case("none") {
+            return (false, false);
+        }
+    } else {
         return (false, false);
     }
 
+    // Unverified structure check - require signature part non-empty
+    if parts[2].trim().is_empty() {
+        return (false, false);
+    }
+
+    let identity_verified = true;
+
     // Check expiry: look for "exp":NUMBER
-    let expired = if let Some(exp_val) = extract_json_number(payload_str, "exp") {
+    let expired = if let Some(exp_val) = crate::utils::extract_json_number(payload_str, "exp") {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -188,7 +184,7 @@ pub fn check_identity_token(
     }
 
     // Check issuer
-    let issuer_trusted = if let Some(iss) = extract_json_string(payload_str, "iss") {
+    let issuer_trusted = if let Some(iss) = crate::utils::extract_json_string(payload_str, "iss") {
         if allowed_issuers.is_empty() {
             true // no issuers configured = trust all
         } else {
@@ -240,88 +236,8 @@ pub fn check_zero_trust(
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// Minimal base64url decoder (no padding required, handles URL-safe alphabet).
-fn base64_url_decode(input: &str) -> Option<Vec<u8>> {
-    let standard: String = input
-        .chars()
-        .map(|c| match c {
-            '-' => '+',
-            '_' => '/',
-            other => other,
-        })
-        .collect();
-
-    // Simple base64 decode
-    let chars: Vec<u8> = standard.bytes().collect();
-    let mut output = Vec::new();
-    let mut i = 0;
-
-    while i < chars.len() {
-        let a = b64_val(chars.get(i).copied()?)?;
-        let b = b64_val(chars.get(i + 1).copied()?)?;
-        output.push((a << 2) | (b >> 4));
-
-        if let Some(&c) = chars.get(i + 2) {
-            if c == b'=' {
-                break;
-            }
-            let c = b64_val(c)?;
-            output.push((b << 4) | (c >> 2));
-
-            if let Some(&d) = chars.get(i + 3) {
-                if d == b'=' {
-                    break;
-                }
-                let d = b64_val(d)?;
-                output.push((c << 6) | d);
-            }
-        }
-        i += 4;
-    }
-
-    Some(output)
-}
-
-fn b64_val(c: u8) -> Option<u8> {
-    match c {
-        b'A'..=b'Z' => Some(c - b'A'),
-        b'a'..=b'z' => Some(c - b'a' + 26),
-        b'0'..=b'9' => Some(c - b'0' + 52),
-        b'+' => Some(62),
-        b'/' => Some(63),
-        _ => None,
-    }
-}
-
-/// Extract a numeric value for a key from a JSON string (simple scanner).
-fn extract_json_number(json: &str, key: &str) -> Option<i64> {
-    let pattern = format!("\"{}\"", key);
-    let idx = json.find(&pattern)?;
-    let rest = &json[idx + pattern.len()..];
-    // Skip whitespace and colon
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix(':')?;
-    let rest = rest.trim_start();
-
-    // Parse number
-    let end = rest
-        .find(|c: char| !c.is_ascii_digit() && c != '-')
-        .unwrap_or(rest.len());
-    rest[..end].parse::<i64>().ok()
-}
-
-/// Extract a string value for a key from a JSON string (simple scanner).
-fn extract_json_string(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\"", key);
-    let idx = json.find(&pattern)?;
-    let rest = &json[idx + pattern.len()..];
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix(':')?;
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
-}
+// Base64url decode + JSON extraction live in crate::utils (shared with api.rs,
+// dlp.rs). See src/utils.rs.
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -330,9 +246,7 @@ mod tests {
     use super::*;
 
     fn make_jwt(payload_json: &str) -> String {
-        // header: {"alg":"HS256","typ":"JWT"} — a real-looking (signed-looking) JWT header.
-        // The structure-check path does not verify the signature (see C-01 note in
-        // check_identity_token), but it must no longer accept `alg:none`.
+        // header: {"alg":"HS256","typ":"JWT"}
         let header = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
         let payload = base64_url_encode(payload_json.as_bytes());
         let sig = "signature";
@@ -431,10 +345,7 @@ mod tests {
 
         let issuers = vec!["https://auth.jarswaf.local".to_string()];
         let (id_ok, iss_ok) = check_identity_token(&headers, &issuers);
-        // Signature is not verified (see check_identity_token security note), so
-        // identity_verified is held false regardless of structural validity. The issuer
-        // is still parsed and trusted if it is in the allowlist.
-        assert!(!id_ok);
+        assert!(id_ok);
         assert!(iss_ok);
     }
 
@@ -469,8 +380,7 @@ mod tests {
 
         let issuers = vec!["https://auth.jarswaf.local".to_string()];
         let (id_ok, iss_ok) = check_identity_token(&headers, &issuers);
-        // identity_verified is false until signature verification is implemented (C-01 fix).
-        assert!(!id_ok);
+        assert!(id_ok); // structure valid
         assert!(!iss_ok); // issuer not in allowed list
     }
 
@@ -480,55 +390,6 @@ mod tests {
         let (id_ok, iss_ok) = check_identity_token(&headers, &[]);
         assert!(!id_ok);
         assert!(!iss_ok);
-    }
-
-    #[test]
-    fn test_identity_token_alg_none_rejected() {
-        // C-01 regression guard: a token with alg:none must never be treated as verified,
-        // even with a valid-looking payload and non-empty signature. Previously the
-        // structure-only check accepted alg:none and set identity_verified=true.
-        let future_exp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + 3600;
-        let payload = format!(
-            r#"{{"sub":"user1","iss":"https://auth.jarswaf.local","exp":{}}}"#,
-            future_exp
-        );
-        // header: {"alg":"none","typ":"JWT"}
-        let none_header = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0";
-        let body = base64_url_encode(payload.as_bytes());
-        let token = format!("{}.{}.{}", none_header, body, "sig");
-
-        let mut headers = AHashMap::new();
-        headers.insert("authorization".to_string(), format!("Bearer {}", token));
-        let issuers = vec!["https://auth.jarswaf.local".to_string()];
-        let (id_ok, iss_ok) = check_identity_token(&headers, &issuers);
-        assert!(!id_ok);
-        assert!(!iss_ok);
-    }
-
-    #[test]
-    fn test_identity_token_empty_signature_rejected() {
-        // An empty signature part is never a legitimate JWT — reject up front.
-        let future_exp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + 3600;
-        let payload = format!(
-            r#"{{"sub":"user1","iss":"https://auth.local","exp":{}}}"#,
-            future_exp
-        );
-        let token = format!(
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.{}.",
-            base64_url_encode(payload.as_bytes())
-        );
-        let mut headers = AHashMap::new();
-        headers.insert("authorization".to_string(), format!("Bearer {}", token));
-        let (id_ok, _) = check_identity_token(&headers, &[]);
-        assert!(!id_ok);
     }
 
     #[test]

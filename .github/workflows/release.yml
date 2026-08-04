@@ -14,19 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.x.x
+        uses: actions/checkout@v4
 
       - name: Install Rust (Stable)
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: |
             x86_64-unknown-linux-gnu
             x86_64-unknown-linux-musl
 
       - name: Install Rust (Nightly for eBPF)
-        uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2 # nightly
+        uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
+
+      - name: Configure Rust Defaults & Targets
+        run: |
+          rustup default stable
+          rustup target add x86_64-unknown-linux-musl --toolchain stable
 
       - name: Install dependencies & bpf-linker
         run: |
@@ -38,35 +43,34 @@ jobs:
         run: cargo +nightly run --package xtask
 
       - name: Build Release Binaries (glibc)
-        run: cargo build --release --workspace
-
-      - name: Build MUSL Static Binary
         run: |
-          cargo build --release --target x86_64-unknown-linux-musl
+          cargo +stable build --release --workspace
           mkdir -p dist
           cp target/release/jarswaf dist/jarswaf-linux-amd64
           cp target/release/agent dist/jarswaf-agent-linux-amd64
           cp target/release/controller dist/jarswaf-controller-linux-amd64
+
+      - name: Build MUSL Static Binary
+        run: |
+          cargo +stable build --release --target x86_64-unknown-linux-musl --workspace
           cp target/x86_64-unknown-linux-musl/release/jarswaf dist/jarswaf-linux-amd64-musl
           cp target/x86_64-unknown-linux-musl/release/agent dist/jarswaf-agent-linux-amd64-musl
           cp target/x86_64-unknown-linux-musl/release/controller dist/jarswaf-controller-linux-amd64-musl
-          tar -czf dist/jarswaf-linux-amd64.tar.gz -C dist jarswaf-linux-amd64 agent controller
-          tar -czf jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz -C dist jarswaf-linux-amd64-musl jarswaf-agent-linux-amd64-musl jarswaf-controller-linux-amd64-musl
-          tar -czf dist/jarswaf-linux-amd64.tar.gz -C dist jarswaf-linux-amd64 agent controller
-          tar -czf jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz -C dist jarswaf-linux-amd64-musl jarswaf-agent-linux-amd64-musl jarswaf-controller-linux-amd64-musl
-          cp jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf dist/jarswaf-ebpf
-      # Emit checksums so installers can verify integrity over the network (see install.sh
-      # checksum verification). Publish one .sha256 per artifact.
-      - name: Generate Checksums
-        run: |
-          cd dist
-          sha256sum jarswaf-linux-amd64* jarswaf-agent-linux-amd64* jarswaf-controller-linux-amd64* jarswaf-ebpf > jarswaf-checksums.txt
-          # Emit per-tarball checksum for the standalone installer to fetch (<tarball>.sha256)
-          sha256sum jarswaf-linux-amd64.tar.gz > jarswaf-linux-amd64.tar.gz.sha256
-          cd ..
-          sha256sum jarswaf-*-musl.tar.gz > jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz.sha256
+          
+          # Create standardized tarball for musl (containing jarswaf, agent, controller)
+          mkdir -p dist/musl-pkg
+          cp target/x86_64-unknown-linux-musl/release/jarswaf dist/musl-pkg/jarswaf
+          cp target/x86_64-unknown-linux-musl/release/agent dist/musl-pkg/agent
+          cp target/x86_64-unknown-linux-musl/release/controller dist/musl-pkg/controller
+          tar -czf jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz -C dist/musl-pkg jarswaf agent controller
+          tar -czf jarswaf-latest-musl.tar.gz -C dist/musl-pkg jarswaf agent controller
+
+          if [ -f "jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf" ]; then
+            cp jarswaf-ebpf/target/bpfel-unknown-none/release/jarswaf-ebpf dist/jarswaf-ebpf
+          fi
+
       - name: Upload Binaries to Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.x.x
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/jarswaf-linux-amd64
@@ -77,8 +81,6 @@ jobs:
             dist/jarswaf-controller-linux-amd64-musl
             dist/jarswaf-ebpf
             jarswaf-*-musl.tar.gz
-            dist/jarswaf-linux-amd64.tar.gz.sha256
-            jarswaf-${GITHUB_REF_NAME#v}-musl.tar.gz.sha256
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           prerelease: false
