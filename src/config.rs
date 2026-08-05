@@ -601,30 +601,40 @@ pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
 }
 
 pub fn parse_size(s: &str) -> usize {
-    let s = s.trim().to_uppercase();
-    if s.ends_with("MB") {
-        s.trim_end_matches("MB")
-            .trim()
-            .parse::<usize>()
-            .unwrap_or(10)
-            * 1024
-            * 1024
-    } else if s.ends_with("KB") {
-        s.trim_end_matches("KB")
-            .trim()
-            .parse::<usize>()
-            .unwrap_or(10)
-            * 1024
-    } else if s.ends_with("GB") {
-        s.trim_end_matches("GB")
-            .trim()
-            .parse::<usize>()
-            .unwrap_or(1)
-            * 1024
-            * 1024
-            * 1024
+    let raw = s.trim();
+    if raw.is_empty() {
+        return 10 * 1024 * 1024;
+    }
+    let upper = raw.to_uppercase();
+    if upper == "0" || upper == "UNLIMITED" || upper == "NONE" || upper == "OFF" {
+        return usize::MAX;
+    }
+
+    let (num_str, multiplier) = if upper.ends_with("GB") {
+        (
+            upper.trim_end_matches("GB").trim(),
+            1024.0 * 1024.0 * 1024.0,
+        )
+    } else if upper.ends_with('G') {
+        (upper.trim_end_matches('G').trim(), 1024.0 * 1024.0 * 1024.0)
+    } else if upper.ends_with("MB") {
+        (upper.trim_end_matches("MB").trim(), 1024.0 * 1024.0)
+    } else if upper.ends_with('M') {
+        (upper.trim_end_matches('M').trim(), 1024.0 * 1024.0)
+    } else if upper.ends_with("KB") {
+        (upper.trim_end_matches("KB").trim(), 1024.0)
+    } else if upper.ends_with('K') {
+        (upper.trim_end_matches('K').trim(), 1024.0)
+    } else if upper.ends_with('B') {
+        (upper.trim_end_matches('B').trim(), 1.0)
     } else {
-        s.parse::<usize>().unwrap_or(10 * 1024 * 1024)
+        (upper.as_str(), 1024.0 * 1024.0)
+    };
+
+    if let Ok(val) = num_str.parse::<f64>() {
+        (val * multiplier) as usize
+    } else {
+        10 * 1024 * 1024
     }
 }
 
