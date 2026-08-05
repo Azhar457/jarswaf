@@ -48,6 +48,9 @@ pub struct JarsWafCtx {
     pub vhost_name: Option<String>,
     pub body_buffer: Vec<u8>,
     pub body_limit: usize,
+    pub inspected_bytes: usize,
+    pub inspect_body_limit: usize,
+    pub inspection_completed: bool,
     pub is_blocked: bool,
     pub security_headers: Option<crate::config::SecurityHeadersConfig>,
     pub dlp_config: Option<crate::config::DlpConfig>,
@@ -723,6 +726,9 @@ impl ProxyHttp for JarsWafProxy {
             vhost_name: None,
             body_buffer: Vec::new(),
             body_limit: 1024 * 1024, // default 1MB
+            inspected_bytes: 0,
+            inspect_body_limit: 1024 * 1024, // 1MB streaming inspection cutoff
+            inspection_completed: false,
             is_blocked: false,
             security_headers: None,
             dlp_config: None,
@@ -2081,7 +2087,10 @@ impl ProxyHttp for JarsWafProxy {
         }
 
         if let Some(chunk) = body {
-            if ctx.body_buffer.len() + chunk.len() > ctx.body_limit {
+            ctx.inspected_bytes += chunk.len();
+
+            // 1. Enforce Hard Max Body Limit (if body_limit is not unlimited/usize::MAX)
+            if ctx.body_limit < usize::MAX && ctx.inspected_bytes > ctx.body_limit {
                 ctx.is_blocked = true;
                 if let Some(ip) = ctx.client_ip {
                     self.record_attack_and_ban(ip);
@@ -2097,8 +2106,8 @@ impl ProxyHttp for JarsWafProxy {
                     action: "BLOCK".to_string(),
                     rule_id: "WAF-BODY-LIMIT".to_string(),
                     reason: format!(
-                        "Request body size limit exceeded (Max: {} bytes)",
-                        ctx.body_limit
+                        "Request body size limit exceeded (Max: {} bytes, current: {} bytes)",
+                        ctx.body_limit, ctx.inspected_bytes
                     ),
                 };
                 let _ = self.log_tx.try_send(entry);
@@ -2110,60 +2119,91 @@ impl ProxyHttp for JarsWafProxy {
                 ));
             }
 
-            ctx.body_buffer.extend_from_slice(chunk);
+            // 2. Stream Inspection Cutoff (Zero-Copy Passthrough for >1.5GB File Uploads)
+            // Accumulate chunks ONLY up to `inspect_body_limit` (default 1MB).
+            if !ctx.inspection_completed {
+                let remaining = ctx.inspect_body_limit.saturating_sub(ctx.body_buffer.len());
+                if remaining > 0 {
+                    let to_take = chunk.len().min(remaining);
+                    ctx.body_buffer.extend_from_slice(&chunk[..to_take]);
+                }
+            }
         }
 
-        if end_of_stream && !ctx.body_buffer.is_empty() {
+        // Trigger WAF inspection as soon as we reach inspect_body_limit OR end_of_stream
+        if !ctx.inspection_completed
+            && (ctx.body_buffer.len() >= ctx.inspect_body_limit || end_of_stream)
+        {
+            ctx.inspection_completed = true;
             let config = GLOBAL_ENGINE.load().config.clone();
 
-            // Skip WAF body inspection if globally disabled
-            if !config.global.waf_enabled {
-                ctx.body_buffer.clear();
-                ctx.body_buffer.shrink_to_fit();
-                return Ok(());
-            }
+            if config.global.waf_enabled && !ctx.body_buffer.is_empty() {
+                let body_str = String::from_utf8_lossy(&ctx.body_buffer);
 
-            let body_str = String::from_utf8_lossy(&ctx.body_buffer);
+                let (path, query, method, host, mut headers_map) = {
+                    let req_header = session.req_header();
+                    let path = req_header.uri.path().to_string();
+                    let query = req_header.uri.query().unwrap_or("").to_string();
+                    let method = req_header.method.as_str().to_string();
+                    let host = req_header
+                        .headers
+                        .get("host")
+                        .and_then(|h| h.to_str().ok())
+                        .map(|s| s.to_string());
 
-            // Extract req_header fields early to avoid hold-borrow of session
-            let (path, query, method, host, mut headers_map) = {
-                let req_header = session.req_header();
-                let path = req_header.uri.path().to_string();
-                let query = req_header.uri.query().unwrap_or("").to_string();
-                let method = req_header.method.as_str().to_string();
-                let host = req_header
-                    .headers
-                    .get("host")
-                    .and_then(|h| h.to_str().ok())
-                    .map(|s| s.to_string());
-
-                let mut headers_map =
-                    ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
-                for (name, value) in req_header.headers.iter() {
-                    if let Ok(val_str) = value.to_str() {
-                        headers_map.insert(name.to_string(), val_str.to_string());
+                    let mut headers_map =
+                        ahash::AHashMap::with_capacity_and_hasher(64, Default::default());
+                    for (name, value) in req_header.headers.iter() {
+                        if let Ok(val_str) = value.to_str() {
+                            headers_map.insert(name.to_string(), val_str.to_string());
+                        }
                     }
+                    (path, query, method, host, headers_map)
+                };
+
+                if let Some(peer_ip) = ctx.peer_ip {
+                    let mut sanitized = headers_map.clone();
+                    sanitize_proxy_headers(&mut sanitized, peer_ip, &config);
+                    headers_map = sanitized;
                 }
-                (path, query, method, host, headers_map)
-            };
 
-            // Sanitize spoofable proxy headers for body inspection too.
-            // Trusted-proxy check MUST use the real TCP peer (never spoofable),
-            // not ctx.client_ip which may be a header-derived visitor IP.
-            if let Some(peer_ip) = ctx.peer_ip {
-                let mut sanitized = headers_map.clone();
-                sanitize_proxy_headers(&mut sanitized, peer_ip, &config);
-                headers_map = sanitized;
-            }
-
-            if let Some((_, vhost_cfg)) = crate::vhost::match_vhost(host.as_deref(), &config) {
-                // 2.7. API Security (GraphQL)
-                if path.contains("graphql")
-                    || (ctx.body_buffer.starts_with(b"{") && body_str.contains("\"query\""))
-                {
-                    if let Err(reason) =
-                        crate::rules::api_security::check_graphql_depth(&ctx.body_buffer, 5)
+                if let Some((_, vhost_cfg)) = crate::vhost::match_vhost(host.as_deref(), &config) {
+                    // API Security (GraphQL)
+                    if path.contains("graphql")
+                        || (ctx.body_buffer.starts_with(b"{") && body_str.contains("\"query\""))
                     {
+                        if let Err(reason) =
+                            crate::rules::api_security::check_graphql_depth(&ctx.body_buffer, 5)
+                        {
+                            let client_ip_str = ctx
+                                .client_ip
+                                .map_or("Unknown".to_string(), |ip| ip.to_string());
+                            let entry = crate::logging::WafLogEntry {
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                client_ip: client_ip_str.clone(),
+                                method: session.req_header().method.as_str().to_string(),
+                                path: session.req_header().uri.path().to_string(),
+                                action: "BLOCK".to_string(),
+                                rule_id: "API-GQL-001".to_string(),
+                                reason: reason.to_string(),
+                            };
+                            let _ = self.log_tx.try_send(entry);
+                            return Err(pingora::Error::create(
+                                pingora::ErrorType::HTTPStatus(400),
+                                pingora::ErrorSource::Downstream,
+                                Some("Bad Request".into()),
+                                None,
+                            ));
+                        }
+                    }
+
+                    let rule_engine = GLOBAL_ENGINE.load().rule_engine.clone();
+
+                    if crate::proxy_engine::WAF_SEMAPHORE.try_acquire().is_err() {
+                        tracing::warn!(
+                            "WAF semaphore full — rejecting body inspection (fail-closed)"
+                        );
+                        ctx.is_blocked = true;
                         let client_ip_str = ctx
                             .client_ip
                             .map_or("Unknown".to_string(), |ip| ip.to_string());
@@ -2173,101 +2213,59 @@ impl ProxyHttp for JarsWafProxy {
                             method: session.req_header().method.as_str().to_string(),
                             path: session.req_header().uri.path().to_string(),
                             action: "BLOCK".to_string(),
-                            rule_id: "API-GQL-001".to_string(),
-                            reason: reason.to_string(),
+                            rule_id: "WAF-CAPACITY".to_string(),
+                            reason: "WAF body inspection capacity exhausted — rejected fail-closed"
+                                .to_string(),
                         };
                         let _ = self.log_tx.try_send(entry);
                         return Err(pingora::Error::create(
-                            pingora::ErrorType::HTTPStatus(400),
+                            pingora::ErrorType::HTTPStatus(503),
                             pingora::ErrorSource::Downstream,
-                            Some("Bad Request".into()),
+                            Some("Service Unavailable".into()),
+                            None,
+                        ));
+                    }
+
+                    if let Some((rule_id, reason)) = rule_engine.check_request(
+                        &path,
+                        &query,
+                        &headers_map,
+                        &body_str,
+                        ctx.client_ip,
+                        &method,
+                        &vhost_cfg.rules,
+                    ) {
+                        ctx.is_blocked = true;
+                        if let Some(ip) = ctx.client_ip {
+                            crate::SUSPICIOUS_IPS.insert(ip, std::time::Instant::now());
+                            self.record_attack_and_ban(ip);
+                        }
+                        let client_ip_str = ctx
+                            .client_ip
+                            .map_or("Unknown".to_string(), |ip| ip.to_string());
+                        let entry = crate::logging::WafLogEntry {
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                            client_ip: client_ip_str,
+                            method: method.clone(),
+                            path: path.clone(),
+                            action: "BLOCK".to_string(),
+                            rule_id,
+                            reason,
+                        };
+                        let _ = self.log_tx.try_send(entry);
+                        return Err(pingora::Error::create(
+                            pingora::ErrorType::HTTPStatus(403),
+                            pingora::ErrorSource::Downstream,
+                            Some("Forbidden".into()),
                             None,
                         ));
                     }
                 }
-
-                let rule_engine = GLOBAL_ENGINE.load().rule_engine.clone();
-
-                // Acquire semaphore — FAIL-CLOSED: if the semaphore is
-                // saturated, reject with 503 rather than letting the body
-                // pass uninspected (body is where SQLi/XSS/webshells live).
-                if crate::proxy_engine::WAF_SEMAPHORE.try_acquire().is_err() {
-                    tracing::warn!("WAF semaphore full — rejecting body inspection (fail-closed)");
-                    ctx.is_blocked = true;
-                    let client_ip_str = ctx
-                        .client_ip
-                        .map_or("Unknown".to_string(), |ip| ip.to_string());
-                    let entry = crate::logging::WafLogEntry {
-                        timestamp: chrono::Utc::now().to_rfc3339(),
-                        client_ip: client_ip_str.clone(),
-                        method: session.req_header().method.as_str().to_string(),
-                        path: session.req_header().uri.path().to_string(),
-                        action: "BLOCK".to_string(),
-                        rule_id: "WAF-CAPACITY".to_string(),
-                        reason: "WAF body inspection capacity exhausted — rejected fail-closed"
-                            .to_string(),
-                    };
-                    let _ = self.log_tx.try_send(entry);
-                    return Err(pingora::Error::create(
-                        pingora::ErrorType::HTTPStatus(503),
-                        pingora::ErrorSource::Downstream,
-                        Some("Service Unavailable".into()),
-                        None,
-                    ));
-                }
-
-                if let Some((rule_id, reason)) = rule_engine.check_request(
-                    &path,
-                    &query,
-                    &headers_map,
-                    &body_str,
-                    ctx.client_ip,
-                    &method,
-                    &vhost_cfg.rules,
-                ) {
-                    ctx.is_blocked = true;
-                    if let Some(ip) = ctx.client_ip {
-                        crate::SUSPICIOUS_IPS.insert(ip, std::time::Instant::now());
-                        self.record_attack_and_ban(ip);
-                    }
-                    let client_ip_str = ctx
-                        .client_ip
-                        .map_or("Unknown".to_string(), |ip| ip.to_string());
-                    let entry = crate::logging::WafLogEntry {
-                        timestamp: chrono::Utc::now().to_rfc3339(),
-                        client_ip: client_ip_str,
-                        method: method.clone(),
-                        path: path.clone(),
-                        action: "BLOCK".to_string(),
-                        rule_id,
-                        reason,
-                    };
-                    let _ = self.log_tx.try_send(entry);
-                    return Err(pingora::Error::create(
-                        pingora::ErrorType::HTTPStatus(403),
-                        pingora::ErrorSource::Downstream,
-                        Some("Forbidden".into()),
-                        None,
-                    ));
-                }
             }
+
+            // Immediately clear the buffer RAM so remaining 1.5GB streams zero-copy!
             ctx.body_buffer.clear();
             ctx.body_buffer.shrink_to_fit();
-
-            // Log DEEP-PASS — all body/rule engine checks passed
-            let client_ip_str = ctx
-                .client_ip
-                .map_or("Unknown".to_string(), |ip| ip.to_string());
-            let pass_entry = crate::logging::WafLogEntry {
-                timestamp: chrono::Utc::now().to_rfc3339(),
-                client_ip: client_ip_str,
-                method: method.clone(),
-                path: path.clone(),
-                action: "PASS".to_string(),
-                rule_id: "WAF-BODY-PASS".to_string(),
-                reason: "Body-level deep inspection: SQLi/XSS/LFI parsed, AST clean, GraphQL depth OK, DLP clean".to_string(),
-            };
-            let _ = self.log_tx.try_send(pass_entry);
         }
 
         Ok(())
