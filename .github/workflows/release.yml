@@ -95,3 +95,11 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post-Build Cleanup (Disk Space Optimization)
+        if: always()
+        run: |
+          echo "🧹 Cleaning up build artifacts..."
+          cargo clean
+          rm -rf dist/
+
