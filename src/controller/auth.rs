@@ -82,11 +82,26 @@ pub fn is_valid_session(store: &std::collections::HashMap<String, i64>, candidat
 /// Ensure an admin password exists on startup.
 /// If no password is defined, generate a 20-character random password, save hash to config, and print console banner.
 pub fn ensure_admin_credentials(config_path: &str) -> String {
+    use std::fs::OpenOptions;
+    use std::io::Write as _;
+    use std::io::IsTerminal as _;
+
     let mut config = config::load_config(config_path).unwrap_or_default();
 
     if let Some(ref token) = config.global.admin_token {
         if !token.trim().is_empty() {
-            return token.clone();
+            // Check if the token is already hashed
+            if token.starts_with("$sha256$") {
+                return token.clone();
+            } else {
+                // The token is plaintext! Let's hash it and save it back to config!
+                let hashed = hash_password(token);
+                config.global.admin_token = Some(hashed.clone());
+                config.global.must_change_password = Some(true);
+                let _ = config::save_config(config_path, &config);
+                info!("Automatically hashed plaintext admin_token in config file on boot.");
+                return hashed;
+            }
         }
     }
 
@@ -101,20 +116,63 @@ pub fn ensure_admin_credentials(config_path: &str) -> String {
     config.global.must_change_password = Some(true);
     let _ = config::save_config(config_path, &config);
 
-    println!(
-        "\n===============================================================\n\
-         🛡️  jarsWAF CONTROLLER INITIALIZED (FIRST BOOT)\n\
-         ===============================================================\n\
-           Dashboard URL:   http://0.0.0.0:9443 / http://localhost:9443 (or :8080)\n\
-           Admin Username:  admin\n\
-           Admin Password:  {}\n\
-         ===============================================================\n\
-           PLEASE LOG IN AND CHANGE YOUR PASSWORD IMMEDIATELY.\n\
-         ===============================================================\n",
-        random_password
-    );
+    // Security: Check if we are running as a systemd service or if stdout is not a TTY.
+    // In those cases, printing the plaintext password to stdout would leak it into journald/syslog.
+    // Write it to a secure onboarding file instead, or print the banner if running in a terminal.
+    let is_systemd = std::env::var("INVOCATION_ID").is_ok();
+    let is_tty = std::io::stdout().is_terminal();
 
-    random_password
+    if is_systemd || !is_tty {
+        // Write to a secure file in the same directory as config
+        let parent_dir = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let credential_file = parent_dir.join("admin_onboarding_credential");
+
+        // Write with 0600 permissions using OpenOptions on Unix
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+
+        if let Ok(mut file) = options.open(&credential_file) {
+            let _ = writeln!(file, "{}", random_password);
+            warn!(
+                "\n===============================================================\n\
+                 🛡️  jarsWAF SECURITY WARNING: NON-TTY / SYSTEMD ENVIRONMENT DETECTED\n\
+                 ===============================================================\n\
+                   Generated onboarding password has been written to a secure file:\n\
+                   {}\n\
+                   Please read this file, log in, and DELETE the file immediately.\n\
+                 ===============================================================\n",
+                credential_file.display()
+            );
+        } else {
+            // Fallback to stderr if writing to file failed (e.g. read-only filesystem)
+            eprintln!(
+                "Warning: Generated onboarding password (failed to write to file): {}",
+                random_password
+            );
+        }
+    } else {
+        println!(
+            "\n===============================================================\n\
+             🛡️  jarsWAF CONTROLLER INITIALIZED (FIRST BOOT)\n\
+             ===============================================================\n\
+               Dashboard URL:   http://0.0.0.0:9443 / http://localhost:9443 (or :8080)\n\
+               Admin Username:  admin\n\
+               Admin Password:  {}\n\
+             ===============================================================\n\
+               PLEASE LOG IN AND CHANGE YOUR PASSWORD IMMEDIATELY.\n\
+             ===============================================================\n",
+            random_password
+        );
+    }
+
+    config.global.admin_token.unwrap()
 }
 
 #[derive(Debug, Deserialize)]
