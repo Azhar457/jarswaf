@@ -221,12 +221,12 @@ while true; do
         rm -f "/etc/systemd/system/jarswaf.service"
         systemctl daemon-reload 2>/dev/null || true
 
-        pkill -9 -f "target/debug/agent" 2>/dev/null || true
-        pkill -9 -f "target/release/agent" 2>/dev/null || true
-        pkill -9 -f "target/debug/controller" 2>/dev/null || true
-        pkill -9 -f "target/release/controller" 2>/dev/null || true
-        pkill -9 -f "/opt/jarswaf/controller" 2>/dev/null || true
-        pkill -9 -f "/opt/jarswaf/agent" 2>/dev/null || true
+        pkill -9 -f "target/debug/[a]gent" 2>/dev/null || true
+        pkill -9 -f "target/release/[a]gent" 2>/dev/null || true
+        pkill -9 -f "target/debug/[c]ontroller" 2>/dev/null || true
+        pkill -9 -f "target/release/[c]ontroller" 2>/dev/null || true
+        pkill -9 -f "/opt/jarswaf/[c]ontroller" 2>/dev/null || true
+        pkill -9 -f "/opt/jarswaf/[a]gent" 2>/dev/null || true
 
         echo -e "${CYAN}🗑️  Menghapus biner & direktori instalasi...${NC}"
         rm -f "$CLI_LINK"
@@ -510,8 +510,8 @@ chown -R jarswaf:jarswaf "${INSTALL_DIR}" 2>/dev/null || true
 
 # Stop any existing service and kill stale processes before restart
 systemctl stop jarswaf 2>/dev/null || true
-pkill -9 -f "${INSTALL_DIR}/controller" 2>/dev/null || true
-pkill -9 -f "${INSTALL_DIR}/agent" 2>/dev/null || true
+pkill -9 -f "${INSTALL_DIR}/[c]ontroller" 2>/dev/null || true
+pkill -9 -f "${INSTALL_DIR}/[a]gent" 2>/dev/null || true
 sleep 1
 
 case "$MODE" in
