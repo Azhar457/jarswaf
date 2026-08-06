@@ -97,7 +97,12 @@ async fn main() {
         .with_env_filter("info")
         .init();
 
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // Fallback to system-wide config if default "config.toml" is requested and the system file exists
+    if cli.config == "config.toml" && std::path::Path::new("/opt/jarswaf/config.toml").exists() {
+        cli.config = "/opt/jarswaf/config.toml".to_string();
+    }
 
     let cfg = jarswaf::config::load_config(&cli.config).unwrap_or_else(|e| {
         eprintln!("Error loading config {}: {}", cli.config, e);
