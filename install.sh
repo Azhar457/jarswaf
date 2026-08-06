@@ -428,32 +428,44 @@ if [ ! -f "${INSTALL_DIR}/config.toml" ]; then
 certificates = []
 allowlists = []
 blacklists = []
+api_schemas = []
 
 [global]
-mode = "${MODE}"
-port_http = 80
-port_https = 443
+port_http = 8000
+port_https = 8443
 max_body_size = 10485760
 default_rate_limit = 600
-log_dir = "/opt/jarswaf/logs"
-log_level = "info"
+log_dir = "./logs"
+log_level = "verbose"
+mode = "${MODE}"
+grpc_token = "f6c4f1e0f9324b80b3ddd653a943e057"
 admin_token = "${GENERATED_PASSWORD}"
-must_change_password = true
 waf_enabled = true
 webhooks = []
-metrics_push_interval_secs = 0
+metrics_push_interval_secs = 60
+scoring_mode = "immediate"
+anomaly_threshold = 5
+ast_learning_enabled = false
 
 [tls]
 mode = "disabled"
-cert_dir = "/opt/jarswaf/certs"
+cert_dir = "./certs"
 
 [logging]
 mode = "file"
-log_path = "/opt/jarswaf/logs/jarswaf.log"
+log_path = "./logs/jarswaf.log"
 max_log_size_mb = 50
 max_log_files = 5
-blocklist_path = "/opt/jarswaf/blocklist.json"
-db_path = "/opt/jarswaf/logs/jarswaf.db"
+push_interval_secs = 300
+push_batch_size = 100
+blocklist_path = "./blocklist.json"
+db_path = "./logs/jarswaf.db"
+
+[components]
+dashboard = false
+clickhouse = false
+service_discovery = false
+geoip = false
 
 [[vhosts]]
 name = "default"
@@ -462,15 +474,26 @@ is_default = true
 backend = "http://localhost:3000"
 rules = ["SQLI-*", "XSS-*", "LFI-*", "BOT-*"]
 TOML
+    else
+        # We successfully downloaded the template. Replace the placeholder token with the generated password.
+        sed -i -E 's/^\s*admin_token\s*=.*/admin_token = "'"${GENERATED_PASSWORD}"'"/' "${INSTALL_DIR}/config.toml"
+        # Set must_change_password to true
+        if ! grep -q "must_change_password" "${INSTALL_DIR}/config.toml"; then
+            echo "must_change_password = true" >> "${INSTALL_DIR}/config.toml"
+        else
+            sed -i -E 's/^\s*must_change_password\s*=.*/must_change_password = true/' "${INSTALL_DIR}/config.toml"
+        fi
+    fi
 else
+    # Config already exists (Upgrade or reconfigure)
     EXISTING_TOKEN=$(grep -E '^\s*admin_token\s*=' "${INSTALL_DIR}/config.toml" | cut -d'"' -f2 || true)
     if [ -n "$EXISTING_TOKEN" ]; then
         GENERATED_PASSWORD="$EXISTING_TOKEN"
     else
+        # No token in existing config, write the generated one
         echo "admin_token = \"${GENERATED_PASSWORD}\"" >> "${INSTALL_DIR}/config.toml"
         echo "must_change_password = true" >> "${INSTALL_DIR}/config.toml"
     fi
-fi
 fi
 
 # ── Create Systemd Service ───────────────────────────────────────
