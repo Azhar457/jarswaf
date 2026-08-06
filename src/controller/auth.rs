@@ -83,8 +83,8 @@ pub fn is_valid_session(store: &std::collections::HashMap<String, i64>, candidat
 /// If no password is defined, generate a 20-character random password, save hash to config, and print console banner.
 pub fn ensure_admin_credentials(config_path: &str) -> String {
     use std::fs::OpenOptions;
-    use std::io::Write as _;
     use std::io::IsTerminal as _;
+    use std::io::Write as _;
 
     let mut config = config::load_config(config_path).unwrap_or_default();
 
