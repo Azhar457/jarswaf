@@ -38,14 +38,7 @@ pub async fn start_blocklist_sync(
                             }
                             // Save to local JSON file as backup
                             logging::save_blocklist_to_file(&blocklist_file_path, &new_blocklist);
-                            blocklist.clear();
-                            for ip in &new_blocklist {
-                                blocklist.insert(
-                                    *ip,
-                                    std::time::Instant::now()
-                                        + std::time::Duration::from_secs(31536000),
-                                ); // Default 1 year for reputation sync
-                            }
+                            update_blocklist_delta(&blocklist, &new_blocklist);
                             // Enforce max entries to cap memory usage
                             if blocklist.len() > proxy_engine::BLOCKLIST_MAX_ENTRIES {
                                 proxy_engine::trim_dashmap(
@@ -102,27 +95,30 @@ pub async fn start_blocklist_sync(
 
             if let Ok(Ok(ips)) = res {
                 logging::save_blocklist_to_file(&blocklist_file_path_clone, &ips);
-                blocklist_clone.clear();
-                for ip in &ips {
-                    blocklist_clone.insert(
-                        *ip,
-                        std::time::Instant::now() + std::time::Duration::from_secs(31536000),
-                    );
-                }
+                update_blocklist_delta(&blocklist_clone, &ips);
             }
         } else {
             // Standalone File/Remote mode: Load from local JSON file
             let loaded = logging::load_blocklist_from_file(&blocklist_file_path);
-            blocklist.clear();
-            for ip in &loaded {
-                blocklist.insert(
-                    *ip,
-                    std::time::Instant::now() + std::time::Duration::from_secs(31536000),
-                );
-            }
+            update_blocklist_delta(&blocklist, &loaded);
         }
 
         let sleep_secs = if controller_url.is_some() { 10 } else { 60 };
         tokio::time::sleep(tokio::time::Duration::from_secs(sleep_secs)).await;
+    }
+}
+
+fn update_blocklist_delta(
+    blocklist: &dashmap::DashMap<std::net::IpAddr, std::time::Instant>,
+    new_ips: &std::collections::HashSet<std::net::IpAddr>,
+) {
+    let now = std::time::Instant::now();
+    // 1. Clean up naturally expired entries
+    blocklist.retain(|_, expiry| *expiry > now);
+
+    // 2. Refresh active IPs or insert new ones with a 1-hour lease time
+    let expiry = now + std::time::Duration::from_secs(3600);
+    for ip in new_ips {
+        blocklist.insert(*ip, expiry);
     }
 }

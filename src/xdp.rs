@@ -117,6 +117,66 @@ impl XdpManager {
         }
     }
 
+    pub fn block_ips(&mut self, _ips: &[Ipv4Addr]) -> Result<(), String> {
+        #[cfg(target_os = "linux")]
+        {
+            if _ips.is_empty() {
+                return Ok(());
+            }
+            let bpf = match self.bpf.as_mut() {
+                Some(b) => b,
+                None => return Ok(()),
+            };
+            let mut blocklist: HashMap<_, u32, u8> = HashMap::try_from(
+                bpf.map_mut("BLOCKLIST")
+                    .ok_or_else(|| "eBPF map 'BLOCKLIST' not found".to_string())?,
+            )
+            .map_err(|e| format!("{}", e))?;
+
+            for ip in _ips {
+                let ip_u32 = u32::from(*ip).to_be();
+                let _ = blocklist.insert(ip_u32, 1, 0);
+            }
+            info!("Successfully batch blocked {} IPs in XDP map", _ips.len());
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(())
+        }
+    }
+
+    pub fn unblock_ips(&mut self, _ips: &[Ipv4Addr]) -> Result<(), String> {
+        #[cfg(target_os = "linux")]
+        {
+            if _ips.is_empty() {
+                return Ok(());
+            }
+            let bpf = match self.bpf.as_mut() {
+                Some(b) => b,
+                None => return Ok(()),
+            };
+            let mut blocklist: HashMap<_, u32, u8> = HashMap::try_from(
+                bpf.map_mut("BLOCKLIST")
+                    .ok_or_else(|| "eBPF map 'BLOCKLIST' not found".to_string())?,
+            )
+            .map_err(|e| format!("{}", e))?;
+
+            for ip in _ips {
+                let ip_u32 = u32::from(*ip).to_be();
+                let _ = blocklist.remove(&ip_u32);
+            }
+            info!("Successfully batch unblocked {} IPs in XDP map", _ips.len());
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(())
+        }
+    }
+
     pub fn block_ip(&mut self, _ip: Ipv4Addr) -> Result<(), String> {
         #[cfg(target_os = "linux")]
         {

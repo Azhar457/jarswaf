@@ -73,7 +73,7 @@ pub async fn start_config_sync_websocket(
                                                         match action {
                                                             "block" => { blocklist_ref.insert(ip, std::time::Instant::now() + std::time::Duration::from_secs(31536000)); info!("Real-time block: {ip} added via Controller push"); }
                                                             "unblock" => { blocklist_ref.remove(&ip); info!("Real-time unblock: {ip} removed via Controller push"); }
-                                                            "sync" => { blocklist_ref.clear(); info!("Blocklist synced (cleared for full reload)"); }
+                                                            "sync" => { info!("Full blocklist sync requested. Delegating to background Delta Sync poller."); }
                                                             _ => {}
                                                         }
                                                     }
@@ -83,10 +83,13 @@ pub async fn start_config_sync_websocket(
                                         }
                                     }
                                     // Fallback: try to parse as Config for backwards compat
-                                    if let Ok(new_cfg) = serde_json::from_str::<config::Config>(&text) {
-                                        if let Ok(mut lock) = config_arc.write() {
+                                    if let Ok(mut new_cfg) = serde_json::from_str::<config::Config>(&text) {
+                                        new_cfg.compile_dlp_patterns();
+                                        if let Err(val_err) = new_cfg.validate() {
+                                            error!("Refusing to reload invalid configuration pushed via WebSocket: {}", val_err);
+                                        } else if let Ok(mut lock) = config_arc.write() {
                                             *lock = new_cfg;
-                                            info!("Dynamic configuration updated via Controller WebSocket push");
+                                            info!("Dynamic configuration updated and validated via Controller WebSocket push");
                                         }
                                     }
                                 }
@@ -155,7 +158,8 @@ async fn run_config_sync_long_poll(
     match req.send().await {
         Ok(res) => {
             if res.status() == reqwest::StatusCode::OK {
-                if let Ok(new_cfg) = res.json::<config::Config>().await {
+                if let Ok(mut new_cfg) = res.json::<config::Config>().await {
+                    new_cfg.compile_dlp_patterns();
                     if let Ok(mut lock) = config_arc.write() {
                         *lock = new_cfg;
                         info!("Dynamic configuration updated via Controller HTTP Long-polling");

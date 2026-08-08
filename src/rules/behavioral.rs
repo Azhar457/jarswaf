@@ -6,7 +6,6 @@
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub struct BehavioralAnalyzer {
@@ -14,8 +13,6 @@ pub struct BehavioralAnalyzer {
     endpoint_hits: DashMap<String, Vec<(Instant, IpAddr)>>,
     // IP -> list of (timestamp, User-Agent)
     ip_ua_history: DashMap<IpAddr, Vec<(Instant, String)>>,
-    // Global request counter for periodic cleanup
-    counter: AtomicUsize,
 }
 
 impl Default for BehavioralAnalyzer {
@@ -29,26 +26,30 @@ impl BehavioralAnalyzer {
         Self {
             endpoint_hits: DashMap::new(),
             ip_ua_history: DashMap::new(),
-            counter: AtomicUsize::new(0),
         }
     }
 
     /// Record a hit to an endpoint and check for 9Proxy IP rotation (BHV-001)
     /// Triggers if >50 unique IPs hit the same sensitive endpoint within 60 seconds.
     pub fn record_and_check_ip_rotation(&self, endpoint: &str, ip: IpAddr) -> bool {
-        self.maybe_cleanup();
         let now = Instant::now();
         let window = Duration::from_secs(60);
 
-        let mut entry = self.endpoint_hits.entry(endpoint.to_string()).or_default();
-        let hits = entry.value_mut();
+        // Scope the lock to release it as fast as possible
+        let ips_to_check = {
+            let mut entry = self.endpoint_hits.entry(endpoint.to_string()).or_default();
+            let hits = entry.value_mut();
 
-        // Retain only entries within sliding window
-        hits.retain(|(ts, _)| now.duration_since(*ts) < window);
-        hits.push((now, ip));
+            // Retain only entries within sliding window
+            hits.retain(|(ts, _)| now.duration_since(*ts) < window);
+            hits.push((now, ip));
 
-        // Count unique IPs in window
-        let unique_ips: std::collections::HashSet<_> = hits.iter().map(|(_, ip)| *ip).collect();
+            // Fast copy of IP addresses to avoid holding write locks during HashSet operations
+            hits.iter().map(|(_, ip)| *ip).collect::<Vec<_>>()
+        };
+
+        // Count unique IPs in window outside the write lock
+        let unique_ips: std::collections::HashSet<_> = ips_to_check.into_iter().collect();
         unique_ips.len() >= 50
     }
 
@@ -58,27 +59,46 @@ impl BehavioralAnalyzer {
         let now = Instant::now();
         let window = Duration::from_secs(120);
 
-        let mut entry = self.ip_ua_history.entry(ip).or_default();
-        let uas = entry.value_mut();
+        // Scope the lock to release it as fast as possible
+        let uas_to_check = {
+            let mut entry = self.ip_ua_history.entry(ip).or_default();
+            let uas = entry.value_mut();
 
-        uas.retain(|(ts, _)| now.duration_since(*ts) < window);
-        uas.push((now, user_agent.to_string()));
+            uas.retain(|(ts, _)| now.duration_since(*ts) < window);
+            uas.push((now, user_agent.to_string()));
 
-        let unique_uas: std::collections::HashSet<_> = uas.iter().map(|(_, ua)| ua).collect();
+            // Fast copy of User Agents
+            uas.iter().map(|(_, ua)| ua.clone()).collect::<Vec<_>>()
+        };
+
+        // Count unique User Agents outside the write lock
+        let unique_uas: std::collections::HashSet<_> = uas_to_check.into_iter().collect();
         unique_uas.len() >= 10
     }
 
-    /// Periodic cleanup of stale sliding windows
-    fn maybe_cleanup(&self) {
-        let count = self.counter.fetch_add(1, Ordering::Relaxed);
-        if count.is_multiple_of(1000) {
+    /// ASYNC DAEMON: Garbage Collector that runs in the background.
+    /// Safely clears expired entries and removes empty vectors from maps to save memory.
+    pub async fn start_background_garbage_collector(&self) {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
             let now = Instant::now();
-            let window = Duration::from_secs(120);
+            let ip_window = Duration::from_secs(60);
+            let ua_window = Duration::from_secs(120);
 
-            self.endpoint_hits
-                .retain(|_, hits| hits.iter().any(|(ts, _)| now.duration_since(*ts) < window));
-            self.ip_ua_history
-                .retain(|_, uas| uas.iter().any(|(ts, _)| now.duration_since(*ts) < window));
+            // Clean endpoint_hits
+            self.endpoint_hits.retain(|_, hits| {
+                hits.retain(|(ts, _)| now.duration_since(*ts) < ip_window);
+                !hits.is_empty()
+            });
+
+            // Clean ip_ua_history
+            self.ip_ua_history.retain(|_, uas| {
+                uas.retain(|(ts, _)| now.duration_since(*ts) < ua_window);
+                !uas.is_empty()
+            });
+
+            tracing::debug!("Behavioral Analyzer Garbage Collection completed");
         }
     }
 }
