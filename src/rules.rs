@@ -177,16 +177,16 @@ pub fn record_block(ip: IpAddr) -> bool {
             rec.count,
         );
 
-        // On the first escalation (tier 0 → 1) also add to XDP
+        // On the first escalation (tier 0 → 1) also add to kernel (Layer 1) blocklist
         if tier == 0 {
             let ip_clone = ip;
             let duration_clone = duration;
             tokio::spawn(async move {
-                let mut xdp = crate::XDP_MANAGER.lock().await;
+                if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+                    kernel.maps.queue_block(ip_clone).await;
+                }
                 match ip_clone {
                     IpAddr::V4(v4) => {
-                        let _ = xdp.block_ip(v4);
-
                         // Broadcast via Gossip
                         let gossip_lock = crate::GOSSIP_MANAGER.lock().await;
                         if let Some(gossip) = gossip_lock.as_ref() {
@@ -199,10 +199,12 @@ pub fn record_block(ip: IpAddr) -> bool {
                             gossip.broadcast_threat_intel(msg).await;
                         }
                     }
-                    // Wire up the previously-dead IPv6 path: add to the XDP
+                    // Wire up the previously-dead IPv6 path: add to the kernel
                     // BLOCKLIST_V6 map (block_ip_v6 is already implemented).
                     IpAddr::V6(v6) => {
-                        let _ = xdp.block_ip_v6(v6);
+                        if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+                            kernel.maps.queue_block(IpAddr::V6(v6)).await;
+                        }
                     }
                 }
             });
@@ -317,14 +319,13 @@ pub fn start_rate_limiter_cleanup() {
                 let blocked = now < rec.block_until;
                 if !window_ok && !blocked {
                     tracing::debug!("Cleaning up auto-remediation record for {}", ip);
-                    // Ensure we remove the block from XDP
-                    if let std::net::IpAddr::V4(ipv4) = ip {
-                        let ip_clone = *ipv4;
-                        tokio::spawn(async move {
-                            let mut xdp = crate::XDP_MANAGER.lock().await;
-                            let _ = xdp.unblock_ip(ip_clone);
-                        });
-                    }
+                    // Ensure we remove the block from kernel (Layer 1)
+                    let expired_ip = *ip;
+                    tokio::spawn(async move {
+                        if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+                            kernel.maps.queue_unblock(expired_ip).await;
+                        }
+                    });
                 }
                 window_ok || blocked
             });
@@ -1883,9 +1884,10 @@ impl crate::gossip::GossipHandler for WafGossipHandler {
         rec.count = 3;
         rec.tier = 1;
 
-        // Apply XDP block
-        let mut xdp = crate::XDP_MANAGER.lock().await;
-        let _ = xdp.block_ip(msg.ip);
+        // Apply kernel (Layer 1) block
+        if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+            kernel.maps.queue_block(ip).await;
+        }
     }
 }
 

@@ -28,8 +28,15 @@ impl WasmPluginEngine {
         // microseconds, and the fail-closed path returns WASM-FAIL-CLOSED
         // before the worker thread is blocked for long.
         config.consume_fuel(true);
+        config.epoch_interruption(true);
         let engine = Engine::new(&config).unwrap_or_else(|_| Engine::default());
         let mut plugins = Vec::new();
+
+        let engine_clone = engine.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            engine_clone.increment_epoch();
+        });
 
         if !dir.exists() {
             return Self { engine, plugins };

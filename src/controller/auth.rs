@@ -55,6 +55,11 @@ pub fn hash_password(password: &str) -> String {
 
 /// Verify input password against stored hash (or legacy plaintext), constant-time.
 pub fn verify_password(password: &str, stored: &str) -> bool {
+    let password = password.trim();
+    let stored = stored.trim();
+    if password.is_empty() || stored.is_empty() {
+        return false;
+    }
     if stored.starts_with("$sha256$") {
         let parts: Vec<&str> = stored.split('$').collect();
         if parts.len() == 4 {
@@ -71,12 +76,24 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
 }
 
 /// True when `candidate` is a currently-valid session token in `store` (present + not
-/// expired), compared constant-time. Caller should hold the sessions read lock.
+/// expired). Caller should hold the sessions read lock.
 pub fn is_valid_session(store: &std::collections::HashMap<String, i64>, candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return false;
+    }
     let now = chrono::Utc::now().timestamp();
-    store
-        .iter()
-        .any(|(k, &exp)| exp >= now && constant_time_eq(k.as_bytes(), candidate.as_bytes()))
+    if let Some(&exp) = store.get(candidate) {
+        exp >= now
+    } else {
+        false
+    }
+}
+
+/// Remove expired session tokens from the store to prevent memory leaks over time.
+pub fn prune_expired_sessions(store: &mut std::collections::HashMap<String, i64>) {
+    let now = chrono::Utc::now().timestamp();
+    store.retain(|_, &mut exp| exp >= now);
 }
 
 /// Ensure an admin password exists on startup.
@@ -231,11 +248,10 @@ pub async fn login_handler(
         let session_id = uuid::Uuid::new_v4().simple().to_string();
         let ttl_secs: i64 = 24 * 3600; // 24h
         let expiry = chrono::Utc::now().timestamp() + ttl_secs;
-        state
-            .sessions
-            .write()
-            .unwrap()
-            .insert(session_id.clone(), expiry);
+        {
+            let mut sessions = state.sessions.write().unwrap();
+            sessions.insert(session_id.clone(), expiry);
+        }
 
         info!(
             "Successful admin login to jarsWAF Controller (must_change={}) — issued session",
@@ -390,4 +406,52 @@ pub async fn auth_middleware(
     }
 
     next.run(req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_verify_password_hash_and_empty() {
+        let password = "SecretPassword123!";
+        let hash = hash_password(password);
+
+        assert!(verify_password(password, &hash));
+        assert!(!verify_password("WrongPassword", &hash));
+        assert!(!verify_password("", &hash));
+        assert!(!verify_password(password, ""));
+        assert!(!verify_password("", ""));
+    }
+
+    #[test]
+    fn test_verify_password_legacy_plaintext() {
+        let legacy_token = "legacy-admin-token-xyz";
+        assert!(verify_password(legacy_token, legacy_token));
+        assert!(!verify_password("wrong-token", legacy_token));
+        assert!(!verify_password("", legacy_token));
+    }
+
+    #[test]
+    fn test_session_lifecycle_and_pruning() {
+        let mut sessions = HashMap::new();
+        let now = chrono::Utc::now().timestamp();
+
+        let valid_token = "valid_session_1";
+        let expired_token = "expired_session_2";
+
+        sessions.insert(valid_token.to_string(), now + 3600); // Expires in 1h
+        sessions.insert(expired_token.to_string(), now - 10); // Expired 10s ago
+
+        assert!(is_valid_session(&sessions, valid_token));
+        assert!(!is_valid_session(&sessions, expired_token));
+        assert!(!is_valid_session(&sessions, "non_existent"));
+        assert!(!is_valid_session(&sessions, ""));
+
+        prune_expired_sessions(&mut sessions);
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions.contains_key(valid_token));
+        assert!(!sessions.contains_key(expired_token));
+    }
 }

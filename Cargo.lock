@@ -2326,6 +2326,7 @@ dependencies = [
  "serde_yaml_ng",
  "sha2",
  "sysinfo",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-stream",

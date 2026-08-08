@@ -44,6 +44,27 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Validate CLI Arguments
+if [ -n "$ACTION" ] && [[ ! "$ACTION" =~ ^(install|upgrade|reset-password|uninstall)$ ]]; then
+    echo -e "${RED}${BOLD}Error:${NC} Action '$ACTION' tidak valid. Pilihan: install, upgrade, reset-password, uninstall"
+    exit 1
+fi
+
+if [ -n "$MODE" ] && [[ ! "$MODE" =~ ^(standalone|controller|agent)$ ]]; then
+    echo -e "${RED}${BOLD}Error:${NC} Mode '$MODE' tidak valid. Pilihan: standalone, controller, agent"
+    exit 1
+fi
+
+if [ -n "$CONTROLLER_URL" ] && [[ ! "$CONTROLLER_URL" =~ ^https?://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$ ]]; then
+    echo -e "${RED}${BOLD}Error:${NC} Format CONTROLLER_URL tidak valid: $CONTROLLER_URL"
+    exit 1
+fi
+
+if [ -n "$AGENT_TOKEN" ] && [[ ! "$AGENT_TOKEN" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+    echo -e "${RED}${BOLD}Error:${NC} AGENT_TOKEN mengandung karakter yang tidak diizinkan."
+    exit 1
+fi
+
 # ── Sanity Check ─────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}${BOLD}Error:${NC} Script ini harus dijalankan sebagai root (gunakan sudo)."

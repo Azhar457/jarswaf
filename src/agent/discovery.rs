@@ -160,16 +160,31 @@ fn parse_proc_net_tcp(
 ) -> Result<Vec<DiscoveredService>, std::io::Error> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
+    use std::time::{Duration, Instant};
+
+    const MAX_PID_SCAN: usize = 500;
+    const SCAN_TIMEOUT: Duration = Duration::from_millis(500);
 
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
     let mut services = Vec::new();
-    let mut sys = sysinfo::System::new();
-    sys.refresh_processes();
 
-    let inode_map = get_linux_socket_inodes();
+    let scan_start = Instant::now();
+    let mut pid_count = 0;
+
+    let mut inode_map: Option<std::collections::HashMap<String, u32>> = None;
+    let mut sys: Option<sysinfo::System> = None;
 
     for (idx, line) in reader.lines().enumerate() {
+        if scan_start.elapsed() > SCAN_TIMEOUT {
+            tracing::warn!(
+                "Service discovery timeout in {} — scanned {} PIDs, aborting",
+                file_path,
+                pid_count
+            );
+            break;
+        }
+
         if idx == 0 {
             continue;
         }
@@ -198,11 +213,24 @@ fn parse_proc_net_tcp(
         let inode = parts[9];
         let mut process_name = "Unknown".to_string();
 
-        if let Some(&pid) = inode_map.get(inode) {
-            if let Some(p) = sys.process(sysinfo::Pid::from(pid as usize)) {
-                process_name = p.name().to_string();
-            } else if let Ok(cmd) = std::fs::read_to_string(format!("/proc/{}/comm", pid)) {
-                process_name = cmd.trim().to_string();
+        if inode_map.is_none() && pid_count < MAX_PID_SCAN {
+            inode_map = Some(get_linux_socket_inodes_limited(MAX_PID_SCAN));
+            sys = Some(sysinfo::System::new());
+            if let Some(ref mut s) = sys {
+                s.refresh_processes();
+            }
+        }
+
+        if let Some(ref map) = inode_map {
+            if let Some(&pid) = map.get(inode) {
+                pid_count += 1;
+                if let Some(ref s) = sys {
+                    if let Some(p) = s.process(sysinfo::Pid::from(pid as usize)) {
+                        process_name = p.name().to_string();
+                    } else if let Ok(cmd) = std::fs::read_to_string(format!("/proc/{}/comm", pid)) {
+                        process_name = cmd.trim().to_string();
+                    }
+                }
             }
         }
 
@@ -218,30 +246,48 @@ fn parse_proc_net_tcp(
 }
 
 #[cfg(target_os = "linux")]
-fn get_linux_socket_inodes() -> std::collections::HashMap<String, u32> {
+fn get_linux_socket_inodes_limited(max_pids: usize) -> std::collections::HashMap<String, u32> {
     let mut map = std::collections::HashMap::new();
+    let mut pid_count = 0;
+
     if let Ok(entries) = std::fs::read_dir("/proc") {
         for entry in entries.flatten() {
+            if pid_count >= max_pids {
+                tracing::debug!("Socket inode scan hit PID limit ({}) — stopping", max_pids);
+                break;
+            }
+
             let path = entry.path();
             if let Some(name_str) = path.file_name().and_then(|s| s.to_str()) {
                 if let Ok(pid) = name_str.parse::<u32>() {
                     let fd_path = format!("/proc/{}/fd", pid);
-                    if let Ok(fd_entries) = std::fs::read_dir(fd_path) {
-                        for fd_entry in fd_entries.flatten() {
-                            if let Ok(link) = std::fs::read_link(fd_entry.path()) {
-                                if let Some(link_str) = link.to_str() {
-                                    if link_str.starts_with("socket:[") && link_str.ends_with(']') {
-                                        let inode = &link_str[8..link_str.len() - 1];
-                                        map.insert(inode.to_string(), pid);
-                                    }
+                    let fd_dir = match std::fs::read_dir(&fd_path) {
+                        Ok(d) => d,
+                        Err(_) => continue,
+                    };
+
+                    for fd_entry in fd_dir.flatten() {
+                        if let Ok(link) = std::fs::read_link(fd_entry.path()) {
+                            if let Some(link_str) = link.to_str() {
+                                if link_str.starts_with("socket:[") && link_str.ends_with(']') {
+                                    let inode = &link_str[8..link_str.len() - 1];
+                                    map.insert(inode.to_string(), pid);
                                 }
                             }
                         }
                     }
+                    pid_count += 1;
                 }
             }
         }
     }
+
+    tracing::debug!(
+        "Socket inode scan: {} PIDs scanned, {} socket inodes found",
+        pid_count,
+        map.len()
+    );
+
     map
 }
 

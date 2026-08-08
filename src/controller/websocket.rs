@@ -76,8 +76,27 @@ async fn handle_agent_socket(mut socket: WebSocket, state: ControllerState) {
 
     // Send current config immediately upon connection
     let initial_cfg = match config::load_config(&state.config_path) {
-        Ok(c) => c,
-        Err(_) => return,
+        Ok(c) => Some(c),
+        Err(e) => {
+            let err_str = e.to_string();
+            tracing::error!("Failed to read config for agent connection: {}", err_str);
+            None
+        }
+    };
+
+    let initial_cfg = match initial_cfg {
+        Some(c) => c,
+        None => {
+            let _ = socket
+                .send(axum::extract::ws::Message::Close(Some(
+                    axum::extract::ws::CloseFrame {
+                        code: axum::extract::ws::close_code::ERROR,
+                        reason: "Internal Server Error - Config Unavailable".into(),
+                    },
+                )))
+                .await;
+            return;
+        }
     };
     if let Ok(json) = serde_json::to_string(&initial_cfg) {
         if socket

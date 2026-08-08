@@ -1,6 +1,7 @@
 certificates = []
 allowlists = []
 blacklists = []
+api_schemas = []
 
 [global]
 port_http = 8000
@@ -9,10 +10,24 @@ max_body_size = 10485760
 default_rate_limit = 600
 log_dir = "./logs"
 log_level = "verbose"
-admin_token = "change-me-admin-token-placeholder"
+mode = "standalone"
+grpc_token = "684097120a5947d99c5b4d1f1c27ffc2"
+admin_token = "$sha256$QN9O6zO5yjZRa8Jy$31921892aa8776db59f87ca493f2d93ec9fae54a54c78d60ab62820fb57de8ed"
+must_change_password = true
 waf_enabled = true
 webhooks = []
 metrics_push_interval_secs = 60
+scoring_mode = "immediate"
+anomaly_threshold = 5
+ast_learning_enabled = false
+
+[global.ebpf]
+tc_interface = "eth0"
+conntrack_map_capacity = 65536
+map_overflow_policy = "drop_oldest"
+ebpf_load_failure = "block_all"
+enable_ipv6 = true
+enable_quic_udp = true
 
 [tls]
 mode = "local_ca"
@@ -64,8 +79,8 @@ description = "Exempted assets to reduce WAF engine evaluation overhead."
 
 [[vhosts]]
 name = "jarswaf-demo"
-hosts = ["*.jarswafwaf.demo"]
-backend = "127.0.0.1:8080"
+hosts = ["*.jarswafwaf.demo", "jarswaf.local", "dev-waf.local", "localhost", "127.0.0.1"]
+backend = "127.0.0.1:8088"
 tenant = "default"
 rate_limit_tiers = []
 rules = ["SQLI-*", "XSS-*", "LFI-*", "RFI-*", "SSRF-*", "CMDI-*", "BOT-*", "CANARY-*", "BHV-*", "IPREP-*"]
@@ -75,13 +90,15 @@ custom_rules = ["CR-825"]
 ssl = "Auto (Local CA)"
 max_body = "10MB"
 rate_limit = "600 req/min"
-is_default = false
+is_default = true
 allowlists = []
 blacklists = []
+deception_mode = false
 max_conns_per_ip = 50
 max_concurrent_requests = 100
 bot_challenge_enabled = false
 websocket_security_enabled = false
+blocked_asns = []
 
 [vhosts.logging]
 enabled = true
@@ -100,3 +117,28 @@ enabled = true
 [redis]
 enabled = false
 url = "redis://127.0.0.1:6379"
+
+[gossip]
+enabled = false
+bind_addr = "0.0.0.0:7946"
+seeds = []
+psk = ""
+node_id = "jarswaf-unknown"
+
+[zero_trust]
+min_trust_score = 0.0
+allowed_issuers = []
+shared_secret = ""
+
+[honeypot]
+enabled = false
+upstream_addr = "127.0.0.1:9999"
+min_delay_ms = 50
+max_delay_ms = 200
+enable_canary_tokens = true
+block_ttl_seconds = 3600
+escalate_after_strikes = 3
+ssh_port = 22
+mysql_port = 3306
+postgres_port = 5432
+redis_port = 6379

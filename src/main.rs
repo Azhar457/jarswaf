@@ -115,8 +115,8 @@ async fn main() {
         match cfg.global.mode.as_str() {
             "manager" => Commands::Controller { port: 8080 },
             _ => Commands::Agent {
-                controller: cfg.global.manager_url,
-                token: cfg.global.grpc_token,
+                controller: cfg.global.manager_url.clone(),
+                token: cfg.global.grpc_token.clone(),
             },
         }
     };
@@ -131,37 +131,43 @@ async fn main() {
         Commands::Bundle { controller_port } => {
             let config_path = cli.config.clone();
             let rules_dir = cli.rules_dir.clone();
-            tokio::spawn(async move {
-                jarswaf::controller::run_controller(controller_port, config_path).await;
-            });
 
-            // Active readiness check instead of 1-second sleep hack
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_millis(500))
-                .build()
-                .unwrap();
-            let health_url = format!("http://127.0.0.1:{}/health", controller_port);
-            let mut ready = false;
-            for _ in 0..20 {
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                if let Ok(res) = client.get(&health_url).send().await {
-                    if res.status().is_success() {
-                        ready = true;
-                        break;
+            if cfg.global.mode == "standalone" {
+                jarswaf::controller::run_controller(controller_port, config_path).await;
+            } else {
+                tokio::spawn(async move {
+                    jarswaf::controller::run_controller(controller_port, config_path).await;
+                });
+
+                // Active readiness check instead of 1-second sleep hack
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_millis(500))
+                    .build()
+                    .unwrap();
+                let health_url = format!("http://127.0.0.1:{}/health", controller_port);
+                let mut ready = false;
+                for _ in 0..20 {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    if let Ok(res) = client.get(&health_url).send().await {
+                        if res.status().is_success() {
+                            ready = true;
+                            break;
+                        }
                     }
                 }
-            }
-            if !ready {
-                eprintln!("Warning: Controller did not become ready within 5 seconds, starting agent anyway.");
-            }
+                if !ready {
+                    eprintln!("Warning: Controller did not become ready within 5 seconds, starting agent anyway.");
+                }
 
-            jarswaf::agent::run_agent(
-                &cli.config,
-                Some(format!("http://127.0.0.1:{}", controller_port)),
-                None,
-                &rules_dir,
-            )
-            .await;
+                let grpc_token = cfg.global.grpc_token.clone();
+                jarswaf::agent::run_agent(
+                    &cli.config,
+                    Some(format!("http://127.0.0.1:{}", controller_port)),
+                    grpc_token,
+                    &rules_dir,
+                )
+                .await;
+            }
         }
         Commands::GenerateToken { machine_id } => {
             let m_id = machine_id.unwrap_or_else(get_machine_id);

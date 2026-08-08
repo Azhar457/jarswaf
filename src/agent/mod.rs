@@ -66,14 +66,35 @@ pub async fn run_agent(
 
     // Start background memory cleanup for rate limiter & reputation counters
     rules::start_rate_limiter_cleanup();
+    tokio::spawn(async {
+        crate::rules::behavioral::BEHAVIORAL_ANALYZER
+            .start_background_garbage_collector()
+            .await;
+    });
     crate::proxy_engine::ensure_background_services_started();
 
-    // Attach eBPF XDP if an interface is configured
+    // ── Control Bus (Layer 3) + Kernel (Layer 1) startup ─────────────
+    // This is where the event bus, ArcSwap published state, and eBPF
+    // interface are initialized. The returned command sender is the
+    // L4 → L3 command path (future src/api/ layer); the receiver must
+    // stay alive for the bus to keep running.
+    let (_control_state, _event_rx, _cmd_tx) = crate::control_bus::start_control_bus(
+        config_path.to_string(),
+        rules_dir.to_string(),
+        cfg.global.anomaly_threshold as f64,
+        cfg.global.scoring_mode.as_str().to_string(),
+    );
+    info!("Control bus started");
+
+    // Attach eBPF XDP if an interface is configured — via Kernel Interface (Layer 1)
     if let Some(interface) = &cfg.global.xdp_interface {
         info!("Attaching eBPF XDP to interface: {}", interface);
-        let mut xdp = crate::XDP_MANAGER.lock().await;
-        if let Err(e) = xdp.attach(interface) {
-            tracing::error!("Failed to attach eBPF XDP: {}", e);
+        if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+            if let Err(e) = kernel.attach_xdp(interface).await {
+                tracing::error!("Failed to attach eBPF XDP: {}", e);
+            }
+        } else {
+            tracing::warn!("Kernel interface not initialized — skipping XDP attach");
         }
     }
 
@@ -81,15 +102,27 @@ pub async fn run_agent(
     {
         info!("Starting RASP Agent (eBPF Kernel Monitor)...");
         let (rasp_tx, mut rasp_rx) = tokio::sync::mpsc::channel::<()>(100);
-        let mut xdp = crate::XDP_MANAGER.lock().await;
-        if let Err(e) = xdp.attach_rasp(Some(rasp_tx)) {
-            tracing::error!("Failed to attach RASP eBPF: {}", e);
+        if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+            if let Err(e) = kernel.attach_rasp(Some(rasp_tx)).await {
+                tracing::error!("Failed to attach RASP eBPF: {}", e);
+            }
+            // RASP events are polled by kernel::BpfMapInterface::poll_rasp_events —
+            // the kernel flush task in control_bus::start_control_bus handles batching.
+        } else {
+            tracing::warn!("Kernel interface not initialized — skipping RASP attach");
         }
 
         tokio::spawn(async move {
+            let mut last_flush = std::time::Instant::now() - std::time::Duration::from_secs(60);
             while rasp_rx.recv().await.is_some() {
-                tracing::warn!("RASP Alert received! Flushing suspicious IPs to blocklist!");
-                crate::proxy_engine::flush_suspicious_ips_to_blocklist().await;
+                let now = std::time::Instant::now();
+                if now.duration_since(last_flush) >= std::time::Duration::from_secs(10) {
+                    tracing::warn!("RASP Alert received! Flushing suspicious IPs to blocklist!");
+                    crate::proxy_engine::flush_suspicious_ips_to_blocklist().await;
+                    last_flush = now;
+                } else {
+                    tracing::info!("RASP Alert received but rate-limited (debounced) to prevent lock contention");
+                }
             }
         });
     }
@@ -166,12 +199,20 @@ pub async fn run_agent(
                         last_modified = modified;
                         match config::load_config(&config_path_clone) {
                             Ok(new_cfg) => {
-                                // Atomic update via ArcSwap — no RwLock race window
-                                crate::proxy_engine::update_global_config(new_cfg);
-                                info!(
-                                    "Configuration reloaded successfully from {}",
-                                    config_path_clone
-                                );
+                                if let Err(val_err) = new_cfg.validate() {
+                                    tracing::error!(
+                                        "Refusing to reload invalid configuration from {}: {}",
+                                        config_path_clone,
+                                        val_err
+                                    );
+                                } else {
+                                    // Atomic update via ArcSwap — no RwLock race window
+                                    crate::proxy_engine::update_global_config(new_cfg);
+                                    info!(
+                                        "Configuration reloaded successfully from {}",
+                                        config_path_clone
+                                    );
+                                }
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -204,14 +245,13 @@ pub async fn run_agent(
                 loaded.len(),
                 cfg.logging.blocklist_path
             );
-            let mut xdp = crate::XDP_MANAGER.lock().await;
             for ip in loaded {
                 blocklist.insert(
                     ip,
                     std::time::Instant::now() + std::time::Duration::from_secs(31536000),
                 );
-                if let std::net::IpAddr::V4(ipv4) = ip {
-                    let _ = xdp.block_ip(ipv4);
+                if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+                    kernel.maps.queue_block(ip).await;
                 }
             }
         }
@@ -235,13 +275,14 @@ pub async fn run_agent(
                     expired_ips.push(*entry.key());
                 }
             }
-            for ip in expired_ips {
-                sweeper_blocklist.remove(&ip);
-                if let std::net::IpAddr::V4(ipv4) = ip {
-                    let mut xdp = crate::XDP_MANAGER.lock().await;
-                    let _ = xdp.unblock_ip(ipv4);
+            if !expired_ips.is_empty() {
+                for ip in &expired_ips {
+                    sweeper_blocklist.remove(ip);
+                    if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+                        kernel.maps.queue_unblock(*ip).await;
+                    }
+                    tracing::info!("Unblocked IP {} after duration expired", ip);
                 }
-                tracing::info!("Unblocked IP {} after duration expired", ip);
             }
         }
     });
@@ -346,9 +387,8 @@ pub async fn run_agent(
                 ip,
                 std::time::Instant::now() + std::time::Duration::from_secs(86400),
             );
-            if let std::net::IpAddr::V4(ipv4) = ip {
-                let mut xdp = crate::XDP_MANAGER.lock().await;
-                let _ = xdp.block_ip(ipv4);
+            if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+                kernel.maps.queue_block(ip).await;
             }
         }
 
@@ -362,9 +402,8 @@ pub async fn run_agent(
                     ip,
                     std::time::Instant::now() + std::time::Duration::from_secs(86400),
                 );
-                if let std::net::IpAddr::V4(ipv4) = ip {
-                    let mut xdp = crate::XDP_MANAGER.lock().await;
-                    let _ = xdp.block_ip(ipv4);
+                if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+                    kernel.maps.queue_block(ip).await;
                 }
             }
         }
