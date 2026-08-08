@@ -71,7 +71,7 @@ redteam_lab*.toml
 __pycache__/
 *.pyc
 *.pyo
-
+graphify-out/
 # ------------------------------------------------------------------------------
 # 6. IDEs, Editors & System Metadata
 # ------------------------------------------------------------------------------
@@ -83,4 +83,5 @@ __pycache__/
 Thumbs.db
 *.swp
 *.swo
-IDEA.md
+IDEA.md
+docs/

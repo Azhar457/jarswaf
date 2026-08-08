@@ -34,6 +34,40 @@ pub struct Config {
     pub honeypot: crate::honeypot::HoneypotConfig,
 }
 
+impl Config {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.global.port_http == 0 {
+            return Err("global.port_http cannot be 0".to_string());
+        }
+        if self.global.port_https == 0 {
+            return Err("global.port_https cannot be 0".to_string());
+        }
+        if self.global.port_http == self.global.port_https {
+            return Err(
+                "global.port_http and global.port_https cannot use the same port".to_string(),
+            );
+        }
+        if self.vhosts.is_empty() {
+            return Err("At least one virtual host (vhost) must be configured".to_string());
+        }
+        for (i, vhost) in self.vhosts.iter().enumerate() {
+            if vhost.name.trim().is_empty() {
+                return Err(format!("vhost[{}] name cannot be empty", i));
+            }
+            if vhost.hosts.is_empty() {
+                return Err(format!(
+                    "vhost[{}] must have at least one host configured",
+                    i
+                ));
+            }
+            if vhost.backend.trim().is_empty() {
+                return Err(format!("vhost[{}] backend cannot be empty", i));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CertificateConfig {
     pub domain: String,
@@ -586,6 +620,22 @@ impl Default for ComponentsConfig {
     }
 }
 
+impl Config {
+    pub fn compile_dlp_patterns(&mut self) {
+        for vhost in &mut self.vhosts {
+            if let Some(ref mut dlp) = vhost.dlp {
+                dlp.compiled_custom_patterns = dlp
+                    .custom_patterns
+                    .iter()
+                    .filter_map(|(name, pattern)| {
+                        regex::Regex::new(pattern).ok().map(|re| (name.clone(), re))
+                    })
+                    .collect();
+            }
+        }
+    }
+}
+
 pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(path)?;
     let mut cfg: Config = toml::from_str(&content)?;
@@ -596,6 +646,18 @@ pub fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
             cfg.gossip.psk = env_psk;
         }
     }
+    if let Ok(env_admin) = std::env::var("JARSWAF_ADMIN_TOKEN") {
+        if !env_admin.trim().is_empty() {
+            cfg.global.admin_token = Some(env_admin);
+        }
+    }
+    if let Ok(env_grpc) = std::env::var("JARSWAF_GRPC_TOKEN") {
+        if !env_grpc.trim().is_empty() {
+            cfg.global.grpc_token = Some(env_grpc);
+        }
+    }
+
+    cfg.compile_dlp_patterns();
 
     Ok(cfg)
 }
@@ -796,6 +858,9 @@ pub struct DlpConfig {
     /// Max response body size to inspect (default: 2MB)
     #[serde(default = "default_dlp_response_limit")]
     pub response_body_limit: usize,
+    /// Precompiled custom patterns (skipped during serialization)
+    #[serde(skip)]
+    pub compiled_custom_patterns: Vec<(String, regex::Regex)>,
 }
 
 impl Default for DlpConfig {
@@ -811,6 +876,7 @@ impl Default for DlpConfig {
             allowlist: Vec::new(),
             custom_patterns: ahash::AHashMap::new(),
             response_body_limit: default_dlp_response_limit(),
+            compiled_custom_patterns: Vec::new(),
         }
     }
 }

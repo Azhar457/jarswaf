@@ -4,24 +4,25 @@ use std::sync::OnceLock;
 use sysinfo::{Disks, System};
 use tracing::{error, warn};
 
-/// Cache of the local standalone node's AgentInfo. Refreshed at most once per
-/// 5 seconds. Prevents full sysinfo inventory (System::new_all + refresh_all)
-/// from running on EVERY dashboard poll (GET /api/v1/agents is polled every 5s).
-static LOCAL_NODE_CACHE: OnceLock<std::sync::Mutex<Option<(std::time::Instant, AgentInfo)>>> =
-    OnceLock::new();
+use arc_swap::ArcSwap;
+use std::sync::Arc;
 
-fn local_node_cache() -> &'static std::sync::Mutex<Option<(std::time::Instant, AgentInfo)>> {
-    LOCAL_NODE_CACHE.get_or_init(|| std::sync::Mutex::new(None))
+struct CachedAgentInfo {
+    info: AgentInfo,
+    cached_at: std::time::Instant,
 }
+
+static LOCAL_NODE_CACHE: OnceLock<ArcSwap<Option<CachedAgentInfo>>> = OnceLock::new();
 
 /// Collect metrics for the local machine, cached for TTL seconds.
 pub fn collect_local_agent_info(ttl_secs: u64) -> AgentInfo {
     let now = std::time::Instant::now();
-    if let Ok(lock) = local_node_cache().lock() {
-        if let Some((ts, info)) = lock.as_ref() {
-            if now.duration_since(*ts) < std::time::Duration::from_secs(ttl_secs) {
-                return info.clone();
-            }
+    let ttl = std::time::Duration::from_secs(ttl_secs);
+    let cache = LOCAL_NODE_CACHE.get_or_init(|| ArcSwap::from_pointee(None));
+
+    if let Some(cached) = cache.load().as_ref() {
+        if now.duration_since(cached.cached_at) < ttl {
+            return cached.info.clone();
         }
     }
 
@@ -63,9 +64,12 @@ pub fn collect_local_agent_info(ttl_secs: u64) -> AgentInfo {
         last_seen: std::time::Instant::now(),
     };
 
-    if let Ok(mut lock) = local_node_cache().lock() {
-        *lock = Some((now, info.clone()));
-    }
+    let cache = LOCAL_NODE_CACHE.get_or_init(|| ArcSwap::from_pointee(None));
+    cache.store(Arc::new(Some(CachedAgentInfo {
+        info: info.clone(),
+        cached_at: now,
+    })));
+
     info
 }
 

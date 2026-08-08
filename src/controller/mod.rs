@@ -269,14 +269,16 @@ pub async fn run_controller(port: u16, config_path: String) {
     });
 
     // Spawn embedded Pingora WAF Agent Proxy inside Controller so it includes full Standalone WAF capabilities
-    let agent_cfg = config_path.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        info!(
-            "🛡️  Embedded WAF Agent Engine initializing inside Controller (Standalone WAF Mode)..."
-        );
-        crate::agent::run_agent(&agent_cfg, None, None, "rules").await;
-    });
+    if cfg.global.mode == "standalone" {
+        let agent_cfg = config_path.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            info!(
+                "🛡️  Embedded WAF Agent Engine initializing inside Controller (Standalone WAF Mode)..."
+            );
+            crate::agent::run_agent(&agent_cfg, None, None, "rules").await;
+        });
+    }
 
     // Initialize broadcast channel for live logs
     let (tx, _rx) = broadcast::channel(10000);
@@ -310,6 +312,20 @@ pub async fn run_controller(port: u16, config_path: String) {
         config_lock: Arc::new(tokio::sync::Mutex::new(())),
         sessions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     };
+
+    // Spawn background task to prune expired sessions every 1 hour to keep memory footprint low
+    // and prevent lock contention on the sessions write lock during login.
+    let sessions_clone = state.sessions.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            if let Ok(mut store) = sessions_clone.write() {
+                let now = chrono::Utc::now().timestamp();
+                store.retain(|_, &mut exp| exp >= now);
+                tracing::debug!("Pruned expired dashboard sessions from memory.");
+            }
+        }
+    });
 
     let app = build_router(state);
 

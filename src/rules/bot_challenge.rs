@@ -237,23 +237,50 @@ pub fn generate_challenge_signature(timestamp: &str, client_ip: &str, secret: &s
 
 /// Checks if the client has already solved the challenge within the last hour.
 pub fn is_challenge_cookie_valid(cookie_header: &str, client_ip: &str, secret: &str) -> bool {
-    for cookie in cookie_header.split(';') {
-        let parts: Vec<&str> = cookie.trim().split('=').collect();
-        if parts.len() == 2 && parts[0] == "jarswaf-challenge-token" {
-            let token = parts[1];
-            let token_parts: Vec<&str> = token.split('.').collect();
-            if token_parts.len() == 3 {
-                let timestamp_str = token_parts[0];
-                let ip = token_parts[1];
-                let signature = token_parts[2];
+    let mut crypto_checks = 0;
+    const MAX_CRYPTO_CHECKS: u8 = 2; // Anti-CPU DoS: Maksimal 2x hash per request
+    const MAX_COOKIE_PARSED: usize = 50; // Anti-Memory DoS: Maksimal 50 cookie
 
-                if ip == client_ip {
-                    let expected_sig = generate_challenge_signature(timestamp_str, ip, secret);
-                    if expected_sig == signature {
-                        if let Ok(ts) = timestamp_str.parse::<i64>() {
-                            let now = chrono::Utc::now().timestamp();
-                            if now >= ts && now - ts < 3600 {
-                                return true;
+    // Batasi iterasi pemisahan cookie menggunakan .take()
+    for cookie in cookie_header.split(';').take(MAX_COOKIE_PARSED) {
+        let cookie = cookie.trim();
+
+        // Menggunakan .split_once() mengembalikan Option<(&str, &str)>
+        // ZERO heap allocation (hanya stack memory)
+        if let Some((key, token)) = cookie.split_once('=') {
+            if key == "jarswaf-challenge-token" {
+                // Proteksi CPU: Hentikan jika sudah mencapai batas crypto checks
+                if crypto_checks >= MAX_CRYPTO_CHECKS {
+                    tracing::warn!(
+                        "Max crypto checks reached for cookie validation. Potential DoS attempt from IP: {}", 
+                        client_ip
+                    );
+                    break;
+                }
+                crypto_checks += 1;
+
+                // Gunakan iterator manual tanpa .collect::<Vec<&str>>() untuk mencegah alokasi Heap
+                let mut token_parts = token.split('.');
+                let timestamp_str = token_parts.next();
+                let ip_str = token_parts.next();
+                let signature = token_parts.next();
+                let extra = token_parts.next(); // Memastikan format tidak memiliki lebih dari 3 bagian
+
+                // Pattern matching yang elegan untuk memvalidasi token_parts
+                if let (Some(ts_str), Some(ip), Some(sig), None) =
+                    (timestamp_str, ip_str, signature, extra)
+                {
+                    if ip == client_ip {
+                        // Proses Kriptografi yang "mahal" (dijamin maksimal jalan 2x berkat counter di atas)
+                        let expected_sig = generate_challenge_signature(ts_str, ip, secret);
+
+                        if expected_sig == sig {
+                            if let Ok(ts) = ts_str.parse::<i64>() {
+                                let now = chrono::Utc::now().timestamp();
+                                // Validasi TTL (1 jam)
+                                if now >= ts && now - ts < 3600 {
+                                    return true; // Sukses divalidasi (Short-circuit!)
+                                }
                             }
                         }
                     }
@@ -261,6 +288,7 @@ pub fn is_challenge_cookie_valid(cookie_header: &str, client_ip: &str, secret: &
             }
         }
     }
+
     false
 }
 
