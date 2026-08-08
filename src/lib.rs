@@ -20,6 +20,9 @@ pub mod vhost;
 pub mod wasm;
 pub mod webhook;
 pub mod xdp;
+pub mod kernel;
+pub mod data_bus;
+pub mod control_bus;
 
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -31,6 +34,13 @@ pub use types::is_local_ip;
 
 pub static SUSPICIOUS_IPS: Lazy<Arc<DashMap<IpAddr, Instant>>> =
     Lazy::new(|| Arc::new(DashMap::new()));
+
+// Global Kernel Abstraction Interface (Layer 1) — OPTIONAL: init by control bus.
+// Unlike XDP_MANAGER (legacy, held in a lib-level static Mutex), this is only
+// instantiated once control_bus::start_control_bus() runs, so non-Linux builds
+// and pure-controller modes skip eBPF entirely. Set by kernel::init().
+pub static KERNEL_INTERFACE: Lazy<Option<&'static kernel::KernelInterface>> =
+    Lazy::new(|| kernel::init_if_present());
 
 // Global XDP Manager
 pub static XDP_MANAGER: Lazy<Arc<tokio::sync::Mutex<xdp::XdpManager>>> =

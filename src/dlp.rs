@@ -129,15 +129,13 @@ pub fn scan_body(raw_body: &str, cfg: &crate::config::DlpConfig) -> Vec<DlpFindi
     }
 
     // Custom patterns
-    for (name, pattern) in &cfg.custom_patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            if let Some(m) = re.find(body) {
-                findings.push(DlpFinding {
-                    rule: "DLP-CUSTOM",
-                    description: format!(r#"custom pattern "{}""#, name),
-                    sample: format!("{}…", &m.as_str()[..40.min(m.len())]),
-                });
-            }
+    for (name, re) in &cfg.compiled_custom_patterns {
+        if let Some(m) = re.find(body) {
+            findings.push(DlpFinding {
+                rule: "DLP-CUSTOM",
+                description: format!(r#"custom pattern "{}""#, name),
+                sample: format!("{}…", &m.as_str()[..40.min(m.len())]),
+            });
         }
     }
 
@@ -206,14 +204,12 @@ pub fn mask_body(body: &str, cfg: &crate::config::DlpConfig) -> String {
     }
 
     // Custom patterns
-    for (name, pattern) in &cfg.custom_patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            result = re
-                .replace_all(&result, |_: &regex::Captures| {
-                    format!("[REDACTED-CUSTOM-{}]", name)
-                })
-                .into_owned();
-        }
+    for (name, re) in &cfg.compiled_custom_patterns {
+        result = re
+            .replace_all(&result, |_: &regex::Captures| {
+                format!("[REDACTED-CUSTOM-{}]", name)
+            })
+            .into_owned();
     }
 
     result
@@ -236,6 +232,7 @@ mod tests {
             allowlist: vec![],
             custom_patterns: ahash::AHashMap::new(),
             response_body_limit: 1024 * 1024,
+            compiled_custom_patterns: Vec::new(),
         }
     }
 
@@ -259,5 +256,30 @@ mod tests {
         cfg.allowlist.push("test@example.com".to_string());
         let masked_allowlist = mask_body(email_body, &cfg);
         assert_eq!(masked_allowlist, email_body);
+
+        // Test custom pattern precompilation and scanning
+        let mut custom_cfg = test_dlp_config();
+        custom_cfg
+            .custom_patterns
+            .insert("secret_id".to_string(), r"SEC-\d{4}".to_string());
+        // Compile patterns like we do at boot time:
+        custom_cfg.compiled_custom_patterns = custom_cfg
+            .custom_patterns
+            .iter()
+            .filter_map(|(name, pattern)| {
+                regex::Regex::new(pattern).ok().map(|re| (name.clone(), re))
+            })
+            .collect();
+
+        let custom_body = "User ID is SEC-1234 here.";
+        let findings_custom = scan_body(custom_body, &custom_cfg);
+        assert_eq!(findings_custom.len(), 1);
+        assert_eq!(findings_custom[0].rule, "DLP-CUSTOM");
+
+        let masked_custom = mask_body(custom_body, &custom_cfg);
+        assert_eq!(
+            masked_custom,
+            "User ID is [REDACTED-CUSTOM-secret_id] here."
+        );
     }
 }

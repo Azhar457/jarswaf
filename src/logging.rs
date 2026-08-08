@@ -50,16 +50,33 @@ pub fn build_client() -> reqwest::Client {
         }
     }
 
-    reqwest::Client::builder()
-        .default_headers(headers)
-        .build()
-        .unwrap_or_else(|e| {
-            tracing::warn!(
-                "Failed to build ClickHouse HTTP client ({}). Using default client — ClickHouse requests may fail auth.",
-                e
-            );
-            reqwest::Client::new()
-        })
+    let mut builder = reqwest::Client::builder().default_headers(headers);
+
+    // Secure TLS: Pin local WAF CA certificate if it exists to verify Controller identity
+    let ca_paths = [
+        "/etc/jarswaf/certs/ca.crt",
+        "/opt/jarswaf/certs/ca.crt",
+        "ca.crt",
+    ];
+    for path in &ca_paths {
+        if std::path::Path::new(path).exists() {
+            if let Ok(cert_bytes) = std::fs::read(path) {
+                if let Ok(cert) = reqwest::Certificate::from_pem(&cert_bytes) {
+                    builder = builder.add_root_certificate(cert);
+                    tracing::info!("Successfully pinned WAF CA certificate from: {}", path);
+                    break;
+                }
+            }
+        }
+    }
+
+    builder.build().unwrap_or_else(|e| {
+        tracing::warn!(
+            "Failed to build ClickHouse/Controller HTTP client ({}). Using default client.",
+            e
+        );
+        reqwest::Client::new()
+    })
 }
 
 // Inisialisasi SQLite Table
