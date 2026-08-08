@@ -959,7 +959,14 @@ impl ProxyHttp for JarsWafProxy {
                     te_present = true;
                 }
                 if let Ok(val_str) = value.to_str() {
-                    headers_map.insert(name.to_string(), val_str.to_string());
+                    let key = name.to_string();
+                    headers_map
+                        .entry(key)
+                        .and_modify(|existing: &mut String| {
+                            existing.push_str(", ");
+                            existing.push_str(val_str);
+                        })
+                        .or_insert_with(|| val_str.to_string());
                 }
             }
             (
@@ -2337,13 +2344,10 @@ pub async fn flush_suspicious_ips_to_blocklist() {
         return;
     }
 
-    let mut xdp = crate::XDP_MANAGER.lock().await;
     for ip in ips_to_block {
-        if let std::net::IpAddr::V4(ipv4) = ip {
-            tracing::warn!("Blocking suspicious IP due to RASP alert: {}", ipv4);
-            let _ = xdp.block_ip(ipv4);
-        } else {
-            tracing::warn!("RASP IP block skipped for non-IPv4: {}", ip);
+        tracing::warn!("Blocking suspicious IP due to RASP alert: {}", ip);
+        if let Some(kernel) = crate::KERNEL_INTERFACE.as_ref() {
+            kernel.maps.queue_block(ip).await;
         }
     }
 }
