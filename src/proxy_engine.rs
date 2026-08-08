@@ -1,5 +1,6 @@
 use crate::config::{path_policy_match, Config};
-use crate::rule_engine::phase::PhasePipeline;
+use crate::data_bus::chain::InspectionChain;
+use crate::data_bus::context::{InspectionContext, Verdict};
 use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::prelude::*;
@@ -705,8 +706,10 @@ pub struct JarsWafProxy {
     pub log_tx: tokio::sync::mpsc::Sender<crate::logging::WafLogEntry>,
     // Webhook / SIEM alert endpoints (loaded from config on startup)
     pub webhooks: Vec<crate::config::WebhookConfig>,
-    // Phase-based WAF inspection pipeline
-    pub phase_pipeline: PhasePipeline,
+    // WAF inspection pipeline (Data Bus). Replaces the legacy phase pipeline.
+    pub inspection_chain: InspectionChain,
+    /// Data bus event sender; emits DataEvent after each inspection when present.
+    pub event_tx: Option<crate::data_bus::events::EventSender>,
 }
 
 impl JarsWafProxy {
@@ -1147,50 +1150,91 @@ impl ProxyHttp for JarsWafProxy {
             }
         }
 
-        // ── Phase Pipeline ─────────────────────────────────────
-        let phase_ctx = crate::rule_engine::phase::PhaseContext {
+        // ── Inspection Chain (Data Bus) ─────────────────────────
+        // Replaces the legacy phase pipeline. Every request passes through the chain;
+        // verdicts drive the same block response the phase pipeline used to produce.
+        let mut headers = hyper::HeaderMap::new();
+        // Collect headers first to avoid lifetime issues with the borrow checker.
+        let header_pairs: Vec<_> = headers_map
+            .iter()
+            .filter_map(|(name, value)| {
+                let name = hyper::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
+                let hv = hyper::header::HeaderValue::from_str(value).ok()?;
+                Some((name, hv))
+            })
+            .collect();
+        for (name, hv) in header_pairs {
+            headers.insert(name, hv);
+        }
+        let inspection_ctx = InspectionContext {
+            request_id: uuid::Uuid::new_v4(),
             client_ip,
             method: req_method.clone(),
             path: path.clone(),
             query: query_str.clone(),
-            host: host.clone(),
-            headers: headers_map.clone(),
-            body: String::new(),
-            vhost_name: vhost_cfg.name.clone(),
-            request_id: ctx.request_id.clone(),
-            max_body: vhost_cfg.max_body.clone(),
-            max_conns_per_ip: vhost_cfg.max_conns_per_ip,
-            bot_challenge_enabled: vhost_cfg.bot_challenge_enabled,
+            headers,
+            body: None,
+            vhost: vhost_cfg.name.clone(),
+            timestamp: std::time::Instant::now(),
+            verdict: Verdict::Undecided,
+            score: 0.0,
+            matched_rules: Vec::new(),
+            tags: std::collections::HashSet::new(),
+            metadata: std::collections::HashMap::new(),
         };
-        match self.phase_pipeline.execute(&phase_ctx).await {
-            crate::rule_engine::phase::PhaseResult::Reject {
-                status,
-                title,
-                description,
+        let chain_ctx = self.inspection_chain.run(inspection_ctx).await;
+        // ── Data Bus: emit event to control bus (non-blocking) ──────────────
+        let request_id = chain_ctx.request_id;
+        if let Some(event_tx) = &self.event_tx {
+            let event = match &chain_ctx.verdict {
+                Verdict::Block { reason, .. } => crate::data_bus::events::DataEvent::RequestBlocked {
+                    request_id,
+                    client_ip,
+                    reason: reason.clone(),
+                    rule_id: chain_ctx
+                        .matched_rules
+                        .last()
+                        .cloned()
+                        .unwrap_or_else(|| "WAF-BLOCK".to_string()),
+                },
+                _ => crate::data_bus::events::DataEvent::RequestInspected {
+                    request_id,
+                    client_ip,
+                    vhost: vhost_cfg.name.clone(),
+                    verdict: chain_ctx.verdict.clone(),
+                    score: chain_ctx.score,
+                    matched_rules: Vec::new(),
+                    latency_us: 0,
+                },
+            };
+            let _ = event_tx.try_send(event);
+        }
+        if let Verdict::Block { reason, action } = &chain_ctx.verdict {
+            let rule_id = chain_ctx
+                .matched_rules
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "WAF-BLOCK".to_string());
+            let entry = crate::logging::WafLogEntry {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                client_ip: client_ip.to_string(),
+                method: req_method.clone(),
+                path: path.clone(),
+                action: "BLOCK".to_string(),
                 rule_id,
-            } => {
-                let entry = crate::logging::WafLogEntry {
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                    client_ip: client_ip.to_string(),
-                    method: req_method.clone(),
-                    path: path.clone(),
-                    action: "BLOCK".to_string(),
-                    rule_id,
-                    reason: format!("Phase block: {}", description),
-                };
-                let _ = self.log_tx.try_send(entry);
-                let _ = respond_custom_error(
-                    session,
-                    status,
-                    &title,
-                    &description,
-                    &client_ip.to_string(),
-                    "",
-                )
-                .await;
-                return Ok(true);
-            }
-            crate::rule_engine::phase::PhaseResult::Continue => {}
+                reason: format!("WAF block: {}", reason),
+            };
+            let _ = self.log_tx.try_send(entry);
+            let _ = respond_custom_error(
+                session,
+                403,
+                "Request Blocked",
+                reason,
+                &client_ip.to_string(),
+                action,
+            )
+            .await;
+            return Ok(true);
         }
 
         // 0.1. Slowloris Connection Limit Check
