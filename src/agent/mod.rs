@@ -78,7 +78,7 @@ pub async fn run_agent(
     // interface are initialized. The returned command sender is the
     // L4 → L3 command path (future src/api/ layer); the receiver must
     // stay alive for the bus to keep running.
-    let (_control_state, _event_rx, _cmd_tx) = crate::control_bus::start_control_bus(
+    let (_control_state, event_tx, _cmd_tx) = crate::control_bus::start_control_bus(
         config_path.to_string(),
         rules_dir.to_string(),
         cfg.global.anomaly_threshold as f64,
@@ -290,6 +290,7 @@ pub async fn run_agent(
         config: config_arc.clone(),
         log_tx,
         blocklist: blocklist.clone(),
+        event_tx: Some(event_tx),
     };
 
     if let Some(ctrl) = &controller {
