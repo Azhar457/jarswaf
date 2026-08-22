@@ -1,0 +1,34 @@
+- id: "PD-001"
+  category: "sqli"
+  technique: "mysql_version_comment"
+  payload: "1 UNI/*!50000ON*/ SELE/*!30000CT*/ password FROM users"
+  expect_block: true
+  notes: "AST tokenizer and normalizer reassembles UNION SELECT after removing MySQL version comments"
+
+- id: "PD-002"
+  category: "sqli"
+  technique: "nfkc_fullwidth"
+  payload: "1 UNION %EF%BC%B3%EF%BC%A5%EF%BC%AC%EF%BC%A5%EF%BC%A3%EF%BC%B4 * FROM accounts"
+  expect_block: true
+  notes: "Fullwidth unicode characters normalized to ASCII before evaluation"
+
+- id: "PD-003"
+  category: "sqli"
+  technique: "multi_layer_url_encoding"
+  payload: "admin%252527%252520OR%2525201=1--"
+  expect_block: true
+  notes: "Bounded recursive URL decoding unwraps multi-level percent-encoding"
+
+- id: "PD-004"
+  category: "sqli"
+  technique: "html_hex_entity_encoding"
+  payload: "&#x27;&#x20;&#x4F;&#x52;&#x20;1=1--"
+  expect_block: true
+  notes: "HTML hex entity decoding decodes ' OR 1=1--"
+
+- id: "PD-005"
+  category: "sqli"
+  technique: "nested_c_style_comments"
+  payload: "1 UNION/*/*nested*/*/SELECT 1,2,3--"
+  expect_block: true
+  notes: "Nested C-style comments stripped cleanly to reveal injection"
