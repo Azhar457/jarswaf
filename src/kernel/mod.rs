@@ -1,26 +1,26 @@
-pub mod interface;
-pub mod xdp;
-pub mod tc;
-pub mod rasp;
 pub mod error;
+pub mod interface;
+pub mod rasp;
+pub mod tc;
 pub mod types;
+pub mod xdp;
 
-pub use interface::{KernelInterface, BpfMapInterface};
 pub use error::{KernelError, KernelResult};
-pub use types::{RaspEvent, BatchResult, IpKey};
+pub use interface::{BpfMapInterface, KernelInterface};
+pub use types::{BatchResult, IpKey, RaspEvent};
 
 use std::sync::OnceLock;
 
 static KERNEL: OnceLock<KernelInterface> = OnceLock::new();
 
 pub fn init() -> &'static KernelInterface {
-    KERNEL.get_or_init(|| {
-        KernelInterface::new()
-    })
+    KERNEL.get_or_init(KernelInterface::new)
 }
 
 pub fn get() -> &'static KernelInterface {
-    KERNEL.get().expect("Kernel interface not initialized. Call kernel::init() first.")
+    KERNEL
+        .get()
+        .expect("Kernel interface not initialized. Call kernel::init() first.")
 }
 
 /// Returns the kernel interface if it has already been initialized (via
@@ -36,7 +36,7 @@ pub fn start_flush_task(mut shutdown: tokio::sync::watch::Receiver<bool>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
         let kernel = get();
-        
+
         loop {
             tokio::select! {
                 _ = interval.tick() => {

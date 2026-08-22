@@ -1,15 +1,15 @@
+use arc_swap::ArcSwap;
 use std::collections::HashSet as StdHashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
-use arc_swap::ArcSwap;
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use super::error::{KernelError, KernelResult};
+use super::rasp::RaspSubsystem;
+use super::tc::TcSubsystem;
 use super::types::{BatchResult, IpKey, RaspEvent};
 use super::xdp::XdpSubsystem;
-use super::tc::TcSubsystem;
-use super::rasp::RaspSubsystem;
 
 #[derive(Debug, Clone, Default)]
 pub struct BlocklistState {
@@ -101,7 +101,10 @@ impl BpfMapInterface {
     pub async fn flush(&self) -> KernelResult<BatchResult> {
         let mut pending = self.pending.lock().await;
         if pending.blocks.is_empty() && pending.unblocks.is_empty() {
-            return Ok(BatchResult { inserted: 0, failed: 0 });
+            return Ok(BatchResult {
+                inserted: 0,
+                failed: 0,
+            });
         }
 
         let ops = pending.clone();
@@ -199,7 +202,9 @@ impl BpfMapInterface {
                     current.blocked_ips.insert(ip);
                 }
                 IpKey::V6(octets) => {
-                    current.blocked_ips.insert(IpAddr::V6(std::net::Ipv6Addr::from(*octets)));
+                    current
+                        .blocked_ips
+                        .insert(IpAddr::V6(std::net::Ipv6Addr::from(*octets)));
                 }
             }
         }
@@ -210,15 +215,24 @@ impl BpfMapInterface {
                     current.blocked_ips.remove(&ip);
                 }
                 IpKey::V6(octets) => {
-                    current.blocked_ips.remove(&IpAddr::V6(std::net::Ipv6Addr::from(*octets)));
+                    current
+                        .blocked_ips
+                        .remove(&IpAddr::V6(std::net::Ipv6Addr::from(*octets)));
                 }
             }
         }
         self.blocklist_state.store(Arc::new(current));
 
-        self.total_blocks.fetch_add(ops.blocks.len() as u64, std::sync::atomic::Ordering::Relaxed);
-        self.total_unblocks.fetch_add(ops.unblocks.len() as u64, std::sync::atomic::Ordering::Relaxed);
-        self.total_flushes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.total_blocks.fetch_add(
+            ops.blocks.len() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.total_unblocks.fetch_add(
+            ops.unblocks.len() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.total_flushes
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         Ok(BatchResult { inserted, failed })
     }
@@ -230,8 +244,12 @@ impl BpfMapInterface {
     pub fn stats(&self) -> KernelStats {
         KernelStats {
             total_blocks: self.total_blocks.load(std::sync::atomic::Ordering::Relaxed),
-            total_unblocks: self.total_unblocks.load(std::sync::atomic::Ordering::Relaxed),
-            total_flushes: self.total_flushes.load(std::sync::atomic::Ordering::Relaxed),
+            total_unblocks: self
+                .total_unblocks
+                .load(std::sync::atomic::Ordering::Relaxed),
+            total_flushes: self
+                .total_flushes
+                .load(std::sync::atomic::Ordering::Relaxed),
             pending_blocks: 0,
             pending_unblocks: 0,
         }
@@ -275,13 +293,24 @@ impl KernelInterface {
             rasp: tokio::sync::Mutex::new(RaspSubsystem::new()),
         }
     }
+}
 
+impl Default for KernelInterface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KernelInterface {
     pub async fn attach_xdp(&self, interface: &str) -> KernelResult<()> {
         let xdp = self.xdp.lock().await;
         xdp.attach(interface).await.map_err(KernelError::LoadFailed)
     }
 
-    pub async fn attach_rasp(&self, rasp_tx: Option<tokio::sync::mpsc::Sender<()>>) -> KernelResult<()> {
+    pub async fn attach_rasp(
+        &self,
+        rasp_tx: Option<tokio::sync::mpsc::Sender<()>>,
+    ) -> KernelResult<()> {
         let rasp = self.rasp.lock().await;
         rasp.attach(rasp_tx).await.map_err(KernelError::LoadFailed)
     }
@@ -290,7 +319,7 @@ impl KernelInterface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_ip_key_from_ipv4() {
         let ip: std::net::Ipv4Addr = "192.168.1.1".parse().unwrap();
@@ -302,7 +331,7 @@ mod tests {
             _ => panic!("Expected V4"),
         }
     }
-    
+
     #[test]
     fn test_ip_key_from_ipv6() {
         let ip: std::net::Ipv6Addr = "::1".parse().unwrap();
@@ -314,31 +343,34 @@ mod tests {
             _ => panic!("Expected V6"),
         }
     }
-    
+
     #[test]
     fn test_batch_result() {
-        let result = BatchResult { inserted: 10, failed: 2 };
+        let result = BatchResult {
+            inserted: 10,
+            failed: 2,
+        };
         assert!(!result.all_success());
         assert_eq!(result.total(), 12);
     }
-    
+
     #[tokio::test]
     async fn test_queue_and_has_pending() {
         #[cfg(target_os = "linux")]
         let iface = BpfMapInterface::new(Arc::new(tokio::sync::Mutex::new(None)));
         #[cfg(not(target_os = "linux"))]
         let iface = BpfMapInterface::new();
-        
+
         assert!(!iface.has_pending().await);
-        
+
         let ip: std::net::IpAddr = "10.0.0.1".parse().unwrap();
         iface.queue_block(ip).await;
         assert!(iface.has_pending().await);
-        
+
         let _ = iface.flush().await;
         assert!(!iface.has_pending().await);
     }
-    
+
     #[test]
     fn test_rasp_event_command_str() {
         let mut event = RaspEvent::default();
@@ -346,7 +378,7 @@ mod tests {
         event.command[..cmd.len()].copy_from_slice(cmd);
         assert_eq!(event.command_str(), "/bin/bash");
     }
-    
+
     #[test]
     fn test_rasp_event_invalid_command() {
         let mut event = RaspEvent::default();

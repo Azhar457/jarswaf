@@ -1,7 +1,7 @@
 use arc_swap::ArcSwap;
-use std::sync::Arc;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -97,18 +97,21 @@ impl RuleSet {
     }
 
     pub fn get_vhost(&self, host: &str) -> Option<&VhostConfig> {
-        self.vhosts.iter().find(|v| {
-            v.hosts.iter().any(|h| {
-                if h == "*" || h == host {
-                    true
-                } else if h.starts_with("*.") {
-                    let suffix = &h[1..];
-                    host.ends_with(suffix)
-                } else {
-                    false
-                }
+        self.vhosts
+            .iter()
+            .find(|v| {
+                v.hosts.iter().any(|h| {
+                    if h == "*" || h == host {
+                        true
+                    } else if h.starts_with("*.") {
+                        let suffix = &h[1..];
+                        host.ends_with(suffix)
+                    } else {
+                        false
+                    }
+                })
             })
-        }).or_else(|| self.vhosts.iter().find(|v| v.is_default))
+            .or_else(|| self.vhosts.iter().find(|v| v.is_default))
     }
 }
 
@@ -155,25 +158,29 @@ impl PublishedState {
     pub fn get_config(&self) -> arc_swap::Guard<Arc<RuntimeConfig>> {
         self.config.load()
     }
-    
+
     pub fn get_rules(&self) -> arc_swap::Guard<Arc<RuleSet>> {
         self.rules.load()
     }
-    
+
     pub fn get_blocklist(&self) -> arc_swap::Guard<Arc<BlocklistSnapshot>> {
         self.blocklist.load()
     }
-    
+
     pub fn publish_config(&self, config: RuntimeConfig) {
         self.config.store(Arc::new(config));
     }
-    
+
     pub fn publish_rules(&self, rules: RuleSet) {
         self.rules.store(Arc::new(rules));
     }
-    
+
     pub fn publish_blocklist(&self, blocklist: BlocklistSnapshot) {
         self.blocklist.store(Arc::new(blocklist));
+    }
+
+    pub fn is_ip_blocked(&self, ip: &std::net::IpAddr) -> bool {
+        self.blocklist.load().entries.contains_key(ip)
     }
 }
 

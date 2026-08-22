@@ -17,6 +17,13 @@ use tokio::net::TcpListener;
 use jarswaf::controller::{build_router, ControllerState};
 use tokio::sync::broadcast;
 
+fn test_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("build test client")
+}
+
 /// Helper: spawn the Controller router on a random local port.
 /// Returns the bound address (e.g. `127.0.0.1:0`) and a JoinHandle that
 /// aborts the server when dropped.
@@ -83,7 +90,11 @@ async fn spawn_test_server(
     let app = build_router(state);
 
     let handle = tokio::spawn(async move {
-        let _ = axum::serve(listener, app.into_make_service()).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
     });
 
     (addr, handle)
@@ -95,9 +106,14 @@ async fn test_health_endpoint_no_auth() {
     let (addr, _handle) = spawn_test_server(None).await;
 
     let url = format!("http://{}/health", addr);
-    let resp = reqwest::get(&url).await.expect("request health");
-    assert_eq!(resp.status(), 200);
+    let resp = test_client()
+        .get(&url)
+        .send()
+        .await
+        .expect("request health");
+    let status = resp.status();
     let body = resp.text().await.expect("read body");
+    assert_eq!(status, 200);
     assert_eq!(body, "OK");
 }
 
@@ -109,7 +125,7 @@ async fn test_api_endpoint_requires_auth() {
 
     // Without auth → 401
     let url = format!("http://{}/api/v1/agents/register", addr);
-    let client = reqwest::Client::new();
+    let client = test_client();
     let resp = client
         .post(&url)
         .json(&serde_json::json!({
@@ -131,7 +147,7 @@ async fn test_api_endpoint_with_auth_succeeds() {
     let (addr, _handle) = spawn_test_server(Some(token.clone())).await;
 
     let url = format!("http://{}/api/v1/agents/register", addr);
-    let client = reqwest::Client::new();
+    let client = test_client();
     let resp = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -154,7 +170,7 @@ async fn test_api_endpoint_wrong_token_rejected() {
     let (addr, _handle) = spawn_test_server(Some(token.clone())).await;
 
     let url = format!("http://{}/api/v1/agents/register", addr);
-    let client = reqwest::Client::new();
+    let client = test_client();
     let resp = client
         .post(&url)
         .header("Authorization", "Bearer wrong_token")
@@ -177,7 +193,7 @@ async fn test_no_admin_token_allows_all() {
 
     // No token configured → register endpoint should fail closed (401)
     let url = format!("http://{}/api/v1/agents/register", addr);
-    let client = reqwest::Client::new();
+    let client = test_client();
     let resp = client
         .post(&url)
         .json(&serde_json::json!({
@@ -199,7 +215,7 @@ async fn test_metrics_endpoint_reachable() {
     let (addr, _handle) = spawn_test_server(Some(token.clone())).await;
 
     let url = format!("http://{}/metrics", addr);
-    let client = reqwest::Client::new();
+    let client = test_client();
 
     // 1. Without auth -> 401
     let resp_unauth = client

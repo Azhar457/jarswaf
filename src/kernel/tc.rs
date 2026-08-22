@@ -23,7 +23,10 @@ impl TcSubsystem {
     }
 
     pub async fn attach(&self, _interface: &str) -> Result<(), String> {
-        warn!("TC subsystem is currently a skeleton stub; TC not attached on {}", _interface);
+        warn!(
+            "TC subsystem is currently a skeleton stub; TC not attached on {}",
+            _interface
+        );
         Ok(())
     }
 }

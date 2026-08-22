@@ -1,4 +1,5 @@
 pub mod blocklist_manager;
+pub mod certificate_manager;
 pub mod commands;
 pub mod config_manager;
 pub mod gossip_manager;
@@ -7,17 +8,16 @@ pub mod policy_engine;
 pub mod rule_engine;
 pub mod state;
 pub mod ws_broadcaster;
-pub mod certificate_manager;
 
-pub use commands::{CommandError, CommandSender, CommandReceiver, ControlCommand, command_channel};
-pub use state::{PublishedState, RuntimeConfig, RuleSet, DashboardMetrics};
+pub use commands::{command_channel, CommandError, CommandReceiver, CommandSender, ControlCommand};
+pub use state::{DashboardMetrics, PublishedState, RuleSet, RuntimeConfig};
 pub use ws_broadcaster::{WsBroadcaster, WsEvent};
 
+use crate::data_bus::events::{DataEvent, EventReceiver};
 use blocklist_manager::BlocklistManager;
 use config_manager::ConfigManager;
 use policy_engine::PolicyEngine;
 use rule_engine::RuleEngine;
-use crate::data_bus::events::{DataEvent, EventReceiver};
 use tracing::{error, info, warn};
 
 /// The control bus — central decision maker
@@ -27,11 +27,11 @@ pub struct ControlBus {
     rules: RuleEngine,
     config: ConfigManager,
     policy: PolicyEngine,
-    
+
     // Channels
     event_rx: Option<EventReceiver>,
     cmd_rx: Option<CommandReceiver>,
-    
+
     // Metrics
     start_time: std::time::Instant,
     total_requests: std::sync::atomic::AtomicU64,
@@ -51,7 +51,7 @@ impl ControlBus {
         let rules = RuleEngine::new(state.clone());
         let config = ConfigManager::new(state.clone(), config_path, rules_dir);
         let policy = PolicyEngine::new(state, anomaly_threshold, scoring_mode);
-        
+
         Self {
             blocklist,
             rules,
@@ -64,32 +64,32 @@ impl ControlBus {
             blocked_requests: std::sync::atomic::AtomicU64::new(0),
         }
     }
-    
+
     /// Set event receiver (from data bus)
     pub fn set_event_rx(&mut self, rx: EventReceiver) {
         self.event_rx = Some(rx);
     }
-    
+
     /// Set command receiver (from API layer)
     pub fn set_command_rx(&mut self, rx: CommandReceiver) {
         self.cmd_rx = Some(rx);
     }
-    
+
     /// Get published state reference (for data bus reads)
     pub fn state(&self) -> &PublishedState {
         &self.blocklist.state
     }
-    
+
     /// Run the control bus event loop
     pub async fn run(mut self) {
         info!("Control bus starting");
-        
+
         let mut event_rx = self.event_rx.take().expect("Event receiver not set");
         let mut cmd_rx = self.cmd_rx.take().expect("Command receiver not set");
-        
+
         let self_ptr = std::sync::Arc::new(tokio::sync::Mutex::new(self));
         let self_clone = self_ptr.clone();
-        
+
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
@@ -98,7 +98,7 @@ impl ControlBus {
                 bus.publish_metrics().await;
             }
         });
-        
+
         // Main event loop
         let bus = self_ptr.clone();
         loop {
@@ -116,7 +116,7 @@ impl ControlBus {
                         }
                     }
                 }
-                
+
                 // Process commands
                 command = cmd_rx.recv() => {
                     match command {
@@ -132,29 +132,31 @@ impl ControlBus {
                 }
             }
         }
-        
+
         info!("Control bus stopped");
     }
-    
+
     /// Process a data event
     async fn process_event(&mut self, event: DataEvent) {
-        self.total_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        
+        self.total_requests
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         match &event {
             DataEvent::RequestInspected { .. } => {
                 // Request allowed — nothing to do
             }
-            
+
             DataEvent::RequestBlocked {
                 request_id,
                 client_ip,
                 reason: _,
                 rule_id,
             } => {
-                self.blocked_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.blocked_requests
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 self.blocklist.record_block(*client_ip).await;
                 self.rules.record_trigger(rule_id).await;
-                
+
                 // Publish to WebSocket
                 ws_broadcaster::get().publish(ws_broadcaster::WsEvent::Log {
                     timestamp: chrono::Utc::now().to_rfc3339(),
@@ -169,11 +171,11 @@ impl ControlBus {
                     vhost: String::new(),
                 });
             }
-            
+
             DataEvent::RequestForwarded { .. } => {
                 // Could track backend latency
             }
-            
+
             DataEvent::BackendError { backend, error, .. } => {
                 warn!("Backend error: {} — {}", backend, error);
                 ws_broadcaster::get().publish(ws_broadcaster::WsEvent::Alert {
@@ -183,7 +185,7 @@ impl ControlBus {
                     source: "proxy".to_string(),
                 });
             }
-            
+
             DataEvent::RateLimitExceeded { client_ip, .. } => {
                 ws_broadcaster::get().publish(ws_broadcaster::WsEvent::Alert {
                     level: "info".to_string(),
@@ -193,14 +195,14 @@ impl ControlBus {
                 });
             }
         }
-        
+
         // Run policy engine
         let policy_commands = self.policy.evaluate(&event).await;
         for cmd in policy_commands {
             self.process_command(cmd).await;
         }
     }
-    
+
     /// Process a command
     async fn process_command(&mut self, cmd: ControlCommand) {
         match cmd {
@@ -216,7 +218,7 @@ impl ControlBus {
             ControlCommand::UpdateConfig(config) => {
                 self.state().publish_config(config);
             }
-            
+
             // Rules
             ControlCommand::GetRuleSet(reply) => {
                 let _ = reply.send(self.state().get_rules().as_ref().clone());
@@ -233,7 +235,7 @@ impl ControlBus {
             ControlCommand::SetRuleEnabled { id, enabled, reply } => {
                 let _ = reply.send(self.rules.set_rule_enabled(&id, enabled).await);
             }
-            
+
             // Rate limits
             ControlCommand::AddRateLimitPolicy { policy, reply } => {
                 let _ = reply.send(self.rules.add_rate_limit_policy(policy).await);
@@ -241,7 +243,7 @@ impl ControlBus {
             ControlCommand::RemoveRateLimitPolicy { name, reply } => {
                 let _ = reply.send(self.rules.remove_rate_limit_policy(&name).await);
             }
-            
+
             // Vhosts
             ControlCommand::GetVhosts(reply) => {
                 let vhosts = self.state().get_rules().vhosts.clone();
@@ -256,12 +258,17 @@ impl ControlBus {
             ControlCommand::RemoveVhost { name, reply } => {
                 let _ = reply.send(self.rules.remove_vhost(&name).await);
             }
-            
+
             // Blocklist
             ControlCommand::GetBlocklist(reply) => {
                 let _ = reply.send(self.blocklist.list_ips().await);
             }
-            ControlCommand::BlockIp { ip, duration, reason, source } => {
+            ControlCommand::BlockIp {
+                ip,
+                duration,
+                reason,
+                source,
+            } => {
                 self.blocklist.block_ip(ip, duration, reason, source).await;
             }
             ControlCommand::UnblockIp { ip } => {
@@ -276,28 +283,36 @@ impl ControlBus {
             ControlCommand::IsBlocked { ip, reply } => {
                 let _ = reply.send(self.blocklist.is_blocked(&ip).await);
             }
-            
+
             // Metrics
             ControlCommand::GetMetrics(reply) => {
                 let metrics = self.build_metrics().await;
                 let _ = reply.send(metrics);
             }
-            
+
             // Lifecycle
             ControlCommand::Shutdown => {
                 info!("Shutdown command received");
             }
         }
     }
-    
+
     /// Build dashboard metrics
     async fn build_metrics(&self) -> DashboardMetrics {
         DashboardMetrics {
             timestamp: chrono::Utc::now().to_rfc3339(),
-            total_requests: self.total_requests.load(std::sync::atomic::Ordering::Relaxed),
-            blocked_requests: self.blocked_requests.load(std::sync::atomic::Ordering::Relaxed),
-            allowed_requests: self.total_requests.load(std::sync::atomic::Ordering::Relaxed)
-                - self.blocked_requests.load(std::sync::atomic::Ordering::Relaxed),
+            total_requests: self
+                .total_requests
+                .load(std::sync::atomic::Ordering::Relaxed),
+            blocked_requests: self
+                .blocked_requests
+                .load(std::sync::atomic::Ordering::Relaxed),
+            allowed_requests: self
+                .total_requests
+                .load(std::sync::atomic::Ordering::Relaxed)
+                - self
+                    .blocked_requests
+                    .load(std::sync::atomic::Ordering::Relaxed),
             requests_per_sec: 0.0,
             blocked_per_sec: 0.0,
             active_connections: 0,
@@ -307,7 +322,7 @@ impl ControlBus {
             uptime_secs: self.start_time.elapsed().as_secs(),
         }
     }
-    
+
     /// Publish metrics to WebSocket
     async fn publish_metrics(&self) {
         let metrics = self.build_metrics().await;
@@ -332,15 +347,15 @@ pub fn init(
     scoring_mode: String,
 ) -> (ControlBus, PublishedState, CommandSender) {
     ws_broadcaster::init();
-    
+
     let state = PublishedState::new(
         RuntimeConfig::default(),
         RuleSet::default(),
         state::BlocklistSnapshot::default(),
     );
-    
+
     let (cmd_tx, cmd_rx) = command_channel(100);
-    
+
     let mut bus = ControlBus::new(
         state.clone(),
         config_path,
@@ -349,7 +364,7 @@ pub fn init(
         scoring_mode,
     );
     bus.set_command_rx(cmd_rx);
-    
+
     (bus, state, cmd_tx)
 }
 
@@ -362,7 +377,11 @@ pub fn start_control_bus(
     rules_dir: String,
     anomaly_threshold: f64,
     scoring_mode: String,
-) -> (PublishedState, crate::data_bus::events::EventSender, CommandSender) {
+) -> (
+    PublishedState,
+    crate::data_bus::events::EventSender,
+    CommandSender,
+) {
     // Initialize kernel (Layer 1) — load eBPF object lazily. This is where
     // XDP/RASP/TC subsystems get their shared BpfMapInterface (see lib.rs).
     crate::kernel::init();

@@ -130,6 +130,8 @@ pub struct GlobalConfig {
     /// learn_safe_ast_profile for the poisoning vector this prevents.
     #[serde(default)]
     pub ast_learning_enabled: bool,
+    #[serde(default)]
+    pub api_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -464,6 +466,7 @@ impl Default for Config {
                 scoring_mode: default_scoring_mode(),
                 anomaly_threshold: default_anomaly_threshold(),
                 ast_learning_enabled: false,
+                api_port: None,
             },
             tls: TlsConfig {
                 mode: "disabled".to_string(),

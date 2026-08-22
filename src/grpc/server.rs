@@ -7,6 +7,7 @@ use tracing::{info, warn};
 
 pub struct WafManagerService {
     pub auth_token: String,
+    pub config_path: String,
 }
 
 impl WafManagerService {
@@ -70,11 +71,21 @@ impl WafSync for WafManagerService {
 
         let (tx, rx) = tokio::sync::mpsc::channel(4);
 
-        // Send an initial payload
+        // Load real config snapshot and blocklist from disk
+        let current_cfg = crate::config::load_config(&self.config_path).unwrap_or_default();
+        let rules_payload =
+            serde_json::to_string(&current_cfg).unwrap_or_else(|_| "{}".to_string());
+        let blocklist_ips: Vec<String> = current_cfg
+            .blacklists
+            .iter()
+            .filter(|b| b.enabled)
+            .flat_map(|b| b.ips.clone())
+            .collect();
+
         let initial_payload = PolicySyncResponse {
-            version: "v1.0.1".to_string(),
-            rules_payload: "{}".to_string(),
-            blocklist_ips: vec![],
+            version: format!("v{}", chrono::Utc::now().timestamp()),
+            rules_payload,
+            blocklist_ips,
         };
 
         if tx.send(Ok(initial_payload)).await.is_err() {
@@ -108,6 +119,7 @@ impl WafSync for WafManagerService {
 pub async fn run_manager_server(
     port: u16,
     token: String,
+    config_path: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Bind loopback by default — the gRPC manager is a control plane and must not be
     // exposed broadly. Cross-host deployments should front it with TLS/mTLS or a reverse
@@ -115,7 +127,10 @@ pub async fn run_manager_server(
     // to untrusted networks with only a bearer token.
     let bind_host = std::env::var("JARSWAF_GRPC_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
     let addr = format!("{}:{}", bind_host, port).parse()?;
-    let service = WafManagerService { auth_token: token };
+    let service = WafManagerService {
+        auth_token: token,
+        config_path,
+    };
 
     info!("WAF Manager gRPC server listening on {}", addr);
 

@@ -19,8 +19,16 @@ static REDIR_001_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)(redirect|return|url|next|goto|callback|return_to|redirect_uri|continue|forward)=https?://").unwrap()
 });
 
-static SSRF_001_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(169\.254\.169\.254|127\.0\.0\.1|localhost|0\.0\.0\.0|::1|::ffff:127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)").unwrap()
+static SSRF_METADATA_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(169\.254\.169\.254|metadata\.google\.internal|instance-data|latest/meta-data|latest/user-data)").unwrap()
+});
+
+static SSRF_SCHEME_INTERNAL_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(https?|ftp|gopher|dict|file)://(localhost|127\.0\.0\.1|0\.0\.0\.0|::1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)").unwrap()
+});
+
+static SSRF_URL_PARAM_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(url|uri|target|dest|destination|redirect|return_to|fetch|proxy|src|feed|endpoint|link|host)=(https?|ftp|gopher|dict|file)://").unwrap()
 });
 
 static SSRF_002_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -67,7 +75,9 @@ fn check_redir_001(req: &RequestInfo) -> bool {
 
 fn check_ssrf_001(req: &RequestInfo) -> bool {
     let target = format!("{}?{}", req.path, req.query);
-    SSRF_001_REGEX.is_match(&target)
+    SSRF_METADATA_REGEX.is_match(&target)
+        || SSRF_SCHEME_INTERNAL_REGEX.is_match(&target)
+        || SSRF_URL_PARAM_REGEX.is_match(req.query)
 }
 
 fn check_ssrf_002(req: &RequestInfo) -> bool {

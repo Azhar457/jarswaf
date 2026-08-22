@@ -3,11 +3,10 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct ComplianceEvent {
-    #[serde(rename = "@timestamp")]
-    timestamp: String,
+    #[serde(rename = "@timestamp", default)]
+    _timestamp: Option<String>,
     event: EventMeta,
     source: SourceMeta,
     rule: RuleMeta,
@@ -24,7 +23,6 @@ struct SourceMeta {
     ip: String,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct RuleMeta {
     id: String,
@@ -47,6 +45,7 @@ pub fn generate_report(log_path: &str, output_path: &str) {
     let mut blocked_events = 0;
     let mut compliance_counts: HashMap<String, usize> = HashMap::new();
     let mut top_ips: HashMap<String, usize> = HashMap::new();
+    let mut top_rules: HashMap<String, usize> = HashMap::new();
 
     for line in reader.lines() {
         if let Ok(line_content) = line {
@@ -60,6 +59,7 @@ pub fn generate_report(log_path: &str, output_path: &str) {
                 }
 
                 *top_ips.entry(event.source.ip).or_insert(0) += 1;
+                *top_rules.entry(event.rule.id).or_insert(0) += 1;
 
                 for tag in event.compliance_tags {
                     *compliance_counts.entry(tag).or_insert(0) += 1;

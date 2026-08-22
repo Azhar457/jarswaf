@@ -262,8 +262,11 @@ pub async fn run_controller(port: u16, config_path: String) {
         info!("No grpc_token configured — generated a random one (persisted to config).");
         generated
     });
+    let grpc_config_path = config_path.clone();
     tokio::spawn(async move {
-        if let Err(e) = crate::grpc::server::run_manager_server(9000, grpc_token).await {
+        if let Err(e) =
+            crate::grpc::server::run_manager_server(9000, grpc_token, grpc_config_path).await
+        {
             tracing::error!("gRPC Manager Server error: {}", e);
         }
     });

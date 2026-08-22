@@ -1,8 +1,8 @@
-pub mod context;
 pub mod chain;
+pub mod context;
 pub mod events;
 pub mod inspectors;
 
-pub use context::{InspectionContext, Verdict};
-pub use chain::{Inspector, InspectionChain};
-pub use events::DataEvent;
+pub use chain::{ChainConfig, InspectionChain};
+pub use context::InspectionContext;
+pub use events::{event_channel, DataEvent, EventReceiver, EventSender};
