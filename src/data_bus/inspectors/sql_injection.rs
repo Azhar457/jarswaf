@@ -61,8 +61,10 @@ impl SqlInjectionInspector {
         let mut total_score = 0.0;
         let mut matches = Vec::new();
 
+        let normalized = crate::rule_engine::normalize_canonical(target);
+
         for (score, pattern) in SQLI_PATTERNS.iter() {
-            if pattern.is_match(target) {
+            if pattern.is_match(target) || pattern.is_match(&normalized) {
                 total_score += score;
                 matches.push(pattern.as_str());
             }
@@ -194,6 +196,33 @@ mod tests {
         let mut attack_ctx = make_sqli_ctx("/style.css?user=admin' OR 1=1--");
         assert!(inspector.should_run(&attack_ctx));
         let result = inspector.inspect(&mut attack_ctx).await;
+        assert!(result.verdict.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_blocks_mysql_version_comment_sqli() {
+        let inspector = SqlInjectionInspector::new();
+        let mut ctx =
+            make_sqli_ctx("/product?id=1 UNI/*!50000ON*/ SELE/*!30000CT*/ password FROM users");
+        let result = inspector.inspect(&mut ctx).await;
+        assert!(result.verdict.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_blocks_nfkc_fullwidth_sqli() {
+        let inspector = SqlInjectionInspector::new();
+        // ＳＥＬＥＣＴ (fullwidth)
+        let mut ctx = make_sqli_ctx("/query?q=1 UNION %EF%BC%B3%EF%BC%A5%EF%BC%AC%EF%BC%A5%EF%BC%A3%EF%BC%B4 * FROM accounts");
+        let result = inspector.inspect(&mut ctx).await;
+        assert!(result.verdict.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_blocks_double_url_encoded_sqli() {
+        let inspector = SqlInjectionInspector::new();
+        // %252527%252520OR%2525201=1
+        let mut ctx = make_sqli_ctx("/search?q=test%252527%252520OR%2525201=1--");
+        let result = inspector.inspect(&mut ctx).await;
         assert!(result.verdict.is_some());
     }
 }

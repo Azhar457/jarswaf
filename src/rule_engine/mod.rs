@@ -132,6 +132,8 @@ pub enum MatchOperator {
 pub enum Transform {
     /// URL-decode value (%XX → char)
     UrlDecode,
+    /// Bounded recursive URL-decode (max 5 cycles)
+    RecursiveUrlDecode,
     /// Lowercase
     Lowercase,
     /// Normalize path: collapse //, resolve ./ and ../
@@ -144,11 +146,28 @@ pub enum Transform {
     HtmlEntityDecode,
     /// Base64 decode for detection (appends ORIG_B64: prefix)
     Base64Decode,
+    /// Unicode NFKC normalization
+    Nfkc,
+    /// Strip SQL & MySQL inline comments (/* ... */, /*!50000 ... */, --, #)
+    StripComments,
 }
+
+/// Maximum recursive URL decoding depth to prevent ReDoS / CPU exhaustion
+pub const MAX_DECODE_DEPTH: usize = 5;
 
 /// Default transforms applied to body and args
 pub fn default_body_transforms() -> Vec<Transform> {
-    vec![Transform::UrlDecode, Transform::RemoveNulls]
+    vec![Transform::RecursiveUrlDecode, Transform::RemoveNulls]
+}
+
+/// Canonical deterministic normalization pipeline for WAF detection
+pub fn normalize_canonical(input: &str) -> String {
+    let mut s = recursive_url_decode(input, MAX_DECODE_DEPTH);
+    s = html_entity_decode(&s);
+    s = unicode_nfkc(&s);
+    s = strip_sql_comments(&s);
+    s = compress_whitespace(&s);
+    s.to_lowercase()
 }
 
 /// Apply a pipeline of transforms to a value
@@ -157,21 +176,109 @@ pub fn apply_transforms(value: &str, transforms: &[Transform]) -> String {
     for t in transforms {
         s = match t {
             Transform::UrlDecode => url_decode(&s),
+            Transform::RecursiveUrlDecode => recursive_url_decode(&s, MAX_DECODE_DEPTH),
             Transform::Lowercase => s.to_lowercase(),
             Transform::NormalizePath => normalize_path(&s),
             Transform::RemoveNulls => s.replace('\0', ""),
             Transform::CompressWhitespace => compress_whitespace(&s),
             Transform::HtmlEntityDecode => html_entity_decode(&s),
             Transform::Base64Decode => base64_decode_try(&s),
+            Transform::Nfkc => unicode_nfkc(&s),
+            Transform::StripComments => strip_sql_comments(&s),
         };
     }
     s
 }
 
-fn url_decode(s: &str) -> String {
+pub fn url_decode(s: &str) -> String {
     urlencoding::decode(s)
         .map(|c| c.into_owned())
         .unwrap_or_else(|_| s.to_string())
+}
+
+pub fn recursive_url_decode(s: &str, max_depth: usize) -> String {
+    let mut current = s.to_string();
+    for _ in 0..max_depth {
+        let decoded = url_decode(&current);
+        if decoded == current {
+            break;
+        }
+        current = decoded;
+    }
+    current
+}
+
+pub fn unicode_nfkc(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    s.nfkc().collect()
+}
+
+pub fn strip_sql_comments(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // 1. MySQL version comment: /*!50000SELECT ... */ or /*!SELECT ... */
+        if i + 2 < len && chars[i] == '/' && chars[i + 1] == '*' && chars[i + 2] == '!' {
+            i += 3;
+            // Skip optional 5 version digits (e.g. 50000)
+            let mut digit_count = 0;
+            while i < len && chars[i].is_ascii_digit() && digit_count < 5 {
+                i += 1;
+                digit_count += 1;
+            }
+            // Copy contents inside MySQL version comment directly inline until */
+            while i < len {
+                if i + 1 < len && chars[i] == '*' && chars[i + 1] == '/' {
+                    i += 2;
+                    break;
+                }
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        // 2. Standard multi-line comment: /* ... */ with nested comment support
+        else if i + 1 < len && chars[i] == '/' && chars[i + 1] == '*' {
+            i += 2;
+            let mut depth = 1;
+            while i < len && depth > 0 {
+                if i + 1 < len && chars[i] == '/' && chars[i + 1] == '*' {
+                    depth += 1;
+                    i += 2;
+                } else if i + 1 < len && chars[i] == '*' && chars[i + 1] == '/' {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            result.push(' ');
+        }
+        // 3. Single-line comments: -- or #
+        else if (i + 1 < len
+            && chars[i] == '-'
+            && chars[i + 1] == '-'
+            && (i + 2 >= len || chars[i + 2].is_whitespace()))
+            || (chars[i] == '#' && (i == 0 || chars[i - 1].is_whitespace()))
+        {
+            if chars[i] == '#' {
+                i += 1;
+            } else {
+                i += 2;
+            }
+            while i < len && chars[i] != '\n' && chars[i] != '\r' {
+                i += 1;
+            }
+            result.push(' ');
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
 }
 
 fn compress_whitespace(s: &str) -> String {
@@ -219,40 +326,41 @@ fn normalize_path(s: &str) -> String {
 
 fn html_entity_decode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'&' {
-            if let Some(end) = s[i..].find(';') {
-                let entity = &s[i + 1..i + end];
-                let decoded = if let Some(num_part) = entity.strip_prefix('#') {
-                    if num_part.starts_with('x') || num_part.starts_with('X') {
-                        u32::from_str_radix(&num_part[1..], 16)
-                            .ok()
-                            .and_then(char::from_u32)
-                    } else {
-                        num_part.parse::<u32>().ok().and_then(char::from_u32)
-                    }
+    let mut rest = s;
+    while let Some(amp_pos) = rest.find('&') {
+        out.push_str(&rest[..amp_pos]);
+        rest = &rest[amp_pos..];
+        if let Some(semi_pos) = rest.find(';') {
+            let entity = &rest[1..semi_pos];
+            let decoded = if let Some(num_part) = entity.strip_prefix('#') {
+                if num_part.starts_with('x') || num_part.starts_with('X') {
+                    u32::from_str_radix(&num_part[1..], 16)
+                        .ok()
+                        .and_then(char::from_u32)
                 } else {
-                    match entity {
-                        "amp" => Some('&'),
-                        "lt" => Some('<'),
-                        "gt" => Some('>'),
-                        "quot" => Some('"'),
-                        "apos" => Some('\''),
-                        _ => None,
-                    }
-                };
-                if let Some(c) = decoded {
-                    out.push(c);
-                    i += end + 1;
-                    continue;
+                    num_part.parse::<u32>().ok().and_then(char::from_u32)
                 }
+            } else {
+                match entity {
+                    "amp" => Some('&'),
+                    "lt" => Some('<'),
+                    "gt" => Some('>'),
+                    "quot" => Some('"'),
+                    "apos" => Some('\''),
+                    _ => None,
+                }
+            };
+            if let Some(c) = decoded {
+                out.push(c);
+                rest = &rest[semi_pos + 1..];
+                continue;
             }
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        // If not a valid entity, push the '&' and continue
+        out.push('&');
+        rest = &rest[1..];
     }
+    out.push_str(rest);
     out
 }
 
@@ -1053,6 +1161,49 @@ action: block
             args: AHashMap::new(),
         };
         parse_and_test(yaml, &req, true, "path matches /admin");
+    }
+
+    #[test]
+    fn test_bounded_recursive_url_decode() {
+        // 1-level
+        assert_eq!(recursive_url_decode("%27", 5), "'");
+        // 3-level
+        assert_eq!(recursive_url_decode("%252527", 5), "'");
+        // 10-level bounded at 5 cycles
+        let mut deeply_nested = "'".to_string();
+        for _ in 0..10 {
+            deeply_nested = urlencoding::encode(&deeply_nested).into_owned();
+        }
+        let result = recursive_url_decode(&deeply_nested, 5);
+        // Does not infinite loop and unwraps 5 layers
+        assert_ne!(result, deeply_nested);
+    }
+
+    #[test]
+    fn test_strip_mysql_version_comments() {
+        let input = "1 UNI/*!50000ON*/ SELE/*!30000CT*/ user()";
+        let cleaned = strip_sql_comments(input);
+        let normalized = compress_whitespace(&cleaned);
+        assert_eq!(normalized, "1 UNION SELECT user()");
+    }
+
+    #[test]
+    fn test_strip_nested_sql_comments() {
+        let input = "UNION/*/*nested*/*/SELECT";
+        let cleaned = strip_sql_comments(input);
+        let normalized = compress_whitespace(&cleaned);
+        assert_eq!(normalized, "UNION SELECT");
+    }
+
+    #[test]
+    fn test_normalize_canonical_pipeline() {
+        let input = "%EF%BC%B3%EF%BC%A5%EF%BC%AC%EF%BC%A5%EF%BC%A3%EF%BC%B4";
+        let normalized = normalize_canonical(input);
+        assert_eq!(normalized, "select");
+
+        let input_hex = "&#x27;&#x20;&#x4F;&#x52;&#x20;1=1";
+        let normalized_hex = normalize_canonical(input_hex);
+        assert_eq!(normalized_hex, "' or 1=1");
     }
 
     fn req_builder() -> RequestBuilder {

@@ -11,7 +11,8 @@ use aya_ebpf::{
 use core::mem;
 use network_types::{
     eth::{EthHdr, EtherType},
-    ip::{Ipv4Hdr, Ipv6Hdr},
+    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
+    tcp::TcpHdr,
 };
 
 #[repr(C)]
@@ -62,6 +63,19 @@ fn try_jarswaf_ebpf(ctx: XdpContext) -> Result<u32, ()> {
             if unsafe { BLOCKLIST.get(&source_ip) }.is_some() {
                 return Ok(xdp_action::XDP_DROP);
             }
+
+            // Anti-Recon / Scanner Fingerprint mitigation
+            if unsafe { (*ipv4hdr).proto } == IpProto::Tcp {
+                let tcphdr: *const TcpHdr = ptr_at(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
+                let syn = unsafe { (*tcphdr).syn() != 0 && (*tcphdr).ack() == 0 };
+                let window = u16::from_be(unsafe { (*tcphdr).window });
+                let doff = unsafe { (*tcphdr).doff() };
+
+                // Drop SYN scan probes with fixed scanner window sizes and missing options
+                if syn && doff == 5 && (window == 1024 || window == 2048) {
+                    return Ok(xdp_action::XDP_DROP);
+                }
+            }
         }
         EtherType::Ipv6 => {
             let ipv6hdr: *const Ipv6Hdr = ptr_at(&ctx, EthHdr::LEN)?;
@@ -69,6 +83,17 @@ fn try_jarswaf_ebpf(ctx: XdpContext) -> Result<u32, ()> {
 
             if unsafe { BLOCKLIST_V6.get(&source_ip) }.is_some() {
                 return Ok(xdp_action::XDP_DROP);
+            }
+
+            if unsafe { (*ipv6hdr).next_hdr } == IpProto::Tcp {
+                let tcphdr: *const TcpHdr = ptr_at(&ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
+                let syn = unsafe { (*tcphdr).syn() != 0 && (*tcphdr).ack() == 0 };
+                let window = u16::from_be(unsafe { (*tcphdr).window });
+                let doff = unsafe { (*tcphdr).doff() };
+
+                if syn && doff == 5 && (window == 1024 || window == 2048) {
+                    return Ok(xdp_action::XDP_DROP);
+                }
             }
         }
         _ => return Ok(xdp_action::XDP_PASS),
