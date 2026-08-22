@@ -1,7 +1,9 @@
-use crate::control_bus::state::{PublishedState, RuntimeConfig, RuleSet, VhostConfig, RateLimitPolicy, CustomRuleDef};
 use crate::control_bus::commands::ControlCommand;
+use crate::control_bus::state::{
+    CustomRuleDef, PublishedState, RateLimitPolicy, RuleSet, RuntimeConfig, VhostConfig,
+};
 use crate::control_bus::ws_broadcaster::{get as get_ws, WsEvent};
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// Manages configuration
 pub struct ConfigManager {
@@ -18,12 +20,20 @@ impl ConfigManager {
             rules_dir,
         }
     }
-    
+
+    pub fn rules_dir(&self) -> &str {
+        &self.rules_dir
+    }
+
+    pub fn config_path(&self) -> &str {
+        &self.config_path
+    }
+
     /// Load configuration from file
     pub fn load_config(&self) -> Result<LoadedConfig, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(&self.config_path)?;
         let config: crate::config::Config = toml::from_str(&content)?;
-        
+
         Ok(LoadedConfig {
             runtime: RuntimeConfig {
                 http_port: config.global.port_http,
@@ -90,37 +100,37 @@ impl ConfigManager {
             },
         })
     }
-    
+
     /// Reload configuration from file
     pub async fn reload(&self) -> Result<(), Box<dyn std::error::Error>> {
         match self.load_config() {
             Ok(loaded) => {
                 self.state.publish_config(loaded.runtime);
                 self.state.publish_rules(loaded.rules);
-                
+
                 get_ws().publish(WsEvent::ConfigReload {
                     success: true,
                     error: None,
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 });
-                
+
                 info!("Configuration reloaded from {}", self.config_path);
                 Ok(())
             }
             Err(e) => {
                 error!("Failed to reload config: {}", e);
-                
+
                 get_ws().publish(WsEvent::ConfigReload {
                     success: false,
                     error: Some(e.to_string()),
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 });
-                
+
                 Err(e)
             }
         }
     }
-    
+
     /// Start background config file watcher
     pub fn start_watcher(
         &self,
@@ -128,14 +138,14 @@ impl ConfigManager {
         mut shutdown: tokio::sync::watch::Receiver<bool>,
     ) {
         let config_path = self.config_path.clone();
-        
+
         tokio::spawn(async move {
             let mut last_modified = std::fs::metadata(&config_path)
                 .and_then(|m| m.modified())
                 .unwrap_or_else(|_| std::time::SystemTime::now());
-            
+
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
-            
+
             loop {
                 tokio::select! {
                     _ = interval.tick() => {

@@ -1015,7 +1015,6 @@ enabled: true
     // CYCLE 1.3 — Penetration Test Suite
     // ────────────────────────────────────────────────────────────
 
-    #[allow(dead_code)]
     fn parse_and_test(yaml: &str, req: &RequestData, should_match: bool, desc: &str) {
         let raw: RawRule =
             serde_yaml_ng::from_str(yaml).unwrap_or_else(|_| panic!("parse {}: yaml", desc));
@@ -1026,6 +1025,34 @@ enabled: true
             "{}: expected match={}, got {}",
             desc, should_match, result
         );
+    }
+
+    #[test]
+    fn test_parse_and_test_execution() {
+        let yaml = r#"
+id: "TEST-PARSE-001"
+name: "Test Parse Rule"
+phase: request_headers
+severity: high
+match:
+  any:
+    - field: path
+      operator: equals
+      value: "/admin"
+action: block
+"#;
+        let mut headers = AHashMap::new();
+        headers.insert("host".to_string(), "example.com".to_string());
+        let req = RequestData {
+            method: "GET".to_string(),
+            path: "/admin".to_string(),
+            query: String::new(),
+            headers,
+            body: String::new(),
+            cookies: AHashMap::new(),
+            args: AHashMap::new(),
+        };
+        parse_and_test(yaml, &req, true, "path matches /admin");
     }
 
     fn req_builder() -> RequestBuilder {

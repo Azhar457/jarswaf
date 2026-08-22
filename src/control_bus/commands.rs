@@ -1,5 +1,5 @@
 use crate::control_bus::state::{
-    BlockSource, CustomRuleDef, RateLimitPolicy, RuntimeConfig, RuleSet, VhostConfig,
+    BlockSource, CustomRuleDef, RateLimitPolicy, RuleSet, RuntimeConfig, VhostConfig,
 };
 use std::net::IpAddr;
 use std::time::Duration;
@@ -11,7 +11,7 @@ pub enum ControlCommand {
     ReloadConfig,
     GetConfig(tokio::sync::oneshot::Sender<RuntimeConfig>),
     UpdateConfig(RuntimeConfig),
-    
+
     // === RULES ===
     GetRuleSet(tokio::sync::oneshot::Sender<RuleSet>),
     AddCustomRule {
@@ -32,7 +32,7 @@ pub enum ControlCommand {
         enabled: bool,
         reply: tokio::sync::oneshot::Sender<Result<(), CommandError>>,
     },
-    
+
     // === RATE LIMITS ===
     AddRateLimitPolicy {
         policy: RateLimitPolicy,
@@ -42,7 +42,7 @@ pub enum ControlCommand {
         name: String,
         reply: tokio::sync::oneshot::Sender<Result<(), CommandError>>,
     },
-    
+
     // === VHOSTS ===
     GetVhosts(tokio::sync::oneshot::Sender<Vec<VhostConfig>>),
     AddVhost {
@@ -58,7 +58,7 @@ pub enum ControlCommand {
         name: String,
         reply: tokio::sync::oneshot::Sender<Result<(), CommandError>>,
     },
-    
+
     // === BLOCKLIST ===
     GetBlocklist(tokio::sync::oneshot::Sender<Vec<IpAddr>>),
     BlockIp {
@@ -79,10 +79,10 @@ pub enum ControlCommand {
         ip: IpAddr,
         reply: tokio::sync::oneshot::Sender<bool>,
     },
-    
+
     // === METRICS ===
     GetMetrics(tokio::sync::oneshot::Sender<crate::control_bus::state::DashboardMetrics>),
-    
+
     // === LIFECYCLE ===
     Shutdown,
 }

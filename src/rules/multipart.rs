@@ -121,12 +121,43 @@ fn inspect_part(part_data: &[u8], findings: &mut Vec<MultipartFinding>) {
     for line in header_str.lines() {
         let line_lower = line.to_lowercase();
         if line_lower.starts_with("content-disposition:") {
-            // Extract filename="..."
+            // Extract filename="..." or RFC 5987 filename*=...
             if let Some(pos) = line_lower.find("filename=") {
                 let start = pos + 9;
-                let val_part = &line[start..];
-                let trimmed = val_part.trim().trim_matches('"').trim_matches('\'');
-                filename = Some(trimmed.to_string());
+                let val_part = line[start..].trim_start();
+                let fname = if let Some(stripped) = val_part.strip_prefix('"') {
+                    if let Some(end_quote) = stripped.find('"') {
+                        &stripped[..end_quote]
+                    } else {
+                        stripped
+                    }
+                } else if let Some(stripped) = val_part.strip_prefix('\'') {
+                    if let Some(end_quote) = stripped.find('\'') {
+                        &stripped[..end_quote]
+                    } else {
+                        stripped
+                    }
+                } else {
+                    let end_token = val_part
+                        .find([';', ' ', '\r', '\n'])
+                        .unwrap_or(val_part.len());
+                    &val_part[..end_token]
+                };
+                filename = Some(fname.trim().to_string());
+            } else if let Some(pos) = line_lower.find("filename*=") {
+                let start = pos + 10;
+                let val_part = line[start..].trim_start();
+                let raw_val = if let Some(quote_stripped) = val_part.strip_prefix('"') {
+                    quote_stripped.split('"').next().unwrap_or(quote_stripped)
+                } else {
+                    val_part.split(';').next().unwrap_or(val_part)
+                };
+                let fname = if let Some(idx) = raw_val.rfind("''") {
+                    &raw_val[idx + 2..]
+                } else {
+                    raw_val
+                };
+                filename = Some(fname.trim().to_string());
             }
         } else if line_lower.starts_with("content-type:") {
             let val = line["content-type:".len()..].trim();

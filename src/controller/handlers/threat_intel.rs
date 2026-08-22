@@ -102,11 +102,10 @@ pub fn start_threat_intel_scraper(db_path: String) {
                 }
             }
 
-            // Fallback mock reputational IPs if nothing was scraped (ensure some data exists)
+            // If no feeds were fetched, log warning without injecting fabricated mock IPs.
             if scraped_ips.is_empty() {
-                tracing::info!("No OSINT feeds successfully fetched. Adding fallback mock reputational IPs for test.");
-                scraped_ips.push(("198.51.100.42".to_string(), "Mock OSINT Feed"));
-                scraped_ips.push(("203.0.113.88".to_string(), "Mock OSINT Feed"));
+                tracing::warn!("No OSINT feeds successfully fetched during threat intel cycle.");
+                return;
             }
 
             // Save scraped IPs to SQLite reputation_feed table
