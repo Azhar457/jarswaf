@@ -92,6 +92,7 @@ mod tests {
                 scoring_mode: crate::config::ScoringMode::default(),
                 anomaly_threshold: 5,
                 ast_learning_enabled: false,
+                api_port: None,
             },
             tls: crate::config::TlsConfig {
                 mode: "local_ca".to_string(),

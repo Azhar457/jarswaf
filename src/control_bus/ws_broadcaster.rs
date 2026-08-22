@@ -61,12 +61,12 @@ impl WsBroadcaster {
         let (tx, _) = broadcast::channel(buffer);
         Self { tx }
     }
-    
+
     /// Subscribe to events (call this for each WebSocket connection)
     pub fn subscribe(&self) -> broadcast::Receiver<WsEvent> {
         self.tx.subscribe()
     }
-    
+
     /// Publish an event to all subscribers
     pub fn publish(&self, event: WsEvent) {
         // Best-effort — if no subscribers or lagged, drop
@@ -77,7 +77,7 @@ impl WsBroadcaster {
             }
         }
     }
-    
+
     /// Number of active subscribers
     pub fn subscriber_count(&self) -> usize {
         self.tx.receiver_count()

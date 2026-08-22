@@ -1,11 +1,15 @@
 pub mod agent;
+pub mod api;
 pub mod compliance;
 pub mod config;
+pub mod control_bus;
 pub mod controller;
+pub mod data_bus;
 pub mod dlp;
 pub mod gossip;
 pub mod grpc;
 pub mod honeypot;
+pub mod kernel;
 pub mod logging;
 pub mod metrics;
 pub mod proxy;
@@ -13,6 +17,7 @@ pub mod proxy_engine;
 pub mod rasp;
 pub mod rule_engine;
 pub mod rules;
+pub mod storage;
 pub mod tls;
 pub mod types;
 pub mod utils;
@@ -20,9 +25,6 @@ pub mod vhost;
 pub mod wasm;
 pub mod webhook;
 pub mod xdp;
-pub mod kernel;
-pub mod data_bus;
-pub mod control_bus;
 
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -40,7 +42,7 @@ pub static SUSPICIOUS_IPS: Lazy<Arc<DashMap<IpAddr, Instant>>> =
 // instantiated once control_bus::start_control_bus() runs, so non-Linux builds
 // and pure-controller modes skip eBPF entirely. Set by kernel::init().
 pub static KERNEL_INTERFACE: Lazy<Option<&'static kernel::KernelInterface>> =
-    Lazy::new(|| kernel::init_if_present());
+    Lazy::new(kernel::init_if_present);
 
 // Global XDP Manager
 pub static XDP_MANAGER: Lazy<Arc<tokio::sync::Mutex<xdp::XdpManager>>> =

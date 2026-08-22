@@ -7,8 +7,9 @@
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-pub static CHALLENGE_SECRET: once_cell::sync::Lazy<String> =
-    once_cell::sync::Lazy::new(|| Uuid::new_v4().to_string());
+pub static CHALLENGE_SECRET: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(|| {
+    std::env::var("JARSWAF_BOT_SECRET").unwrap_or_else(|_| Uuid::new_v4().to_string())
+});
 
 /// Escape a string for safe embedding inside a JavaScript double-quoted string literal,
 /// and neutralize `</script>` so an attacker-controlled value cannot break out of the

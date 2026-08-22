@@ -35,7 +35,7 @@ impl BatchResult {
     pub fn all_success(&self) -> bool {
         self.failed == 0
     }
-    
+
     pub fn total(&self) -> usize {
         self.inserted + self.failed
     }
@@ -44,7 +44,7 @@ impl BatchResult {
 /// IP address wrapper that handles v4/v6 and byte order
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IpKey {
-    V4(u32),           // Network byte order
+    V4(u32), // Network byte order
     V6([u8; 16]),
 }
 

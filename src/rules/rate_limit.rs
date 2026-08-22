@@ -28,8 +28,11 @@ pub trait RateLimiterStore: Send + Sync {
     ) -> RateLimitStatus;
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 pub struct LocalStore {
     limiter: DashMap<String, TokenBucket>,
+    last_pruned_epoch_secs: AtomicU64,
 }
 
 impl Default for LocalStore {
@@ -42,6 +45,7 @@ impl LocalStore {
     pub fn new() -> Self {
         Self {
             limiter: DashMap::new(),
+            last_pruned_epoch_secs: AtomicU64::new(0),
         }
     }
 
@@ -49,6 +53,38 @@ impl LocalStore {
         match user_key {
             Some(k) if !k.is_empty() => format!("{}|{}", ip, k),
             _ => ip.to_string(),
+        }
+    }
+
+    /// Prune idle buckets without sorting or cloning massive key vectors.
+    fn prune_idle_if_needed(&self, now: Instant) {
+        const MAX_BUCKETS: usize = 100_000;
+        const PRUNE_INTERVAL_SECS: u64 = 5;
+        const IDLE_TTL_SECS: u64 = 300; // 5 minutes
+
+        if self.limiter.len() > MAX_BUCKETS {
+            let current_unix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            let last = self.last_pruned_epoch_secs.load(Ordering::Relaxed);
+            if current_unix.saturating_sub(last) >= PRUNE_INTERVAL_SECS
+                && self
+                    .last_pruned_epoch_secs
+                    .compare_exchange(last, current_unix, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+            {
+                // Retain only entries accessed within the last IDLE_TTL_SECS
+                self.limiter
+                    .retain(|_, b| now.duration_since(b.last_access).as_secs() < IDLE_TTL_SECS);
+
+                // If still over capacity, do an aggressive prune for 60s idle
+                if self.limiter.len() > MAX_BUCKETS {
+                    self.limiter
+                        .retain(|_, b| now.duration_since(b.last_access).as_secs() < 60);
+                }
+            }
         }
     }
 }
@@ -61,24 +97,8 @@ impl RateLimiterStore for LocalStore {
         limit: u32,
         user_key: Option<&str>,
     ) -> RateLimitStatus {
-        // Bound memory growth (Availability): an attacker can mint unlimited distinct IPs /
-        // user-keys, growing the map without limit. When it exceeds the cap, evict the
-        // oldest buckets (by last_access) until back under it. `ponytail:` a real LRU would
-        // be O(1); this retain-scan is O(n) but only runs when over the cap, so amortized cheap.
-        const MAX_BUCKETS: usize = 100_000;
-        if self.limiter.len() > MAX_BUCKETS {
-            let over = self.limiter.len() - MAX_BUCKETS;
-            let mut keys: Vec<String> = self.limiter.iter().map(|e| e.key().clone()).collect();
-            keys.sort_by_key(|k| {
-                self.limiter
-                    .get(k)
-                    .map(|b| b.last_access)
-                    .unwrap_or(Instant::now())
-            });
-            for k in keys.into_iter().take(over + 1) {
-                self.limiter.remove(&k);
-            }
-        }
+        let now = Instant::now();
+        self.prune_idle_if_needed(now);
 
         let rate = limit as f64 / 60.0;
         let capacity = rate * 2.0;

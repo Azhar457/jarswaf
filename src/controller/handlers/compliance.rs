@@ -22,12 +22,35 @@ pub async fn get_compliance_report_handler(
 
     let audit_logs = crate::logging::sqlite_get_audit_logs(&state.db_path, 100).unwrap_or_default();
 
+    let cfg = crate::config::load_config(&state.config_path).unwrap_or_default();
+
+    let waf_active = cfg.global.waf_enabled;
+    let must_change_pw = cfg.global.must_change_password.unwrap_or(false);
+    let zero_trust_active =
+        cfg.zero_trust.min_trust_score > 0.0 || !cfg.zero_trust.allowed_issuers.is_empty();
+
+    let system_status = if waf_active {
+        "HEALTHY".to_string()
+    } else {
+        "DEGRADED (WAF Disabled)".to_string()
+    };
+
+    let security_posture = if !waf_active {
+        "VULNERABLE (Engine Disabled)".to_string()
+    } else if must_change_pw {
+        "WARNING (Default Admin Credentials Pending Change)".to_string()
+    } else if zero_trust_active {
+        "STRICT (Zero-Trust Active)".to_string()
+    } else {
+        "MODERATE (Basic Inspection Only)".to_string()
+    };
+
     let report = ComplianceReport {
         generated_at: chrono::Utc::now().to_rfc3339(),
-        system_status: "HEALTHY".to_string(),
+        system_status,
         global_stats: stats,
         audit_logs,
-        security_posture: "STRICT".to_string(),
+        security_posture,
     };
 
     (StatusCode::OK, Json(report))

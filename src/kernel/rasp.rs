@@ -2,11 +2,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 #[cfg(target_os = "linux")]
-use aya::{
-    maps::perf::PerfEventArray,
-    programs::KProbe,
-    Ebpf,
-};
+use aya::{maps::perf::PerfEventArray, programs::KProbe, Ebpf};
 
 pub struct RaspSubsystem {
     #[cfg(target_os = "linux")]
