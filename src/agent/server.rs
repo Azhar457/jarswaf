@@ -12,6 +12,9 @@ pub struct AppState {
     pub config: Arc<std::sync::RwLock<config::Config>>,
     pub log_tx: tokio::sync::mpsc::Sender<logging::WafLogEntry>,
     pub blocklist: Arc<dashmap::DashMap<std::net::IpAddr, std::time::Instant>>,
+    /// Data bus event sender (produced by control_bus::start_control_bus). The proxy emits
+    /// DataEvents here after each request inspection so the control bus has a live feed.
+    pub event_tx: Option<crate::data_bus::events::EventSender>,
 }
 
 #[cfg(unix)]
@@ -21,13 +24,36 @@ pub async fn run_server(cfg: &config::Config, state: AppState) {
     let mut server = Server::new(None).unwrap();
     server.bootstrap();
 
-    // Create our proxy instance
+    // Create our proxy instance with the Data Bus inspection chain.
+    let rule_engine = Arc::new(crate::rules::RuleEngine::new(cfg));
+    let enabled_rules: Vec<String> = cfg
+        .vhosts
+        .iter()
+        .flat_map(|v| v.rules.clone())
+        .collect();
+    let mut inspection_chain = crate::data_bus::chain::InspectionChain::new();
+    inspection_chain.register(Box::new(
+        crate::data_bus::inspectors::direct_ip_block::DirectIpBlockInspector,
+    ));
+    for inspector in crate::data_bus::inspectors::default_inspectors(
+        rule_engine,
+        if enabled_rules.is_empty() {
+            vec!["*".to_string()]
+        } else {
+            enabled_rules
+        },
+        vec![],
+        10.0,
+    ) {
+        inspection_chain.register(inspector);
+    }
+
     let proxy = proxy_engine::JarsWafProxy {
         blocklist: state.blocklist.clone(),
         log_tx: state.log_tx.clone(),
         webhooks: cfg.global.webhooks.clone(),
-        phase_pipeline: crate::rule_engine::phase::PhasePipeline::default()
-            .register(Box::new(crate::rule_engine::phase::DirectIpBlockHandler)),
+        inspection_chain,
+        event_tx: state.event_tx.clone(),
     };
 
     // Store config in ArcSwap for lock-free reads in Pingora
