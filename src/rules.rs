@@ -28,7 +28,6 @@ use regex::Regex;
 use tokio::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 pub enum Phase {
     Headers,
     Uri,
@@ -36,14 +35,12 @@ pub enum Phase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Action {
     Block,
     Log,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Severity {
     Low,
     Medium,
@@ -62,7 +59,6 @@ impl Severity {
     }
 }
 
-#[allow(dead_code)]
 pub struct Rule {
     pub id: &'static str,
     pub name: &'static str,
@@ -73,7 +69,6 @@ pub struct Rule {
     pub check: fn(&RequestInfo) -> bool,
 }
 
-#[allow(dead_code)]
 pub struct RequestInfo<'a> {
     pub method: &'a str,
     pub path: &'a str,
@@ -224,7 +219,6 @@ pub fn is_ip_temporarily_blocked(ip: IpAddr) -> bool {
 }
 
 /// Return the remaining block duration in seconds for `ip`, or 0 if not blocked.
-#[allow(dead_code)]
 pub fn remaining_block_secs(ip: IpAddr) -> u64 {
     BLOCKED_IPS.get(&ip).map_or(0, |rec| {
         let now = Instant::now();
@@ -294,7 +288,6 @@ pub fn is_ip_reputation_blocked(ip: IpAddr) -> bool {
 }
 
 /// Get current reputation score (0.0–100.0) for an IP.
-#[allow(dead_code)]
 pub fn get_reputation_score(ip: IpAddr) -> f64 {
     if let Some(mut rep) = IP_REPUTATION.get(&ip) {
         rep.decay();
@@ -1922,6 +1915,7 @@ mod tests {
                 scoring_mode: crate::config::ScoringMode::default(),
                 anomaly_threshold: 5,
                 ast_learning_enabled: false,
+                api_port: None,
             },
             tls: TlsConfig {
                 mode: "local_ca".to_string(),

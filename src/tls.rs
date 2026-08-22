@@ -5,13 +5,11 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs;
 use std::path::Path;
 
-#[allow(dead_code)]
 pub struct LocalCA {
     cert_path: String,
     key_path: String,
 }
 
-#[allow(dead_code)]
 impl LocalCA {
     pub fn new(cert_dir: &str) -> Self {
         // Securely ensure path exists and canonicalize to avoid path traversal
@@ -112,13 +110,18 @@ impl LocalCA {
 
 /// Securely writes private key to filesystem with 0o600 permissions (Unix) to prevent unauthorized local reads
 fn write_secure_private_key(path: &str, content: &str) -> std::io::Result<()> {
-    fs::write(path, content)?;
+    use std::fs::OpenOptions;
+    use std::io::Write as _;
+
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        let _ = fs::set_permissions(path, perms);
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    let mut file = options.open(path)?;
+    file.write_all(content.as_bytes())?;
     Ok(())
 }
 

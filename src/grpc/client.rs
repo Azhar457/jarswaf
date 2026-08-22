@@ -46,8 +46,12 @@ async fn connect_and_sync(
         Ok(req)
     });
 
+    let host_agent_id = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("HOST"))
+        .unwrap_or_else(|_| "agent-default".to_string());
+
     let request = tonic::Request::new(PolicySyncRequest {
-        agent_id: "agent-001".to_string(), // In reality, fetch from hostname or config
+        agent_id: host_agent_id,
         current_version: "1.0.0".to_string(),
     });
 
@@ -57,8 +61,27 @@ async fn connect_and_sync(
 
     while let Some(response) = response_stream.message().await? {
         info!("Received policy update version: {}", response.version);
-        // Here we would parse response.rules_payload and apply to DashMap
-        // and add response.blocklist_ips to XDP map.
+        // Apply rules_payload if non-empty valid JSON
+        if !response.rules_payload.is_empty() && response.rules_payload != "{}" {
+            if let Ok(new_cfg) =
+                serde_json::from_str::<crate::config::Config>(&response.rules_payload)
+            {
+                crate::proxy_engine::update_global_config(new_cfg);
+                info!("Successfully updated WAF global config from gRPC policy sync");
+            }
+        }
+        // Sync blocklist IPs to XDP map
+        if !response.blocklist_ips.is_empty() {
+            let parsed_ips: Vec<std::net::Ipv4Addr> = response
+                .blocklist_ips
+                .iter()
+                .filter_map(|ip_str| ip_str.parse().ok())
+                .collect();
+            if !parsed_ips.is_empty() {
+                let mut xdp = crate::xdp::XdpManager::new();
+                let _ = xdp.block_ips(&parsed_ips);
+            }
+        }
     }
 
     Ok(())

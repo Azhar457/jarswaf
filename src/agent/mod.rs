@@ -4,6 +4,7 @@ pub mod metrics;
 pub mod server;
 pub mod websocket;
 
+use crate::api::{build_router, ApiState};
 use crate::{config, logging, proxy_engine, rules};
 pub use server::AppState;
 use std::sync::Arc;
@@ -78,13 +79,49 @@ pub async fn run_agent(
     // interface are initialized. The returned command sender is the
     // L4 → L3 command path (future src/api/ layer); the receiver must
     // stay alive for the bus to keep running.
-    let (_control_state, event_tx, _cmd_tx) = crate::control_bus::start_control_bus(
+    let (published_state, _event_tx, cmd_tx) = crate::control_bus::start_control_bus(
         config_path.to_string(),
         rules_dir.to_string(),
         cfg.global.anomaly_threshold as f64,
         cfg.global.scoring_mode.as_str().to_string(),
     );
     info!("Control bus started");
+
+    // Start local API server (Layer 4)
+    let ws_broadcaster = crate::control_bus::ws_broadcaster::get();
+    let jwt_secret = cfg
+        .global
+        .grpc_token
+        .as_deref()
+        .unwrap_or("jarswaf_default_grpc_token_secret");
+    let admin_password = cfg.global.admin_token.as_deref().unwrap_or("admin");
+    let auth_service = crate::api::auth::AuthService::new(jwt_secret, admin_password);
+
+    let api_state = ApiState::new(
+        cmd_tx.clone(),
+        published_state.clone(),
+        auth_service,
+        ws_broadcaster,
+        env!("CARGO_PKG_VERSION").to_string(),
+    );
+
+    let api_router = build_router(api_state);
+    let api_port = cfg.global.api_port.unwrap_or(9090);
+    let api_addr = format!("127.0.0.1:{}", api_port); // Bind to localhost by default for security
+
+    tokio::spawn(async move {
+        match tokio::net::TcpListener::bind(&api_addr).await {
+            Ok(listener) => {
+                info!("API server listening on http://{}", api_addr);
+                if let Err(e) = axum::serve(listener, api_router).await {
+                    tracing::error!("API server error: {}", e);
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to bind API server to {}: {}", api_addr, e);
+            }
+        }
+    });
 
     // Attach eBPF XDP if an interface is configured — via Kernel Interface (Layer 1)
     if let Some(interface) = &cfg.global.xdp_interface {
@@ -290,7 +327,6 @@ pub async fn run_agent(
         config: config_arc.clone(),
         log_tx,
         blocklist: blocklist.clone(),
-        event_tx: Some(event_tx),
     };
 
     if let Some(ctrl) = &controller {
