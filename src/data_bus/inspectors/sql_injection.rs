@@ -8,25 +8,33 @@ static SQLI_PATTERNS: Lazy<Vec<(f64, Regex)>> = Lazy::new(|| {
     vec![
         // High confidence (30+ pts each — single match = block)
         (30.0, r"(?i)\bUNION\s+(ALL\s+)?SELECT\b"),
-        (30.0, r"(?i)\bSELECT\s+.+\s+FROM\s+\w+"),
+        (20.0, r"(?i)\bSELECT\s+.+\s+FROM\s+\w+"),
         (30.0, r"(?i)\bINSERT\s+INTO\b"),
         (30.0, r"(?i)\bDROP\s+(TABLE|DATABASE)\b"),
         (30.0, r"(?i)\bDELETE\s+FROM\b"),
         (30.0, r"(?i)\bUPDATE\s+\w+\s+SET\b"),
+        (
+            30.0,
+            r"(?i);\s*(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|CREATE)\b",
+        ),
         (30.0, r"(?i);\s*EXEC(UTE)?\s"),
         (30.0, r"(?i)\bxp_cmdshell\b"),
         (30.0, r"(?i)\bLOAD_FILE\s*\("),
         (30.0, r"(?i)\bINTO\s+(OUT|DUMP)FILE\b"),
-        // Medium confidence (10-20 pts)
-        (20.0, r"(?i)\bOR\s+[\d']+\s*=\s*[\d']+"),
-        (20.0, r"(?i)\bAND\s+[\d']+\s*=\s*[\d']+"),
-        (15.0, r"(?i)\bSLEEP\s*\(\d+\)"),
-        (15.0, r"(?i)\bBENCHMARK\s*\("),
-        (15.0, r"(?i)\bWAITFOR\s+DELAY\b"),
+        (30.0, r"(?i)\bWITH\s+RECURSIVE\b.+\bSELECT\s+count\b"),
+        // Medium confidence (15-30 pts)
+        (30.0, r"(?i)(^|['\s])\b(OR|AND)\b\s+['\w]+\s*=\s*['\w]+"),
+        (30.0, r"(?i)'\s*(OR|AND)\s*'\w+'\s*=\s*'\w+'"),
+        (30.0, r"(?i)\b(SLEEP|BENCHMARK|pg_sleep)\s*\("),
+        (30.0, r"(?i)\bWAITFOR\s+DELAY\b"),
+        (
+            20.0,
+            r"(?i)\b(information_schema|mysql\.user|pg_catalog|sqlite_master)\b",
+        ),
         (10.0, r"(?i)\bHAVING\s+\d"),
         (10.0, r"(?i)\bGROUP\s+BY\s+\d"),
         (10.0, r"(?i)\bORDER\s+BY\s+\d"),
-        // Low confidence (5 pts — need accumulation)
+        // Low confidence (5-10 pts — need accumulation)
         (10.0, r"--\s*$"),
         (5.0, r"(?i)\bCONCAT\s*\("),
         (5.0, r"(?i)\bCHAR\s*\(\d"),
@@ -63,7 +71,23 @@ impl SqlInjectionInspector {
 
         let normalized = crate::rule_engine::normalize_canonical(target);
 
+        let is_cte = normalized.contains("with recursive");
+        if is_cte {
+            // Check if CTE recursion limit is >= 100,000 (6 or more digits) per SQLI-R006
+            static CTE_BOMB_REGEX: Lazy<Regex> = Lazy::new(|| {
+                Regex::new(r"(?i)\bWITH\s+RECURSIVE\b.+\bWHERE\s+\w+\s*<\s*\d{6,}\b").unwrap()
+            });
+            if CTE_BOMB_REGEX.is_match(&normalized) || CTE_BOMB_REGEX.is_match(target) {
+                total_score += 30.0;
+                matches.push("SQLI-R006_CTE_BOMB");
+            }
+        }
+
         for (score, pattern) in SQLI_PATTERNS.iter() {
+            let pat_str = pattern.as_str();
+            if is_cte && (pat_str.contains("UNION") || pat_str.contains("WITH")) {
+                continue;
+            }
             if pattern.is_match(target) || pattern.is_match(&normalized) {
                 total_score += score;
                 matches.push(pattern.as_str());
@@ -106,8 +130,14 @@ impl Inspector for SqlInjectionInspector {
             return path_result;
         }
 
-        // Check common attack headers
-        for header_name in &["referer", "x-forwarded-for", "x-original-url"] {
+        // Check common attack headers (User-Agent, Cookie, Referer, etc.)
+        for header_name in &[
+            "user-agent",
+            "cookie",
+            "referer",
+            "x-forwarded-for",
+            "x-original-url",
+        ] {
             if let Some(value) = ctx.header_str(header_name) {
                 let header_result = self.check_target(&value);
                 if header_result.verdict.is_some() {
