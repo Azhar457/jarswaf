@@ -1,0 +1,421 @@
+# jarsWAF Golden Vectors v1.0 — EXACTLY 50. IMMUTABLE DATA (AGENTS.md H4).
+- id: VEC-SQLI-001
+  category: sqli
+  technique: TECH-001
+  target: query
+  raw: "1 UNION/**/SELECT/**/user()--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001]
+  notes: "inter-token comment placement (E-06)"
+- id: VEC-SQLI-002
+  category: sqli
+  technique: TECH-002
+  target: query
+  raw: "%2527%20OR%20%271%27%3D%271"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+- id: VEC-SQLI-003
+  category: sqli
+  technique: TECH-003
+  target: query
+  raw: "&#x27; OR &#x27;a&#x27;&#x3D;&#x27;a"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+- id: VEC-SQLI-004
+  category: sqli
+  technique: TECH-004
+  target: query
+  raw: "\uFF11\uFF1D\uFF11\u0020\uFF2F\uFF32\u0020\uFF11\uFF1D\uFF11"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "fullwidth 1=1 OR 1=1; NFKC folds then bare-kw branch fires"
+- id: VEC-SQLI-005
+  category: sqli
+  technique: TECH-005
+  target: query
+  raw: "1; DROP TABLE users"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R003]
+- id: VEC-SQLI-006
+  category: sqli
+  technique: TECH-006
+  target: query
+  raw: "1 AND SLEEP(/*x*/5)"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R004]
+  notes: "paren-interior comment; E-06 replaces SL/**/EEP form"
+- id: VEC-SQLI-007
+  category: sqli
+  technique: TECH-007
+  target: query
+  raw: "' UNION SELECT table_name FROM information_schema.tables--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001, SQLI-R005]
+- id: VEC-SQLI-008
+  category: sqli
+  technique: TECH-008
+  target: body_json
+  raw: '{"q":"WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM t WHERE n<99999999) SELECT count(*) FROM t"}'
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R006]
+- id: VEC-SQLI-009
+  category: clean
+  technique: CLEAN
+  target: query
+  raw: "search=rust+async+waf&sort=desc&page=2"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-010
+  category: clean
+  technique: CLEAN
+  target: cookie
+  raw: "session=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.Kma8b0Q"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-011
+  category: sqli
+  technique: TECH-HPP
+  target: query
+  raw: "id=1&id=%27%20OR%20%271%27%3D%271"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "FR-PRX-03 join-all-values before inspection"
+- id: VEC-SQLI-012
+  category: sqli
+  technique: TECH-UA
+  target: header_ua
+  raw: "sqlmap/1.8' OR 'a'='a"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "E-04 Str-inner branch fires"
+- id: VEC-SQLI-013
+  category: sqli
+  technique: TECH-001
+  target: query
+  raw: "1/**/UNION/**/SELECT/**/version()--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001]
+- id: VEC-SQLI-014
+  category: sqli
+  technique: TECH-001
+  target: cookie
+  raw: "admin'/**/OR/**/'1'/**/%3D/**/'1"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+- id: VEC-SQLI-015
+  category: sqli
+  technique: TECH-001
+  target: query
+  raw: "1 UNION/**//**//**/SELECT user()--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001, SQLI-R007]
+  notes: "comment_count=3 stacks R007"
+- id: VEC-SQLI-016
+  category: sqli
+  technique: TECH-001
+  target: query
+  raw: "' UNION/*z*/SELECT password FROM users LIMIT 1--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001]
+- id: VEC-SQLI-017
+  category: sqli
+  technique: TECH-002
+  target: query
+  raw: "%252527%20OR%20%252731%2527%3D%252731"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "triple-encoded quote chain"
+- id: VEC-SQLI-018
+  category: sqli
+  technique: TECH-002
+  target: query
+  raw: "%27%20OR%20%271%27%3D%271"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "quotes encoded, separators literal"
+- id: VEC-SQLI-019
+  category: sqli
+  technique: TECH-002
+  target: query
+  raw: "1'%20OR%20'1'%3D'1"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "separators encoded, quotes literal"
+- id: VEC-SQLI-020
+  category: sqli
+  technique: TECH-002
+  target: query
+  raw: "%25%32%37%20OR%20%25%32%371%25%32%37%3D%25%32%371"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "chunked percent-of-percent encoding"
+- id: VEC-SQLI-021
+  category: sqli
+  technique: TECH-003
+  target: query
+  raw: "&#39; OR &#39;a&#39;&#61;&#39;a"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+- id: VEC-SQLI-022
+  category: sqli
+  technique: TECH-003
+  target: query
+  raw: "&apos; OR &apos;z&apos;&#61;&apos;z"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "named apos + decimal equals"
+- id: VEC-SQLI-023
+  category: sqli
+  technique: TECH-003
+  target: query
+  raw: "name=x&#39;%20and%20&#39;1&#39;&#61;&#39;1"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+- id: VEC-SQLI-024
+  category: sqli
+  technique: TECH-003
+  target: query
+  raw: "1&#160;union&#160;select&#160;user()"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001]
+  notes: "NBSP entity -> U+00A0 -> NFKC space"
+- id: VEC-SQLI-025
+  category: sqli
+  technique: TECH-004
+  target: query
+  raw: "1\u00A0union\u00A0select\u00A0version()"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001]
+  notes: "raw UTF-8 NBSP separators"
+- id: VEC-SQLI-026
+  category: sqli
+  technique: TECH-004
+  target: query
+  raw: "\uFF07\u0020\uFF2F\uFF32\u0020\uFF07\uFF11\uFF07\uFF1D\uFF07\uFF11"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "fullwidth quotes; E-04 branch"
+- id: VEC-SQLI-027
+  category: sqli
+  technique: TECH-004
+  target: query
+  raw: "\uFF11\u0020\uFF35\uFF2E\uFF29\uFF2F\uFF2E\u0020\uFF33\uFF25\uFF2C\uFF25\uFF23\uFF34\u0020\uFF49\uFF53\uFF45\uFF52\uFF08\uFF09"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001]
+- id: VEC-SQLI-028
+  category: sqli
+  technique: TECH-004
+  target: query
+  raw: "a'\u3000OR\u3000'1'\u3000=\u3000'1"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R002]
+  notes: "U+3000 ideographic space folds to ASCII space"
+- id: VEC-SQLI-029
+  category: sqli
+  technique: TECH-005
+  target: query
+  raw: "1; DELETE FROM users"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R003]
+- id: VEC-SQLI-030
+  category: sqli
+  technique: TECH-005
+  target: query
+  raw: "5; UPDATE users SET role='admin'"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R003]
+- id: VEC-SQLI-031
+  category: sqli
+  technique: TECH-005
+  target: query
+  raw: "; INSERT INTO logs VALUES('x')"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R003]
+- id: VEC-SQLI-032
+  category: sqli
+  technique: TECH-006
+  target: query
+  raw: "1 AND BENCHMARK(1000000,MD5('x'))"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R004]
+- id: VEC-SQLI-033
+  category: sqli
+  technique: TECH-006
+  target: query
+  raw: "1 OR pg_sleep(10) IS NULL"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R004]
+- id: VEC-SQLI-034
+  category: sqli
+  technique: TECH-006
+  target: query
+  raw: "; WAITFOR DELAY '0:0:10'--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R004]
+- id: VEC-SQLI-035
+  category: sqli
+  technique: TECH-007
+  target: query
+  raw: "' UNION SELECT host,user FROM mysql.user--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001, SQLI-R005]
+- id: VEC-SQLI-036
+  category: sqli
+  technique: TECH-007
+  target: query
+  raw: "' UNION SELECT schemaname FROM pg_catalog.pg_tables--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001, SQLI-R005]
+- id: VEC-SQLI-037
+  category: sqli
+  technique: TECH-007
+  target: query
+  raw: "' UNION SELECT sql FROM sqlite_master WHERE type='table'--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001, SQLI-R005]
+  notes: "sqlite_master matched via lexeme (E-05)"
+- id: VEC-SQLI-038
+  category: sqli
+  technique: TECH-007
+  target: query
+  raw: "' UNION SELECT load_file('/etc/passwd')--"
+  encoded_variant: []
+  expect_action: would_block
+  min_rules: [SQLI-R001]
+  notes: "exfil primitive; no dedicated rule in v1.0"
+- id: VEC-SQLI-039
+  category: sqli
+  technique: TECH-008
+  target: body_json
+  raw: '{"q":"SELECT * FROM a,b,c,d,e"}'
+  encoded_variant: []
+  expect_action: allow
+  min_rules: [SQLI-R009]
+  notes: "sub-threshold: R009(20)<50; hit recorded, forwarded (FP-safety proof)"
+- id: VEC-SQLI-040
+  category: sqli
+  technique: TECH-008
+  target: body_json
+  raw: '{"q":"WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM t WHERE n<99999) SELECT count(*) FROM t"}'
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+  notes: "below R006 numeric threshold"
+- id: VEC-SQLI-041
+  category: clean
+  technique: CLEAN
+  target: query
+  raw: "token=dGhpcyBpcyBiYXNlNjQ="
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-042
+  category: clean
+  technique: CLEAN
+  target: header_ua
+  raw: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-043
+  category: clean
+  technique: CLEAN
+  target: path
+  raw: "/files/report;sessionid=abc123.pdf"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-044
+  category: clean
+  technique: CLEAN
+  target: query
+  raw: "name=O'Brien&city=Cork"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+  notes: "E-02 unterminated Str consumes to EOS"
+- id: VEC-SQLI-045
+  category: clean
+  technique: CLEAN
+  target: query
+  raw: "range=30d&metrics=p95,p99&group_by=path,status"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-046
+  category: clean
+  technique: CLEAN
+  target: query
+  raw: "t=aW50ZWdlcnMrandhbGxhbmRvbTEyMzQ1Njc4OTA"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-047
+  category: clean
+  technique: CLEAN
+  target: cookie
+  raw: "prefs=theme%3Ddark%26lang%3Did"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-048
+  category: clean
+  technique: CLEAN
+  target: body_form
+  raw: "username=admin&password=S3cur3-P@ss!"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-049
+  category: clean
+  technique: CLEAN
+  target: query
+  raw: "utm_source=newsletter&utm_campaign=launch"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []
+- id: VEC-SQLI-050
+  category: clean
+  technique: CLEAN
+  target: header_ua
+  raw: "curl/8.5.0"
+  encoded_variant: []
+  expect_action: allow
+  min_rules: []

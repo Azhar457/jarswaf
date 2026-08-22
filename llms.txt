@@ -1,0 +1,8 @@
+# jarsWAF — LLM Agent Index
+Entry protocol: read AGENTS.md FIRST. Then PRD.md (requirements), SCHEMAS.md (canonical
+numbers/schemas), ERRATA-v1.0.1.md, ARCHITECTURE.md (tree/types), TASKS.md (ordered tasks with DoD).
+Execution: sequential tasks; gate = fmt+clippy(-D warnings)+test green after each.
+Ambiguity: STOP -> OPEN_QUESTIONS.md (protocol in AGENTS.md). Never edit tests to pass.
+Stack pins: rust 1.84, pingora 0.8, axum 0.7, aya 0.13.1(exact), kernel>=5.15.
+MVP scope locks: L7 proxy + SQLi hybrid engine + XDP anti-recon + loopback dashboard.
+Non-goals v1.0: TLS term, XSS/SSRF/LFI engines, hot-reload, IPv6-XDP, clustering.

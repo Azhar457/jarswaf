@@ -1,0 +1,24 @@
+# jarsWAF Locked File Tree v1.0 (J1) — generated companion of ARCHITECTURE.md §4
+# Rule: agents MUST NOT create files outside this tree (AGENTS.md H1).
+# Legend: [M#] = milestone introducing the file. (ebpf) = workspace-excluded crate.
+
+LICENSE-APACHE                          [M0] Apache-2.0 full text
+LICENSE-MIT                             [M0] MIT full text
+PRD.md                                  [M0] requirements + acceptance criteria
+ARCHITECTURE.md                         [M0] components, flow, types, XDP contract, CI contract
+SCHEMAS.md                              [M0] CANONICAL numbers/config/API/logs/metrics
+ERRATA-v1.0.1.md                        [M0] binding corrections to SCHEMAS (read AFTER SCHEMAS)
+TASKS.md                                [M0] sequential gated task plan
+AGENTS.md                               [M0] agent operating contract (read FIRST)
+llms.txt                                [M0] agent entry index
+TREE.txt                                [M0] this file
+OPEN_QUESTIONS.md                       [M0] seeded by T-003; Stop Protocol target
+BOOTSTRAP.md                            [M0] agent kickoff prompt
+BENCHMARKS.md                           [M6] written by scripts/bench.sh
+ACCEPTANCE.md                           [M7] written by T-072 generator
+rust-toolchain.toml                     [M0] channel = "1.84"
+Cargo.toml                              [M0] workspace members ["crates/*"]; exclude ["ebpf"]
+Cargo.lock                              [M0] committed, frozen (whitelist-checked in CI)
+config.example.toml                     [M2] copy of SCHEMAS §1 byte-for-byte
+.gitignore                              [M0]
+.github/workflows/ci.yml                [M0] lint/test + ebpf job + nightly fuzz-lite
