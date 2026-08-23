@@ -71,7 +71,7 @@ unicode-normalization = "0.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 pingora = { version = "0.4.0", features = ["proxy", "rustls"] }
 bytes = "1"
-pingora-core = { version = "0.4.0", features = ["rustls"] }
+pingora-core = { version = "0.8.0", features = ["rustls"] }
 pingora-proxy = "0.4.0"
 pingora-http = "0.4.0"
 pingora-load-balancing = "0.4.0"
