@@ -3,7 +3,7 @@ port_http = 8082
 port_https = 8444
 mode = "agent"
 manager_url = "http://127.0.0.1:9000"
-grpc_token = "[REDACTED-CREDENTIAL]"
+grpc_token = ""
 
 [logging]
 mode = "sqlite"

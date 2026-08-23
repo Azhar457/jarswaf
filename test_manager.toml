@@ -2,7 +2,7 @@
 port_http = 8081
 port_https = 8443
 mode = "manager"
-grpc_token = "[REDACTED-CREDENTIAL]"
+grpc_token = ""
 
 [logging]
 mode = "sqlite"
