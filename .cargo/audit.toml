@@ -50,5 +50,11 @@ ignore = [
     "RUSTSEC-2026-0104",
     "RUSTSEC-2026-0190",
     "RUSTSEC-2026-0221",
+
+    # h2 unbounded empty DATA frames via tonic 0.11 -> hyper 0.14 -> h2 0.3.x.
+    # h2 0.4.x path already bumped to fixed 0.4.18 (audit F-P1-4, 2026-08-23).
+    # Exposure is control-plane gRPC only (not the proxied data plane).
+    # Owner: maintainers. Expiry: bump tonic to >= 0.12 (hyper 1.x) and remove.
+    "RUSTSEC-2026-0258",
 ]
 
