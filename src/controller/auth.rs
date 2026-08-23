@@ -17,6 +17,11 @@ use tracing::{info, warn};
 
 use sha2::{Digest, Sha256};
 
+use argon2::password_hash::{
+    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
+use argon2::Argon2;
+
 /// Constant-time byte comparison for equal-length slices. Returns false on length mismatch
 /// (length is already public — the hash format has a fixed length); for equal lengths the
 /// time is independent of the first differing byte, removing a timing oracle that `==` on
@@ -41,23 +46,45 @@ static LOGIN_LIMITER: once_cell::sync::Lazy<Arc<crate::rules::rate_limit::LocalS
 /// Login attempts allowed per source IP per minute before we start refusing.
 const LOGIN_RATE_LIMIT_PER_MIN: u32 = 10;
 
-/// Salted SHA-256 password hashing helper
+/// Hash an admin password with Argon2id (PHC string format). SCHEMAS §1 / TASKS T-050
+/// mandate Argon2id for stored credentials. Returns an empty string on the (practically
+/// unreachable) hashing failure instead of panicking — an empty stored token makes the
+/// account unauthenticated until the next boot regenerates one (fail-closed).
 pub fn hash_password(password: &str) -> String {
-    let salt: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(16)
-        .map(char::from)
-        .collect();
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{}:{}", salt, password).as_bytes());
-    format!("$sha256${}${:x}", salt, hasher.finalize())
+    let salt = SaltString::generate(&mut OsRng);
+    match Argon2::default().hash_password(password.trim().as_bytes(), &salt) {
+        Ok(hash) => hash.to_string(),
+        Err(e) => {
+            tracing::error!(
+                "Argon2id hashing failed: {} — refusing to store credential",
+                e
+            );
+            String::new()
+        }
+    }
+}
+
+/// True when `stored` uses any supported hashed credential format (Argon2id or legacy).
+fn is_hashed_credential(stored: &str) -> bool {
+    stored.starts_with("$argon2") || stored.starts_with("$sha256$")
 }
 
 /// Verify input password against stored hash (or legacy plaintext), constant-time.
+/// Accepts Argon2id PHC strings, legacy `$sha256$salt$hex` hashes, and (transitional)
+/// legacy plaintext tokens. Plaintext/sha256 inputs are transparently rehashed to
+/// Argon2id by the login handler after a successful verification.
 pub fn verify_password(password: &str, stored: &str) -> bool {
     let password = password.trim();
     let stored = stored.trim();
     if password.is_empty() || stored.is_empty() {
+        return false;
+    }
+    if stored.starts_with("$argon2") {
+        if let Ok(parsed) = PasswordHash::new(stored) {
+            return Argon2::default()
+                .verify_password(password.as_bytes(), &parsed)
+                .is_ok();
+        }
         return false;
     }
     if stored.starts_with("$sha256$") {
@@ -107,8 +134,8 @@ pub fn ensure_admin_credentials(config_path: &str) -> String {
 
     if let Some(ref token) = config.global.admin_token {
         if !token.trim().is_empty() {
-            // Check if the token is already hashed
-            if token.starts_with("$sha256$") {
+            // Already hashed (Argon2id or legacy format) — nothing to do.
+            if is_hashed_credential(token.trim()) {
                 return token.clone();
             } else {
                 // The token is plaintext! Let's hash it and save it back to config!
@@ -232,11 +259,14 @@ pub async fn login_handler(
             .and_then(|c| c.global.must_change_password)
             .unwrap_or(false);
 
-        // Auto-upgrade legacy plaintext tokens to hashed format
-        if !stored_token.starts_with("$sha256$") {
+        // Auto-upgrade legacy plaintext AND legacy $sha256$ credentials to Argon2id.
+        // The stored value is only ever a hash; rehashing here uses the just-verified
+        // password, so no plaintext round-trip through config is needed.
+        if !stored_token.starts_with("$argon2") {
             if let Ok(mut cfg) = config::load_config(&state.config_path) {
                 cfg.global.admin_token = Some(hash_password(&payload.password));
                 let _ = config::save_config(&state.config_path, &cfg);
+                info!("Upgraded stored admin credential to Argon2id on successful login.");
             }
         }
 
@@ -356,7 +386,6 @@ pub async fn auth_middleware(
 
         // 3. Stateless Machine ID Binding: <MachineID>.<Hash>
         if let Some((machine_id, hash)) = token.split_once('.') {
-            use sha2::{Digest, Sha256};
             let mut hasher = Sha256::new();
             hasher.update(format!("{}:{}", machine_id, expected_token).as_bytes());
             let expected_hash = format!("{:x}", hasher.finalize());
