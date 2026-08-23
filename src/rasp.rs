@@ -58,7 +58,12 @@ fn parse_execve_event(buf: &[u8]) -> Option<ExecveEvent> {
         return None;
     }
 
-    // Unsafe pointer read because it's coming from kernel perf buffer
+    // SAFETY: `buf` is a perf-event sample delivered by the kernel for our
+    // RASP_EVENTS ring buffer; the length guard above guarantees it holds at least one
+    // full `ExecveEvent`. The kernel writer emits the struct with natural alignment but
+    // perf samples are byte-packed, hence `read_unaligned`; the pointer is valid and
+    // aligned to 1 for the duration of the read, and no concurrent mutation of `buf`
+    // occurs inside this callback.
     let event = unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const ExecveEvent) };
     Some(event)
 }

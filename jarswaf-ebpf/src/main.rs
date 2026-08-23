@@ -54,6 +54,9 @@ fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
 }
 
 fn try_jarswaf_ebpf(ctx: XdpContext) -> Result<u32, ()> {
+    // SAFETY: every header pointer below comes from `ptr_at`, which validates
+    // `data_start + offset + size_of::<T>() <= data_end` against the XDP frame before
+    // any dereference; `Err` propagates and the packet is passed untouched.
     let ethhdr: *const EthHdr = ptr_at(&ctx, 0)?;
     match unsafe { (*ethhdr).ether_type } {
         EtherType::Ipv4 => {
@@ -122,6 +125,9 @@ fn try_jarswaf_rasp_exec(ctx: ProbeContext) -> Result<u32, i64> {
         command: [0; 128],
     };
     
+    // SAFETY: `filename_ptr` is the execve filename argument captured by the kprobe;
+    // the helper validates the user pointer internally and on failure leaves
+    // `event.command` as initialized (all zeros), which we surface as an empty command.
     let _ = unsafe { aya_ebpf::helpers::bpf_probe_read_user_str_bytes(filename_ptr, &mut event.command) };
     
     RASP_EVENTS.output(&ctx, &event, 0);
@@ -131,5 +137,11 @@ fn try_jarswaf_rasp_exec(ctx: ProbeContext) -> Result<u32, i64> {
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    unsafe { core::hint::unreachable_unchecked() }
+    // A panic inside eBPF context is a hard bug. We must diverge without returning.
+    // `unreachable_unchecked` would be instant UB if ever reached; a spin loop keeps
+    // this sound (defined behavior), and the verifier rejects loops so a live panic
+    // fails program load instead of executing undefined instructions.
+    loop {
+        core::hint::spin_loop();
+    }
 }
