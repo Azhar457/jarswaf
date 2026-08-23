@@ -1,0 +1,38 @@
+[general]
+mode = "detect"                      # detect | enforce
+[proxy]
+listen = "0.0.0.0:8080"
+upstream = "http://127.0.0.1:9000"
+max_inspect_bytes = 65536
+request_timeout_ms = 30000
+connect_timeout_ms = 5000
+[block_action]
+status = 403
+body_html = "<html><body><h1>403 Forbidden</h1><!-- jarsWAF --></body></html>"
+send_rst = false
+[detection]
+block_threshold = 50
+max_decode_iterations = 5
+[dashboard]
+listen = "127.0.0.1:9443"
+session_ttl_sec = 28800
+login_max_attempts = 5
+login_window_sec = 900
+[logging]
+file_path = "/var/log/jarswaf/events.jsonl"
+max_file_mb = 100
+max_files = 10
+[xdp]
+enabled = true
+interface = "eth0"
+protected_ports = [8080]
+trusted_cidrs = ["127.0.0.0/8", "10.0.0.0/8", "192.168.0.0/16"]
+syn_rate_limit_per_min = 100
+ban_seconds = 60
+[latency]
+enabled = true
+window_sec = 60
+delta_alert_ms = 250
+
+# Admin password NOT in config (SCHEMAS §1): generated on first boot or by install.sh,
+# stored hashed in the runtime config only.

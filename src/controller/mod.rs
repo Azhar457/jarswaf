@@ -341,12 +341,20 @@ pub async fn run_controller(port: u16, config_path: String) {
     let addr = match bind_host.parse::<std::net::IpAddr>() {
         Ok(ip) => SocketAddr::from((ip, port)),
         Err(_) => {
-            panic!("Invalid JARSWAF_BIND value: {bind_host}");
+            // ARCHITECTURE §7: invalid config must terminate with a non-zero exit BEFORE
+            // any socket bind. A clean error exit instead of a panic keeps shutdown
+            // handlers and supervisor reporting well-defined.
+            eprintln!("jarswaf-controller: invalid JARSWAF_BIND value: {bind_host}");
+            std::process::exit(2);
         }
     };
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("Cannot bind Controller port");
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("jarswaf-controller: cannot bind {addr}: {e}");
+            std::process::exit(2);
+        }
+    };
 
     info!(
         "jarsWAF Controller API & Dashboard available at http://{}",
