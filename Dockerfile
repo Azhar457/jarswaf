@@ -33,6 +33,7 @@ RUN apt-get update && \
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY proto/ ./proto/
 COPY xtask/ ./xtask/
+COPY rand_patch/ ./rand_patch/
 COPY src/ ./src/
 
 # Single build pass — avoids doubling disk usage from dummy build caching
