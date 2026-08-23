@@ -66,7 +66,7 @@ pub async fn run_redteam(target: &str) {
     // 1. JWT Test
     let start = Instant::now();
     match client
-        .get(&format!("{}/api/test", target))
+        .get(format!("{}/api/test", target))
         .header("Authorization", "Bearer invalid_token_without_dots")
         .send()
         .await
@@ -93,7 +93,7 @@ pub async fn run_redteam(target: &str) {
     let start = Instant::now();
     let nested_gql = r#"{"query": "{ user { posts { comments { author { id } } } } }"}"#;
     match client
-        .post(&format!("{}/api/graphql", target))
+        .post(format!("{}/api/graphql", target))
         .body(nested_gql)
         .send()
         .await

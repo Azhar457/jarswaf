@@ -47,23 +47,21 @@ pub fn generate_report(log_path: &str, output_path: &str) {
     let mut top_ips: HashMap<String, usize> = HashMap::new();
     let mut top_rules: HashMap<String, usize> = HashMap::new();
 
-    for line in reader.lines() {
-        if let Ok(line_content) = line {
-            if line_content.trim().is_empty() {
-                continue;
+    for line_content in reader.lines().map_while(Result::ok) {
+        if line_content.trim().is_empty() {
+            continue;
+        }
+        if let Ok(event) = serde_json::from_str::<ComplianceEvent>(&line_content) {
+            total_events += 1;
+            if event.event.action == "blocked" {
+                blocked_events += 1;
             }
-            if let Ok(event) = serde_json::from_str::<ComplianceEvent>(&line_content) {
-                total_events += 1;
-                if event.event.action == "blocked" {
-                    blocked_events += 1;
-                }
 
-                *top_ips.entry(event.source.ip).or_insert(0) += 1;
-                *top_rules.entry(event.rule.id).or_insert(0) += 1;
+            *top_ips.entry(event.source.ip).or_insert(0) += 1;
+            *top_rules.entry(event.rule.id).or_insert(0) += 1;
 
-                for tag in event.compliance_tags {
-                    *compliance_counts.entry(tag).or_insert(0) += 1;
-                }
+            for tag in event.compliance_tags {
+                *compliance_counts.entry(tag).or_insert(0) += 1;
             }
         }
     }
@@ -93,11 +91,11 @@ pub fn generate_report(log_path: &str, output_path: &str) {
         };
         report.push_str(&format!("| `{}` | {} | {} |\n", tag, count, desc));
     }
-    report.push_str("\n");
+    report.push('\n');
 
     report.push_str("## 3. Top Source IPs\n");
     let mut sorted_ips: Vec<_> = top_ips.into_iter().collect();
-    sorted_ips.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted_ips.sort_by_key(|b| std::cmp::Reverse(b.1));
     for (ip, count) in sorted_ips.iter().take(5) {
         report.push_str(&format!("- `{}`: {} events\n", ip, count));
     }
