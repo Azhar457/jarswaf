@@ -36,13 +36,15 @@ static SSRF_002_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 // XSS in URI/query — catches javascript: scheme, HTML-entity-encoded tags,
-// data: URIs, vbscript:, and mixed-case/malformed script tags after decoding.
+// data: URIs, vbscript:, formaction, SMIL animation, and mixed-case/malformed script tags after decoding.
 static XSS_URI_001_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(javascript\s*:|vbscript\s*:|data\s*:\s*text/html|&#x?\w+;*\s*<|&#x?\w+;*\s*scr|<\s*script|<script|</script|on\w+\s*=|onload|onerror|onclick|alert\s*\(|confirm\s*\(|prompt\s*\()").unwrap()
+    Regex::new(r"(?i)(javascript\s*:|vbscript\s*:|data\s*:\s*text/html|&#x?\w+;*\s*<|&#x?\w+;*\s*scr|<\s*script|</\s*script|on[a-z]{3,}\s*=|onload|onerror|onclick|alert\s*\(|confirm\s*\(|prompt\s*\(|\bformaction\s*=|<\s*(animate|set)\b[^>]*\b(values|to|from)\s*=)").unwrap()
 });
 
 fn check_xss_uri_001(req: &RequestInfo) -> bool {
-    XSS_URI_001_REGEX.is_match(req.query)
+    let target = format!("{}?{}", req.path, req.query);
+    let normalized = crate::rule_engine::normalize_canonical(&target);
+    XSS_URI_001_REGEX.is_match(&target) || XSS_URI_001_REGEX.is_match(&normalized)
 }
 
 // SQLi heuristics that the AST engine misses (whitespace-less keywords,

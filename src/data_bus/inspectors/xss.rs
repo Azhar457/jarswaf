@@ -6,30 +6,28 @@ use regex::Regex;
 
 static XSS_PATTERNS: Lazy<Vec<(f64, Regex)>> = Lazy::new(|| {
     vec![
-        // High confidence
-        (30.0, r"(?i)<script[\s>]"),
-        (30.0, r"(?i)</script>"),
-        (30.0, r"(?i)javascript\s*:"),
-        (30.0, r"(?i)vbscript\s*:"),
-        (30.0, r"(?i)\bon\w+\s*="), // onerror=, onload=, onclick=, etc.
-        (30.0, r"(?i)<iframe[\s>]"),
-        (30.0, r"(?i)<object[\s>]"),
-        (30.0, r"(?i)<embed[\s>]"),
-        (30.0, r"(?i)<svg[\s/].*\bon\w+\s*="),
-        (30.0, r"(?i)expression\s*\("), // CSS expression
-        // Medium confidence
-        (15.0, r"(?i)<img\s[^>]*\bon\w+\s*="),
-        (15.0, r"(?i)<body\s[^>]*\bon\w+\s*="),
-        (15.0, r"(?i)<input\s[^>]*\bon\w+\s*="),
-        (15.0, r"(?i)document\.(cookie|location|write)"),
-        (15.0, r"(?i)window\.(location|open)"),
-        (15.0, r"(?i)\.innerHTML\s*="),
-        (10.0, r"(?i)eval\s*\("),
-        (10.0, r"(?i)setTimeout\s*\("),
-        (10.0, r"(?i)setInterval\s*\("),
-        // Low confidence
-        (5.0, r"(?i)<\w+\s"),   // Any HTML tag (very generic)
-        (5.0, r"(?i)&#x?\d+;"), // HTML entities
+        // High confidence (30 pts each — single match = block)
+        (30.0, r#"(?i)<\s*script[\s>]"#),
+        (30.0, r#"(?i)</\s*script\s*>"#),
+        (30.0, r#"(?i)(javascript|vbscript|data\s*:\s*text/html)\s*:"#),
+        (30.0, r#"(?i)\bon[a-z]{3,}\s*="#), // onerror=, onload=, onclick=, onfocus=, onmouseover=, etc.
+        (30.0, r#"(?i)<\s*(iframe|object|embed|applet|base)\b"#),
+        (30.0, r#"(?i)<\s*svg\b[^>]*\bon\w+\s*="#),
+        (30.0, r#"(?i)<\s*svg\b[^>]*<\s*a\b"#),
+        (30.0, r#"(?i)<\s*(animate|set)\b[^>]*\b(values|to|from|attributeName)\s*="#), // SMIL XSS
+        (30.0, r#"(?i)\b(formaction|action|href|src|values|xlink:href|srcdoc)\s*=\s*['"]?\s*(javascript|vbscript|data\s*:\s*text/html)\s*:"#),
+        (30.0, r#"(?i)\bexpression\s*\("#), // CSS expression
+        // Medium confidence (10-15 pts — accumulate for block)
+        (15.0, r#"(?i)<img\s[^>]*\bon\w+\s*="#),
+        (15.0, r#"(?i)<body\s[^>]*\bon\w+\s*="#),
+        (15.0, r#"(?i)<input\s[^>]*\bon\w+\s*="#),
+        (15.0, r#"(?i)document\.(cookie|location|domain|write)"#),
+        (15.0, r#"(?i)window\.(location|open)"#),
+        (15.0, r#"(?i)\.innerHTML\s*="#),
+        (15.0, r#"(?i)\b(alert|confirm|prompt)\s*\("#),
+        (10.0, r#"(?i)\beval\s*\("#),
+        (10.0, r#"(?i)\bsetTimeout\s*\("#),
+        (10.0, r#"(?i)\bsetInterval\s*\("#),
     ]
     .into_iter()
     .filter_map(|(score, pat)| Regex::new(pat).ok().map(|r| (score, r)))
@@ -59,8 +57,10 @@ impl XssInspector {
         let mut total_score = 0.0;
         let mut matches = Vec::new();
 
+        let normalized = crate::rule_engine::normalize_canonical(target);
+
         for (score, pattern) in XSS_PATTERNS.iter() {
-            if pattern.is_match(target) {
+            if pattern.is_match(target) || pattern.is_match(&normalized) {
                 total_score += score;
                 matches.push(pattern.as_str());
             }
@@ -102,7 +102,14 @@ impl Inspector for XssInspector {
         }
 
         // Check headers
-        for header_name in &["referer", "x-forwarded-for"] {
+        for header_name in &[
+            "user-agent",
+            "cookie",
+            "referer",
+            "x-forwarded-for",
+            "x-original-url",
+            "authorization",
+        ] {
             if let Some(value) = ctx.header_str(header_name) {
                 let header_result = self.check_target(&value);
                 if header_result.verdict.is_some() {
@@ -173,10 +180,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_blocks_formaction_xss() {
+        let inspector = XssInspector::new();
+        let mut ctx =
+            make_xss_ctx("/submit?payload=<button formaction=javascript:alert(1)>Click</button>");
+        let result = inspector.inspect(&mut ctx).await;
+        assert!(
+            result.verdict.is_some(),
+            "formaction=javascript: must be blocked"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_blocks_smil_animate_xss() {
+        let inspector = XssInspector::new();
+        let mut ctx = make_xss_ctx(
+            "/svg?data=<svg><a><animate attributeName=href values=javascript:alert(1)></a></svg>",
+        );
+        let result = inspector.inspect(&mut ctx).await;
+        assert!(result.verdict.is_some(), "SMIL animate XSS must be blocked");
+    }
+
+    #[tokio::test]
+    async fn test_blocks_encoded_xss() {
+        let inspector = XssInspector::new();
+        let mut ctx = make_xss_ctx("/search?q=jav&#x61;script&#x3a;alert(1)");
+        let result = inspector.inspect(&mut ctx).await;
+        assert!(
+            result.verdict.is_some(),
+            "HTML entity encoded javascript: must be blocked"
+        );
+    }
+
+    #[tokio::test]
     async fn test_clean_path() {
         let inspector = XssInspector::new();
-        let mut ctx = make_xss_ctx("/api/users");
+        let mut ctx = make_xss_ctx("/api/users?page=1&limit=20&sort=asc");
         let result = inspector.inspect(&mut ctx).await;
-        assert!(result.verdict.is_none());
+        assert!(result.verdict.is_none(), "Clean parameters must be allowed");
+    }
+
+    #[tokio::test]
+    async fn test_clean_html_comment_or_content() {
+        let inspector = XssInspector::new();
+        let mut ctx = make_xss_ctx("/article?title=Understanding+HTML5+Buttons+and+Animations");
+        let result = inspector.inspect(&mut ctx).await;
+        assert!(
+            result.verdict.is_none(),
+            "Legitimate text discussing HTML must be allowed"
+        );
     }
 }

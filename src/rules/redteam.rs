@@ -103,6 +103,28 @@ pub fn owasp_test_suite() -> Vec<AttackPayload> {
             headers: vec![],
             expect_blocked: true,
         },
+        AttackPayload {
+            id: "XSS-004",
+            category: "Cross-Site Scripting",
+            description: "Button formaction javascript scheme",
+            path: "/form",
+            query: "action=<button formaction=javascript:alert(1)>Click</button>",
+            body: "",
+            method: "GET",
+            headers: vec![],
+            expect_blocked: true,
+        },
+        AttackPayload {
+            id: "XSS-005",
+            category: "Cross-Site Scripting",
+            description: "SVG SMIL animate attribute injection",
+            path: "/svg",
+            query: "vector=<svg><a><animate attributeName=href values=javascript:alert(1)></a></svg>",
+            body: "",
+            method: "GET",
+            headers: vec![],
+            expect_blocked: true,
+        },
         // ─── A03:2021 — Injection (Command) ─────────────────────────
         AttackPayload {
             id: "CMDI-001",

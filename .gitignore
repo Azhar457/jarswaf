@@ -63,6 +63,7 @@ secrets.toml
 pentest_lab.toml
 pentest*.toml
 redteam_lab*.toml
+admin_onboarding_credential
 
 # ------------------------------------------------------------------------------
 # 5. External Research / Vendored Sub-repositories

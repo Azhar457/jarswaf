@@ -198,4 +198,11 @@ mod tests {
         // Non-matching host → no default → None
         assert!(match_vhost(Some("other.com"), &cfg).is_none());
     }
+
+    #[test]
+    fn test_match_vhost_casing_and_whitespace() {
+        let cfg = test_vhost_config();
+        let (backend, _) = match_vhost(Some("   ExAmPlE.CoM:8080   "), &cfg).unwrap();
+        assert_eq!(backend, "10.0.0.1:8080");
+    }
 }

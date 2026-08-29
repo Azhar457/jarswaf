@@ -2289,7 +2289,58 @@ impl ProxyHttp for JarsWafProxy {
             _ => 502,
         };
 
-        // Circuit breaker: increment failure count for backend
+        let client_ip_str = session
+            .client_addr()
+            .and_then(|addr| addr.as_inet().map(|i| i.ip().to_string()))
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        if code == 403 {
+            let _ = respond_custom_error(
+                session,
+                403,
+                "Forbidden",
+                "Your request was blocked by JARSWAF security policy.",
+                &client_ip_str,
+                "WAF-BLOCK-403",
+            )
+            .await;
+            return 403;
+        } else if code == 413 {
+            let _ = respond_custom_error(
+                session,
+                413,
+                "Payload Too Large",
+                "Request body size limit exceeded.",
+                &client_ip_str,
+                "WAF-BODY-LIMIT",
+            )
+            .await;
+            return 413;
+        } else if code == 429 {
+            let _ = respond_custom_error(
+                session,
+                429,
+                "Too Many Requests",
+                "Rate limit exceeded. Please try again later.",
+                &client_ip_str,
+                "WAF-RATE-LIMIT",
+            )
+            .await;
+            return 429;
+        } else if code == 503 {
+            let _ = respond_custom_error(
+                session,
+                503,
+                "Service Unavailable",
+                "Service is temporarily unavailable or overloaded.",
+                &client_ip_str,
+                "WAF-CAPACITY",
+            )
+            .await;
+            return 503;
+        }
+
+        // Circuit breaker: increment failure count for backend only on real gateway errors
         if let Some(ref backend) = _ctx.vhost_backend_resolved {
             if let Some(entry) = BACKEND_FAILURE_COUNTS.get(backend) {
                 let prev = entry
@@ -2308,10 +2359,6 @@ impl ProxyHttp for JarsWafProxy {
             }
         }
 
-        let client_ip_str = session
-            .client_addr()
-            .and_then(|addr| addr.as_inet().map(|i| i.ip().to_string()))
-            .unwrap_or_else(|| "Unknown".to_string());
         let _ = respond_custom_error(
             session,
             code,
