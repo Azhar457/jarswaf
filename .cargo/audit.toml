@@ -42,7 +42,6 @@ ignore = [
     # Protobuf / Time / Crossbeam — re-check on next dependency refresh
     "RUSTSEC-2024-0437",
     "RUSTSEC-2026-0009",
-    "RUSTSEC-2026-0204",
 
     # Upstream transitive rustls-webpki / anyhow / event-listener advisories
     "RUSTSEC-2026-0098",
